@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest an idea for Vantage
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: Describe the problem or the casting/analysis situation, not just the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could Vantage help?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: How do you handle it today?
+      description: Another tool, a workaround, or nothing.

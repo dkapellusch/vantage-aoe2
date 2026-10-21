@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in Vantage does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please run `vantage doctor` first; it catches most setup problems.
+        **Never attach certificate files (`*.pem`, `*.key`) to an issue.**
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: What were you watching?
+      options:
+        - A live game
+        - A replay (.aoe2record)
+        - A recording (.vrec)
+        - Nothing yet (start-up / installation)
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `vantage doctor`
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Vantage (`vantage --version`), operating system, browser
+      placeholder: "vantage 0.1.0, Arch Linux (Proton 9), Firefox 132"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server output and browser console errors
+      description: The terminal output of `vantage serve`, and any red errors from the browser's developer console (F12).
+      render: text

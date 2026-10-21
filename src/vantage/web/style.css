@@ -1,0 +1,305 @@
+:root {
+  --bg: #0d0f12;
+  --panel: rgba(16, 19, 24, 0.9);
+  --panel-solid: #14181e;
+  --line: rgba(255, 255, 255, 0.09);
+  --text: #e8e3d6;
+  --muted: #9a958a;
+  --accent: #d9b45a;
+  --accent-2: #6fb3d2;
+  --good: #7fc27a;
+  --bad: #e06a5c;
+  --food: #e8665a;
+  --wood: #b98250;
+  --gold: #f0c94b;
+  --stone: #a7a9ab;
+  --radius: 6px;
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+  font: 13px/1.35 var(--font); user-select: none;
+}
+button {
+  font: inherit; color: var(--text); background: rgba(255,255,255,0.06);
+  border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; cursor: pointer;
+}
+button:hover { background: rgba(255,255,255,0.13); }
+button.on { background: var(--accent); color: #1a1407; border-color: var(--accent); }
+input, select, textarea {
+  font: inherit; color: var(--text); background: #0b0d10; border: 1px solid var(--line);
+  border-radius: 4px; padding: 4px 6px;
+}
+#world { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; cursor: default; }
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#hud > * { pointer-events: auto; }
+.panel {
+  position: absolute; background: var(--panel); border: 1px solid var(--line);
+  /* No backdrop-filter: blurring the live map under every panel costs a full
+     re-blur each frame (it halved the frame rate in Firefox); --panel is opaque enough. */
+  border-radius: var(--radius); box-shadow: 0 2px 14px rgba(0,0,0,.45);
+}
+.hidden { display: none !important; }
+.hint { color: var(--muted); font-size: 11px; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.title { font-weight: 600; letter-spacing: .02em; }
+
+/* scoreboard */
+#scoreboard {
+  top: 6px; left: 50%; transform: translateX(-50%); display: flex; align-items: stretch;
+  gap: 0; padding: 0; overflow: hidden; max-width: 96vw;
+}
+#scoreboard .team { display: flex; align-items: stretch; }
+#scoreboard .team.right { flex-direction: row-reverse; }
+#scoreboard .sb-player {
+  display: flex; align-items: center; gap: 6px; padding: 4px 9px; border-bottom: 3px solid;
+  cursor: pointer; min-width: 0;
+}
+#scoreboard .sb-player.dead { opacity: .45; text-decoration: line-through; }
+/* The player whose view (fog) is shown. */
+#scoreboard .sb-player.persp { background: rgba(217,180,90,.14); box-shadow: inset 0 0 0 1px rgba(217,180,90,.55); border-radius: 4px; }
+#scoreboard .sb-player img.emblem { width: 26px; height: 26px; object-fit: contain; }
+#scoreboard .sb-player img.flag { width: 30px; height: 20px; object-fit: cover; border-radius: 2px; }
+#scoreboard { flex-wrap: wrap; justify-content: center; }
+/* The full-width lines below the players: a wrapping row sizes itself as if every
+   item sat on one line, so these must not contribute their text width (it showed
+   as blank space either side of the players). max-width 0 removes it from the
+   intrinsic width; min-width 100% still makes the line full width. */
+.sb-allies, .sb-texts { flex-basis: 100%; max-width: 0; min-width: 100%; box-sizing: border-box; text-align: center; font-size: 11px; padding: 2px 0; background: rgba(0,0,0,.3); }
+.sb-texts b { color: var(--accent); }
+#scoreboard .sb-name { font-weight: 600; white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+#scoreboard .sb-sub { color: var(--muted); font-size: 11px; white-space: nowrap; }
+#scoreboard .sb-score { font-family: var(--mono); color: var(--accent); font-size: 12px; min-width: 5ch; text-align: right; }
+#scoreboard .sb-center {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 2px 14px; background: rgba(0,0,0,.35); min-width: 96px;
+}
+#scoreboard .sb-clock { font: 600 17px var(--mono); min-width: 7ch; text-align: center; }
+#scoreboard .sb-speed { color: var(--muted); font-size: 11px; }
+#scoreboard .balance { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; justify-content: center; }
+.balbar { width: 120px; height: 6px; display: flex; border-radius: 3px; overflow: hidden; background: #222; }
+.balbar > div { height: 100%; }
+.ballabel { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; width: 120px; }
+
+/* overview (team details) */
+/* top / max-height are set by layoutLeftColumn() (app.js): below the scoreboard when they
+   would overlap, ending above the time bar; the column scrolls rather than squashing panels. */
+#leftcol { position: absolute; top: 64px; left: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; max-height: calc(100vh - 390px); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; pointer-events: none; }
+#leftcol > .panel, #leftcol2 > .panel { position: static; pointer-events: auto; flex-shrink: 0; }
+#leftcol2 > .panel { max-width: 100%; }
+#leftcol2 { position: absolute; top: 64px; left: 500px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; overflow-y: auto; overflow-x: hidden; pointer-events: none; }
+#overview { padding: 6px 8px; min-width: 330px; }
+.ov-row { display: grid; grid-template-columns: 4px 22px 1fr auto; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.ov-row:last-child { border-bottom: 0; }
+.ov-row.dead, .tech-row.dead, .prod-row.dead { opacity: .45; filter: grayscale(.6); }
+.ov-color { width: 4px; height: 30px; border-radius: 2px; }
+.ov-age { width: 22px; height: 22px; position: relative; cursor: pointer; }
+.ov-age img { width: 22px; height: 22px; }
+.ov-age .age-prog { position: absolute; left: 0; bottom: -3px; height: 3px; background: var(--accent); }
+.ov-age .age-num { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; font-size: 11px; text-shadow: 0 0 3px #000; }
+.ov-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.ov-civ { color: var(--muted); font-size: 11px; }
+.ov-res { display: grid; grid-template-columns: repeat(4, 52px) 62px; gap: 2px; font-family: var(--mono); font-size: 12px; }
+.ov-res span { display: flex; flex-direction: column; align-items: flex-end; }
+.ov-res small { color: var(--muted); font-size: 10px; }
+.ov-head { padding: 0; }
+.ov-req { display: flex; gap: 3px; align-items: center; margin-top: 2px; }
+.ov-req .req { width: 34px; height: 4px; background: rgba(255,255,255,.1); border-radius: 2px; overflow: hidden; display: inline-block; }
+.ov-req .req i { display: block; height: 100%; }
+.ov-req .ticks b { display: inline-block; width: 6px; height: 6px; border-radius: 1px; background: rgba(255,255,255,.15); margin-left: 2px; }
+.ov-req .ticks b.on { background: var(--good); }
+#autocast-banner { position: fixed; top: calc(var(--sb-bottom, 114px) + 8px); left: 50%; transform: translateX(-50%); padding: 8px 20px; background: linear-gradient(90deg, rgba(120,20,10,.85), rgba(200,60,20,.9)); color: #fff; font: 700 18px var(--font); border-radius: 6px; z-index: 9; text-shadow: 0 1px 3px #000; }
+#pause-banner { position: fixed; top: calc(var(--sb-bottom, 114px) + 8px); left: 50%; transform: translateX(-50%); padding: 6px 16px; background: rgba(0,0,0,.8); border: 1px solid var(--accent); border-radius: 6px; font-weight: 600; z-index: 8; }
+.ov-head img { width: 18px; height: 18px; }
+.ov-res .food { color: var(--food); } .ov-res .wood { color: var(--wood); }
+.ov-res .gold { color: var(--gold); } .ov-res .stone { color: var(--stone); }
+.ov-res .pop.housed { animation: flash 1s steps(2) infinite; }
+@keyframes flash { 50% { color: var(--bad); } }
+
+/* static techs */
+#techs { padding: 6px; max-width: calc(100vw - 340px); }
+.tech-row { display: flex; align-items: center; gap: 2px; padding: 2px 0; }
+.tech-row .who { width: 4px; height: 22px; border-radius: 2px; margin-right: 3px; }
+.tech { flex: 0 0 auto; width: var(--tc, 20px); height: var(--tc, 20px); border-radius: 3px; position: relative; overflow: hidden; background: #000; }
+.tech img { width: 100%; height: 100%; display: block; }
+.tech.no img { opacity: .18; filter: grayscale(1); }
+.tech.doing img { opacity: .6; }
+.tech .prog { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
+.tech-gap { width: 6px; }
+.dyn-techs { display: flex; gap: 3px; margin-left: 8px; }
+
+/* production / composition */
+#production { padding: 6px 8px; max-width: 40vw; overflow: auto; min-height: 0; }
+.prod-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.icon-count { position: relative; width: 28px; height: 28px; border-radius: 3px; overflow: hidden; background: #000; cursor: pointer; }
+.icon-count img { width: 100%; height: 100%; }
+.icon-count b { position: absolute; right: 1px; bottom: 0; font: 700 11px var(--mono); text-shadow: 0 0 3px #000, 0 0 2px #000; }
+.icon-count .prog { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent-2); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; cursor: pointer; }
+
+/* events */
+#events { top: 64px; right: 8px; width: 300px; max-height: 46vh; display: flex; flex-direction: column; }
+.events-head { display: flex; justify-content: space-between; align-items: center; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+#event-filters button { padding: 0 4px; font-size: 11px; margin-left: 2px; }
+#event-list { list-style: none; margin: 0; padding: 0 0 4px; overflow: auto; flex: 1;
+  /* A row scrolled half out at the top fades instead of reading as cut off. */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px); }
+#event-list li { display: grid; grid-template-columns: 44px 4px 1fr; gap: 6px; padding: 3px 8px; align-items: center; cursor: pointer; }
+#event-list li:hover { background: rgba(255,255,255,.05); }
+#event-list li.high { background: rgba(217,180,90,.13); }
+#event-list .et { font: 11px var(--mono); color: var(--muted); }
+#event-list .et:hover { color: var(--accent); text-decoration: underline; }
+#event-list .ec { width: 4px; height: 16px; border-radius: 2px; }
+#event-list img { width: 16px; height: 16px; vertical-align: -3px; border-radius: 2px; }
+#event-pager { padding: 3px 8px; color: var(--accent); cursor: pointer; text-align: center; }
+
+/* dashboard */
+/* left/transform are set by placeDashboard() (app.js): centred, or moved right of
+   the minimap when the page is too wide to stay centred beside it. */
+#dashboard { bottom: 8px; left: 50%; transform: translateX(-50%); padding: 4px 8px 6px; max-width: calc(100vw - 340px); min-width: min(800px, calc(100vw - 660px)); overflow-x: auto; }
+.dash-head { display: flex; justify-content: space-between; gap: 16px; font-size: 11px; color: var(--muted); padding-bottom: 2px; }
+#dash-title { color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+#dash-table { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+#dash-table th { color: var(--muted); font: 600 10px var(--font); text-transform: uppercase; padding: 0 6px; text-align: right; white-space: nowrap; }
+#dash-table th:first-child, #dash-table td:first-child { text-align: left; }
+#dash-table td { padding: 1px 6px; text-align: right; white-space: nowrap; }
+#dash-table td.pname { font-family: var(--font); font-weight: 600; max-width: 200px; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid; }
+
+/* minimap + time */
+#minimap-wrap { left: 8px; bottom: 8px; padding: 4px; }
+#minimap { display: block; width: 300px; height: 150px; cursor: crosshair; }
+#minimap-tools { display: flex; gap: 3px; margin-bottom: 4px; }
+#minimap-tools button { padding: 0 6px; }
+#fog-label { position: absolute; right: 8px; bottom: 8px; font-size: 10px; color: #c9ccd2; pointer-events: none; background: rgba(0,0,0,.6); padding: 0 5px; border-radius: 3px; }
+#timebar { left: 8px; bottom: 214px; width: max-content; min-width: 420px; max-width: calc(100vw - 16px); padding: 4px 6px; box-sizing: border-box; }
+#timebar.compact #scrub { display: none; }
+#time-controls { display: flex; align-items: center; gap: 4px; }
+#time-controls button { padding: 0 6px; }
+#tc-speed { font: 12px var(--mono); min-width: 32px; text-align: center; white-space: nowrap; }
+/* "1:21:07 / 1:21:07" must fit the 310 px bar: the clock may shrink, never overflow. */
+#tc-clock { margin-left: auto; font: 600 12px var(--mono); white-space: nowrap; min-width: 0; letter-spacing: -.02em; }
+#time-controls > button { flex: 0 0 auto; }
+#tc-live.on { background: var(--bad); border-color: var(--bad); color: #fff; }
+/* width 0 + min-width 100%: the scrub bar fills the time bar without feeding its
+   pixel width back into the bar's max-content width. */
+#scrub { height: 26px; margin-top: 4px; width: 0; min-width: 100%; }
+#scrub-canvas { width: 100%; height: 26px; display: block; cursor: pointer; }
+
+/* unit panel */
+#unitpanel { right: 8px; bottom: 8px; width: 320px; padding: 8px; max-height: 40vh; overflow: auto; }
+.up-head { display: flex; gap: 8px; align-items: center; }
+.up-head img { width: 54px; height: 54px; border-radius: 4px; background: #000; }
+.up-name { font-weight: 600; font-size: 14px; }
+.up-owner { font-size: 11px; }
+.hpbar { height: 6px; border-radius: 3px; background: #331; overflow: hidden; margin: 4px 0; }
+.hpbar > div { height: 100%; background: var(--good); }
+.up-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 8px; font-size: 12px; margin-top: 4px; }
+.up-stats span { color: var(--muted); }
+.up-multi { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+
+/* resources left */
+#resleft { right: 330px; bottom: 8px; padding: 8px; font-family: var(--mono); }
+
+/* overlays */
+.overlay {
+  position: fixed; inset: 4vh 4vw; background: var(--panel-solid); border: 1px solid var(--line);
+  border-radius: 10px; padding: 16px 20px; overflow: auto; z-index: 10; scrollbar-gutter: stable;
+  /* The page behind is dimmed: the live HUD at the edges does not read as part of the overlay. */
+  box-shadow: 0 0 0 100vmax rgba(0,0,0,.55), 0 10px 50px rgba(0,0,0,.7);
+}
+.overlay h2 { margin: 0 0 10px; font-size: 18px; color: var(--accent); }
+.overlay h3 { margin: 16px 0 6px; font-size: 14px; }
+/* Sticky (it is the first child of each overlay): stays reachable while the overlay scrolls. */
+.overlay .close { position: sticky; top: 0; float: right; z-index: 3; margin-left: 12px; }
+.tabs { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; }
+.chart-wrap { position: relative; }
+.chart-wrap canvas { width: 100%; height: clamp(340px, 52vh, 640px); display: block; background: rgba(0,0,0,.25); border-radius: 6px; }
+.chart-controls { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; margin: 6px 0; }
+.legend label { display: flex; gap: 4px; align-items: center; cursor: pointer; }
+.legend i { width: 12px; height: 4px; display: inline-block; border-radius: 2px; }
+table.agg { border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+table.agg th, table.agg td { padding: 3px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+table.agg th:first-child, table.agg td:first-child { text-align: left; }
+table.agg td.pname { border-left: 3px solid; font-weight: 600; }
+.list { width: 100%; border-collapse: collapse; font-size: 12px; }
+.list td, .list th { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.list tr:hover td { background: rgba(255,255,255,.04); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.form-row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+.form-row label { min-width: 210px; color: var(--muted); }
+kbd { font: 11px var(--mono); background: #0a0c0f; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+.keys td { padding: 2px 10px 2px 0; }
+#endgame-banner { clear: both; text-align: center; font-size: 26px; color: var(--accent); margin: 10px 0 18px; }
+
+/* Opaque: it opens beside the scoreboard, whose text must not show through. Placed by
+   placeTechTree (panels.js). */
+#techtree { position: fixed; top: 60px; left: 8px; z-index: 15; padding: 8px 10px; max-width: calc(100vw - 16px); max-height: 80vh; overflow: auto; pointer-events: none; background: var(--panel-solid); }
+#techtree:not(.show-desc) .tt-desc { display: none; }
+#techtree h3 { margin: 0 0 6px; font-size: 14px; color: var(--accent); }
+.tt-cols { display: flex; gap: 6px; align-items: flex-start; }
+.tt-col { display: flex; flex-direction: column; gap: 2px; align-items: center; min-width: 30px; }
+.tt-col .bld { width: 30px; height: 30px; border: 1px solid var(--accent); border-radius: 3px; }
+.tt-node { width: 26px; height: 26px; border-radius: 3px; position: relative; }
+.tt-node img { width: 100%; height: 100%; border-radius: 3px; }
+.tt-node.na { opacity: .18; filter: grayscale(1); }
+.tt-node.na::after { content: ""; position: absolute; inset: 0; background: linear-gradient(45deg, transparent 45%, var(--bad) 46% 54%, transparent 55%); }
+.tt-node.todo { opacity: .55; }
+.tt-node.done { outline: 2px solid var(--good); }
+.tt-age { font-size: 9px; color: var(--muted); margin-top: 2px; }
+#toast {
+  position: fixed; left: 50%; top: calc(var(--sb-bottom, 114px) + 10px); transform: translateX(-50%); padding: 6px 14px;
+  background: rgba(0,0,0,.8); border-radius: 6px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 20;
+}
+#toast.show { opacity: 1; }
+#status-line { position: fixed; right: 10px; top: 6px; font-size: 11px; color: var(--muted); z-index: 5; }
+#selbox { position: fixed; border: 1px solid var(--accent); background: rgba(217,180,90,.12); pointer-events: none; z-index: 6; }
+#tooltip { position: fixed; z-index: 30; background: rgba(0,0,0,.9); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; font-size: 12px; pointer-events: none; max-width: 320px; }
+/* skins */
+body.skin-classic { --panel: rgba(38, 28, 18, 0.9); --panel-solid: #2a1f14; --line: rgba(214, 178, 110, 0.28); --accent: #e7c46b; --text: #f2e6c8; }
+body.skin-contrast { --panel: rgba(0, 0, 0, 0.92); --panel-solid: #000; --line: rgba(255, 255, 255, 0.35); --accent: #ffd400; --text: #fff; --muted: #ccc; }
+body.skin-clean .panel { backdrop-filter: none; box-shadow: none; }
+body.skin-clean { --panel: rgba(12, 14, 18, 0.62); }
+/* overlay mode: HUD only, transparent page (OBS browser source) */
+body.overlay-mode, body.overlay-mode html { background: transparent !important; }
+body.overlay-mode #world { display: none; }
+body.overlay-mode #minimap-wrap, body.overlay-mode #timebar, body.overlay-mode #status-line { display: none; }
+body.no-ui #hud { display: none; }
+body.no-ui.keep-minimap #hud { display: block; }
+body.no-ui.keep-minimap #hud > *:not(#minimap-wrap) { display: none; }
+@media (max-width: 900px) {
+  #overview { min-width: 0; max-width: calc(100vw - 16px); }
+  #techs, #production, #events { display: none; }
+  #timebar { left: 8px; bottom: 200px; width: calc(100vw - 16px); }
+  #dashboard { max-width: calc(100vw - 16px); overflow: auto; }
+}
+
+.list .rp { display: inline-block; border-left: 3px solid; padding: 0 4px; margin: 1px 2px; white-space: nowrap; }
+.list td.warn { color: var(--warn, #e0a030); }
+
+.list tr.rrow { cursor: pointer; }
+.list tr.rrow:hover { background: rgba(255, 255, 255, 0.04); }
+.rdetails { padding: 6px 10px 10px; }
+.rdetails .kvs { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; }
+.rdetails .kv b { color: var(--muted, #9aa); font-weight: 500; margin-right: 4px; }
+button.link { background: none; border: none; color: var(--accent, #e0b050); text-decoration: underline; cursor: pointer; padding: 0 4px; }
+
+label.filebtn { display: inline-block; padding: 4px 10px; border: 1px solid var(--line, #444); border-radius: 4px; cursor: pointer; }
+
+/* Banners (pause, jump, autocast, toast) share one column below the scoreboard
+   instead of one spot, so two at once never overlap. The toast is last: its
+   fade-out never moves the others. */
+#banners { position: fixed; top: calc(var(--sb-bottom, 114px) + 8px); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; z-index: 20; pointer-events: none; }
+#banners > * { position: static !important; transform: none !important; }
+#banners > #jump-banner, #banners > #pause-banner, #banners > #autocast-banner, #banners > #highlight-bar { pointer-events: auto; }
+/* Overlays (the end-game screen, settings) cover the banners. */
+body:has(.overlay:not(.hidden)) #banners { z-index: 9; }
+/* Narrow windows: the dashboard tightens rather than scrolling or covering the minimap. */
+@media (max-width: 1500px) {
+  #dash-table { font-size: 11px; }
+  #dash-table th, #dash-table td { padding-left: 4px; padding-right: 4px; }
+}
+#leftcol2 > .no-room, #leftcol > .no-room { display: none !important; }

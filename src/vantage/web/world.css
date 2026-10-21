@@ -1,0 +1,13 @@
+/* Vantage: world styles (split from style.css so parallel work does not collide). */
+
+/* FXAA output: a WebGL canvas stacked on the world canvas (input still goes to #world). */
+#world-fx { position: fixed; inset: 0; width: 100vw; height: 100vh; display: none; pointer-events: none; }
+#world-fx.on { display: block; }
+body.overlay-mode #world-fx { display: none; }
+/* Holder for the SVG filters used by bloom and the colour channels. */
+.world-svg-filters { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+/* GPU sprites (sprite-gl.js) and the overlay over them: stacked on the world
+   canvas, under the HUD; input still goes to #world. */
+#world-gl, #world-top { position: fixed; inset: 0; width: 100vw; height: 100vh; display: none; pointer-events: none; }
+#world-gl.on, #world-top.on { display: block; }
+body.overlay-mode #world-gl, body.overlay-mode #world-top { display: none; }
