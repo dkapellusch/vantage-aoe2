@@ -1,0 +1,1151 @@
+// Messages of the game's spectator API (cade_api.rpc.CadeRemote, API v20+), as
+// Vantage uses them. The package is vantage.cade so it cannot clash with another
+// definition in the same process; RPCs are invoked by explicit
+// "/cade_api.rpc.CadeRemote/<Method>" paths (vantage/live.py).
+syntax = "proto3";
+package vantage.cade;
+
+message AccessFlagRequest {
+  enum Flag {
+    DISABLE_CAPTUREAGE_WARNINGS = 0;
+  }
+  int32 flag = 1;
+  bool set = 2;
+  bool value = 3;
+}
+message AccessFlagResponse {
+  bool success = 1;
+  bool value = 2;
+}
+message ChangeScreenRequest {
+  ScreenState screen = 1;
+  bool confirm = 2;
+}
+message ChangeScreenResponse {
+  enum Code {
+    OK = 0;
+    FAILED_PLAYING_RANKED = 1;
+    FAILED_PLAYING_MULTIPLAYER = 2;
+    FAILED_PLAYING_NEED_CONFIRM = 3;
+    UNSUPPORTED = 4;
+  }
+  int32 code = 1;
+  ScreenState screen = 2;
+}
+message ChangeWindowStateRequest {
+  enum ModeChange {
+    NONE = 0;
+    TO_NORMAL = 1;
+    TO_MINIMIZED = 2;
+    TO_MAXIMIZED = 3;
+    TO_FULLSCREEN = 4;
+    RESTORE_ORIGINAL = 5;
+  }
+  int32 modechange = 1;
+  bool setforeground = 2;
+  bool setfocus = 3;
+  float setrenderscale = 4;
+}
+message ChangeWindowStateResponse {
+  enum Code {
+    OK = 0;
+    FAILED_PLAYING = 1;
+    UNSUPPORTED = 2;
+    NO_WINDOW = 3;
+    SET_FOCUS_FAILED = 4;
+    SET_FOREGROUND_FAILED = 5;
+    SET_MODE_FAILED = 6;
+    ILLEGAL_RENDER_SCALE = 7;
+  }
+  int32 code = 1;
+  WindowState windowstate = 2;
+}
+message Command {
+  message AboutFaceFormation {
+    int32 formationid = 1;
+  }
+  message AddAttribute {
+    uint32 playerid = 1;
+    uint32 attrid = 2;
+    float attramount = 3;
+  }
+  message AddWaypoint {
+    uint32 playerid = 1;
+    int32 recipient = 2;
+    repeated Command.XyzUintPoint waypoints = 4;
+  }
+  message AiEffectAmount {
+    int32 effecttype = 1;
+    int32 unitortechid = 2;
+    int32 attributetype = 3;
+    float value = 4;
+  }
+  message AiEffectPercent {
+    int32 effecttype = 1;
+    int32 unitortechid = 2;
+    int32 attributetype = 3;
+    float value = 4;
+  }
+  message AiOrder {
+    uint32 playerid = 2;
+    uint32 issuer = 3;
+    int32 recipient = 4;
+    int32 ordertype = 5;
+    uint32 orderpriority = 6;
+    uint32 targetowner = 8;
+    Command.XyzFloatPoint location = 9;
+    float range = 10;
+    bool immediate = 11;
+    bool infront = 12;
+    repeated int32 unitids = 13;
+    int32 target = 14;
+    int32 targettype = 15;
+  }
+  message AllBackToWork {
+    int32 unitid = 1;
+  }
+  message AttackGround {
+    Command.XyFloatPoint location = 2;
+    bool extend = 3;
+    bool instant = 4;
+    bool humanorder = 5;
+    repeated int32 unitids = 6;
+  }
+  message AttackMove {
+    bool reset = 3;
+    repeated Command.XyFloatPoint waypoints = 4;
+    repeated int32 unitids = 5;
+    bool extend = 6;
+    bool instant = 7;
+  }
+  message AttackMoveTarget {
+    int32 targetid = 2;
+    repeated Command.XyFloatPoint waypoints = 4;
+    repeated int32 unitids = 5;
+    bool extend = 6;
+    bool instant = 7;
+  }
+  message AutoFormations {
+    bool on = 1;
+  }
+  message AutoScout {
+    repeated int32 unitids = 2;
+  }
+  message BreakFormation {
+    int32 formationid = 1;
+  }
+  message Build {
+    uint32 unitplayerid = 2;
+    Command.XyFloatPoint location = 3;
+    int32 objid = 4;
+    int32 uniqueid = 5;
+    uint32 frame = 6;
+    bool extend = 7;
+    bool instant = 8;
+    int32 spriteoverrideid = 9;
+    repeated int32 unitids = 10;
+  }
+  message BuildWall {
+    uint32 unitplayerid = 2;
+    Command.XyUintPoint location1 = 3;
+    Command.XyUintPoint location2 = 4;
+    int32 objid = 5;
+    int32 uniqueid = 6;
+    bool extend = 7;
+    bool instant = 8;
+    repeated int32 unitids = 9;
+  }
+  message BuildingCommandQueue {
+    uint32 commplayerid = 1;
+    int32 targetid = 2;
+    Command.XyFloatPoint location = 4;
+    bool extend = 5;
+    bool instant = 6;
+    bool humanorder = 7;
+    bool controlheld = 8;
+    repeated int32 unitids = 9;
+    int32 certainaction = 10;
+  }
+  message BuyCommodity {
+    uint32 playerid = 1;
+    uint32 attrid = 2;
+    uint32 lotcount = 3;
+    int32 unitid = 4;
+  }
+  message CancelBuild {
+    int32 unitid = 1;
+    int32 unitplayerid = 2;
+  }
+  message ChangePlayerName {
+    uint32 playerid = 1;
+    string newname = 2;
+  }
+  message Chapter {
+    uint32 commplayerid = 1;
+  }
+  message Create {
+    int32 objcategory = 1;
+    uint32 playerid = 2;
+    Command.XyzFloatPoint location = 3;
+  }
+  message DeleteObjects {
+    uint32 playerid = 2;
+    repeated int32 unitids = 3;
+  }
+  message Diplomacy {
+    uint32 playerid1 = 1;
+    uint32 playerid2 = 2;
+    uint32 sequence = 3;
+    uint32 status = 4;
+    uint32 declare = 5;
+    uint32 diplomacy = 6;
+    uint32 intelligence = 7;
+    uint32 trade = 8;
+    uint32 demand = 9;
+    int32 gold = 10;
+    string message = 11;
+  }
+  message DropRelic {
+    int32 unitid = 1;
+  }
+  message Explore {
+    uint32 unitplayerid = 2;
+    Command.XyFloatPoint location = 3;
+    repeated int32 unitids = 4;
+  }
+  message FillSelection {
+    float x1 = 1;
+    float y1 = 2;
+    float x2 = 3;
+    float y2 = 4;
+    int32 objid = 5;
+    bool extend = 6;
+    bool instant = 7;
+    repeated int32 unitids = 8;
+  }
+  message FireActiveAbility {
+    uint32 commplayerid = 1;
+    int32 targetid = 2;
+    Command.XyFloatPoint location = 4;
+    bool extend = 5;
+    bool instant = 6;
+    bool humanorder = 7;
+    bool controlheld = 8;
+    repeated int32 unitids = 9;
+    int32 certainaction = 10;
+    int32 mainunit = 11;
+  }
+  message Flare {
+    int32 unitid = 1;
+    bytes flareflags = 2;
+    Command.XyFloatPoint location = 3;
+    uint32 playerid = 4;
+    uint32 commplayerid = 5;
+  }
+  message Follow {
+    int32 targetid = 2;
+    repeated int32 unitids = 3;
+  }
+  message FormFormation {
+    uint32 playerid = 2;
+    int32 formationtype = 3;
+    repeated int32 unitids = 4;
+  }
+  message FormationParameters {
+    int32 lineratio = 1;
+    int32 columnratio = 2;
+    int32 mincolumndistance = 3;
+    int32 columntolinedistance = 4;
+    float formationinfluencedistance = 5;
+    bool breakautoformationsbyspeed = 6;
+  }
+  message Game {
+    uint32 gamecommandid = 1;
+    int32 var1 = 2;
+    int32 var2 = 3;
+    float var3 = 4;
+    uint32 var4 = 5;
+  }
+  message Gate {
+    int32 unitid = 1;
+  }
+  message GiveAttribute {
+    uint32 toplayerid = 1;
+    uint32 attrid = 2;
+    float attramount = 3;
+  }
+  message GiveAttribute2 {
+    uint32 playerid = 1;
+    uint32 toplayerid = 2;
+    uint32 attrid = 3;
+    float attramount = 4;
+    float attrcost = 5;
+  }
+  message GiveAttributes {
+    message Attribute {
+      int32 id = 1;
+      float amount = 2;
+      float cost = 3;
+    }
+    int32 fromplayerid = 1;
+    int32 toplayerid = 2;
+    repeated Command.GiveAttributes.Attribute attributes = 3;
+  }
+  message GiveAttributesRge {
+    repeated float attramount = 1;
+    repeated int32 attrid = 2;
+    uint32 toplayerid = 3;
+  }
+  message GoBackToWork {
+    int32 unitid = 1;
+  }
+  message GoBackToWork2 {
+    repeated int32 unitids = 2;
+  }
+  message GroupAiOrder {
+    uint32 playerid = 1;
+    uint32 issuer = 2;
+    int32 ordertype = 4;
+    uint32 orderpriority = 5;
+    int32 targetid = 6;
+    uint32 targetowner = 7;
+    Command.XyzFloatPoint location = 8;
+    float range = 9;
+    bool immediate = 10;
+    bool infront = 11;
+    repeated int32 unitids = 12;
+    int32 targettype = 13;
+  }
+  message GroupMultiWaypoints {
+    repeated int32 unitids = 3;
+    repeated Command.XyUintPoint waypoints = 4;
+  }
+  message GroupWaypoint {
+    uint32 commplayerid = 1;
+    Command.XyUintPoint location = 3;
+    repeated int32 unitids = 4;
+  }
+  message Guard {
+    int32 targetid = 2;
+    repeated int32 unitids = 3;
+  }
+  message Interact {
+    uint32 commplayerid = 1;
+    int32 targetid = 2;
+    Command.XyFloatPoint location = 4;
+    bool extend = 5;
+    bool instant = 6;
+    bool humanorder = 7;
+    bool controlheld = 8;
+    repeated int32 unitids = 9;
+    int32 certainaction = 10;
+  }
+  message LockFormation {
+    int32 formationid = 1;
+    int32 formationtype = 2;
+  }
+  message Make {
+    int32 unitid = 1;
+    uint32 unitplayerid = 2;
+    int32 objid = 3;
+    int32 uniqueid = 4;
+  }
+  message MoreTechs {
+    uint32 playerid = 1;
+  }
+  message Move {
+    uint32 commplayerid = 1;
+    int32 targetid = 2;
+    Command.XyFloatPoint location = 4;
+    bool extend = 5;
+    bool instant = 6;
+    bool humanorder = 7;
+    bool controlheld = 8;
+    repeated int32 unitids = 9;
+    int32 certainaction = 10;
+  }
+  message MultiGate {
+    uint32 state = 1;
+    repeated int32 unitids = 3;
+  }
+  message MultiQueue {
+    uint32 playerid = 1;
+    int32 selectedbuildingid = 2;
+    int32 trainid = 4;
+    int32 traincount = 5;
+    repeated int32 buildingids = 6;
+    int32 buttonlocationid = 7;
+  }
+  message MultiplayerSave {
+    bool exitaftersave = 1;
+    uint32 commplayer = 2;
+  }
+  message OffboardTrade {
+    int32 unitid = 1;
+    int32 traderoute = 2;
+  }
+  message Patrol {
+    bool reset = 3;
+    repeated Command.XyFloatPoint waypoints = 4;
+    repeated int32 unitids = 5;
+  }
+  message Pause {
+    repeated int32 unitids = 2;
+  }
+  message PseudoTech {
+    int32 techid = 1;
+    bool extend = 2;
+    repeated int32 unitids = 3;
+  }
+  message Queue {
+    int32 buildingid = 1;
+    int32 trainid = 2;
+    int32 traincount = 3;
+  }
+  message Repair {
+    int32 targetid = 2;
+    bool extend = 3;
+    bool instant = 4;
+    repeated int32 unitids = 5;
+  }
+  message Research {
+    int32 unitid = 1;
+    uint32 unitplayerid = 2;
+    int32 techid = 4;
+    int32 uniqueid = 5;
+    bool extend = 6;
+    repeated int32 buildingids = 7;
+  }
+  message ResetBuildings {
+    uint32 state = 2;
+    repeated int32 unitids = 3;
+  }
+  message Resign {
+    uint32 playerid = 1;
+    uint32 commplayerid = 2;
+    bool dropped = 3;
+  }
+  message Retreat {
+    uint32 commplayerid = 1;
+    int32 targetid = 2;
+    Command.XyFloatPoint location = 4;
+    bool extend = 5;
+    bool instant = 6;
+    bool humanorder = 7;
+    bool controlheld = 8;
+    repeated int32 unitids = 9;
+    int32 certainaction = 10;
+  }
+  message Scout {
+    Command.XyFloatPoint location = 2;
+    repeated int32 unitids = 3;
+  }
+  message SeekShelter {
+    repeated int32 unitids = 1;
+  }
+  message SellCommodity {
+    uint32 playerid = 1;
+    uint32 attrid = 2;
+    uint32 lotcount = 3;
+    int32 unitid = 4;
+  }
+  message SendAiSignal {
+    int32 signalid = 1;
+    int32 value = 2;
+  }
+  message SetGatherPoint {
+    int32 targetid = 2;
+    int32 targetmasterid = 3;
+    Command.XyFloatPoint location = 4;
+    repeated int32 unitids = 5;
+  }
+  message SetGatherState {
+    uint32 state = 2;
+    repeated int32 unitids = 3;
+  }
+  message SetRetreatPoint {
+    int32 unitid = 1;
+  }
+  message Special {
+    int32 targetid = 1;
+    int32 action = 2;
+    bool extend = 3;
+    bool instant = 4;
+    repeated int32 unitids = 5;
+  }
+  message Stop {
+    repeated int32 unitids = 2;
+  }
+  message StopAll {
+    uint32 playerid = 1;
+  }
+  message TownBell {
+    int32 unitid = 1;
+    uint32 activateflag = 2;
+  }
+  message TradeAttribute {
+    int32 attribute = 2;
+    repeated int32 unitids = 3;
+  }
+  message TransformObject {
+    uint32 playerid = 1;
+    int32 masterid = 2;
+    int32 objid = 3;
+  }
+  message TransformObjects {
+    repeated int32 unitids = 1;
+    int32 hotkeyaction = 2;
+  }
+  message Trigger {
+    int32 triggerid = 1;
+  }
+  message UnitAiState {
+    uint32 state = 2;
+    repeated int32 unitids = 3;
+  }
+  message UnitOrder {
+    int32 targetid = 2;
+    uint32 action = 3;
+    uint32 param = 4;
+    Command.XyFloatPoint location = 5;
+    int32 uniqueId = 6;
+    bool extend = 7;
+    bool instant = 8;
+    bool humanorder = 9;
+    repeated int32 unitids = 10;
+    bool split = 11;
+  }
+  message UnitTransform {
+    uint32 unitplayerid = 2;
+    int32 objid = 3;
+    int32 uniqueid = 4;
+    repeated int32 unitids = 5;
+  }
+  message UnitTypeAiState {
+    uint32 state = 2;
+    int32 unittype = 3;
+    int32 playerid = 4;
+  }
+  message UnknownCommand {
+    uint32 commandid = 1;
+  }
+  message Unload {
+    Command.XyFloatPoint location = 2;
+    uint32 unloadflag = 3;
+    int32 unloadunittype = 4;
+    repeated int32 unitids = 5;
+  }
+  message WheelFormation {
+    int32 formationid = 1;
+    int32 angle = 2;
+  }
+  message Work {
+    uint32 commplayerid = 1;
+    int32 targetid = 2;
+    Command.XyFloatPoint location = 4;
+    bool extend = 5;
+    bool instant = 6;
+    bool humanorder = 7;
+    bool controlheld = 8;
+    repeated int32 unitids = 9;
+    int32 certainaction = 10;
+  }
+  message XyFloatPoint {
+    float x = 1;
+    float y = 2;
+  }
+  message XyUintPoint {
+    uint32 x = 1;
+    uint32 y = 2;
+  }
+  message XyzFloatPoint {
+    float x = 1;
+    float y = 2;
+    float z = 3;
+  }
+  message XyzUintPoint {
+    uint32 x = 1;
+    uint32 y = 2;
+    uint32 z = 3;
+  }
+  oneof command {
+    Command.Interact interact = 1000;
+    Command.Stop stop = 1001;
+    Command.Work work = 1002;
+    Command.Move move = 1003;
+    Command.Create create = 1004;
+    Command.AddAttribute addattribute = 1005;
+    Command.GiveAttribute giveattribute = 1007;
+    Command.AiOrder aiorder = 1010;
+    Command.Resign resign = 1011;
+    Command.AddWaypoint addwaypoint = 112;
+    Command.Pause pause = 1013;
+    Command.GroupWaypoint groupwaypoint = 1016;
+    Command.GroupAiOrder groupaiorder = 1017;
+    Command.UnitAiState unitaistate = 1018;
+    Command.Guard guard = 1019;
+    Command.Follow follow = 1020;
+    Command.Patrol patrol = 1021;
+    Command.Scout scout = 1022;
+    Command.FormFormation formformation = 1023;
+    Command.BreakFormation breakformation = 1024;
+    Command.WheelFormation wheelformation = 1025;
+    Command.AboutFaceFormation aboutfaceformation = 1026;
+    Command.MultiplayerSave multiplayersave = 1027;
+    Command.FormationParameters formationparameters = 1028;
+    Command.AutoFormations autoformations = 1029;
+    Command.LockFormation lockformation = 1030;
+    Command.GroupMultiWaypoints groupmultiwaypoints = 1031;
+    Command.Chapter chapter = 1032;
+    Command.AttackMove attackmove = 1033;
+    Command.AttackMoveTarget attackmovetarget = 1034;
+    Command.Retreat retreat = 1035;
+    Command.UnitTypeAiState unittypeaistate = 1037;
+    Command.AutoScout autoscout = 1038;
+    Command.StopAll stopall = 1039;
+    Command.MoreTechs moretechs = 1040;
+    Command.TransformObject transformobject = 1041;
+    Command.Trigger trigger = 1042;
+    Command.TransformObjects transformobjects = 1043;
+    Command.SeekShelter seekshelter = 1044;
+    Command.BuildingCommandQueue buildingcommandqueue = 1045;
+    Command.FireActiveAbility fireactiveability = 1046;
+    Command.GiveAttributesRge giveattributesrge = 1096;
+    Command.Make make = 1100;
+    Command.Research research = 1101;
+    Command.Build build = 1102;
+    Command.Game game = 1103;
+    Command.Explore explore = 1104;
+    Command.BuildWall buildwall = 1105;
+    Command.CancelBuild cancelbuild = 1106;
+    Command.AttackGround attackground = 1107;
+    Command.GiveAttribute2 giveattribute2 = 1108;
+    Command.TradeAttribute tradeattribute = 1109;
+    Command.Repair repair = 1110;
+    Command.Unload unload = 1111;
+    Command.Gate gate = 1114;
+    Command.Flare flare = 1115;
+    Command.Special special = 1116;
+    Command.UnitOrder unitorder = 1117;
+    Command.Diplomacy diplomacy = 1118;
+    Command.Queue queue = 1119;
+    Command.SetGatherPoint setgatherpoint = 1120;
+    Command.SetRetreatPoint setretreatpoint = 1121;
+    Command.SellCommodity sellcommodity = 1122;
+    Command.BuyCommodity buycommodity = 1123;
+    Command.OffboardTrade offboardtrade = 1124;
+    Command.UnitTransform unittransform = 1125;
+    Command.DropRelic droprelic = 1126;
+    Command.TownBell townbell = 1127;
+    Command.GoBackToWork gobacktowork = 1128;
+    Command.MultiQueue multiqueue = 1129;
+    Command.SetGatherState setgatherstate = 1130;
+    Command.DeleteObjects deleteobjects = 1131;
+    Command.ResetBuildings resetbuildings = 1132;
+    Command.MultiGate multigate = 1133;
+    Command.GoBackToWork2 gobacktowork2 = 1134;
+    Command.ChangePlayerName changeplayername = 1135;
+    Command.SendAiSignal sendaisignal = 1136;
+    Command.AiEffectAmount aieffectamount = 1137;
+    Command.AiEffectPercent aieffectpercent = 1138;
+    Command.AllBackToWork allbacktowork = 1140;
+    Command.PseudoTech pseudotech = 1141;
+    Command.FillSelection fillselection = 1142;
+    Command.GiveAttributes giveattributes = 1196;
+    Command.UnknownCommand unknowncommand = 2000;
+  }
+  uint32 commplayerid = 1;
+}
+message CurrentReplay {
+  string replayfile = 1;
+}
+message Event {
+  message CombatNotificationSound {
+    enum Type {
+      NORMAL = 0;
+      WOLF = 1;
+      TOWN = 2;
+    }
+    int32 receiverid = 1;
+    int32 type = 2;
+    int32 attackedobjectid = 3;
+  }
+  message Damage {
+    int32 entityid = 1;
+    int32 attackerid = 2;
+    float damage = 3;
+    float hpafterdamage = 4;
+    bool iskillingblow = 5;
+    int32 missileid = 6;
+    bool isprimarymissile = 7;
+  }
+  message EntityKilled {
+    int32 id = 1;
+    int32 killerid = 2;
+  }
+  message MarketTransaction {
+    uint32 playerid = 1;
+    uint32 attributetype = 2;
+    float attributebefore = 3;
+    float goldbefore = 4;
+    float attributeexchanged = 5;
+    float goldrate = 6;
+    float goldexchanged = 7;
+  }
+  message MonkConversion {
+    int32 monkid = 1;
+    int32 monkownerid = 2;
+    int32 targetid = 3;
+    int32 targetownerid = 4;
+  }
+  message NotificationFarmOrFishTrapDied {
+    int32 ownerid = 1;
+    int32 objid = 2;
+    bool farm = 3;
+  }
+  message NotificationResearchDone {
+    int32 ownerid = 1;
+    int32 techid = 2;
+    int32 buildingid = 3;
+  }
+  message NotificationTrainDone {
+    int32 ownerid = 1;
+    int32 masterid = 2;
+    int32 buildingid = 3;
+    int32 objid = 4;
+  }
+  message NotificationWonder {
+    enum Type {
+      WONDER_STARTED = 0;
+      WONDER_COMPLETED = 1;
+      WONDER_DESTROYED = 2;
+      ARTIFACTS_HELD = 3;
+      ARTIFACTS_LOST = 4;
+      RUINS_HELD = 5;
+      RUINS_LOST = 6;
+    }
+    int32 ownerid = 1;
+    int32 remainingtime = 2;
+    int32 objid = 3;
+    int32 type = 4;
+  }
+  message PlayerChat {
+    enum Channel {
+      DEFAULT = 0;
+      ALLCHAT = 1;
+      TEAMCHAT = 2;
+      ENEMYCHAT = 3;
+    }
+    int32 playerid = 1;
+    int32 commplayerid = 2;
+    int32 channel = 3;
+    string text = 4;
+    int32 taunt = 5;
+    uint32 destinationmap = 6;
+  }
+  message Tribute {
+    uint32 senderid = 1;
+    uint32 receiverid = 2;
+    uint32 attributetype = 3;
+    float sendervaluebefore = 4;
+    float sendervaluechange = 5;
+    float receivervaluebefore = 6;
+    float receivervaluechange = 7;
+  }
+  oneof event {
+    Event.EntityKilled entitykilled = 1;
+    Event.MarketTransaction markettransaction = 2;
+    Event.Tribute tribute = 3;
+    Event.PlayerChat playerchat = 4;
+    Event.CombatNotificationSound combatnotificationsound = 5;
+    Event.Damage damage = 6;
+    Event.MonkConversion monkconversion = 7;
+    Event.NotificationTrainDone notificationtraindone = 8;
+    Event.NotificationResearchDone notificationresearchdone = 9;
+    Event.NotificationFarmOrFishTrapDied notificationfarmorfishtrapdied = 10;
+    Event.NotificationWonder notificationwonder = 11;
+  }
+}
+message Frame {
+  message MetricEntry {
+    enum Region {
+      ALL = 0;
+      ENTITIES = 1;
+      SLEEPING_ENTITIES = 2;
+      MAP_TILES = 3;
+      UNIFIED_VISIBLE_MAP = 4;
+      PARTICLES = 5;
+      MASTER_ENTITIES = 6;
+      RESEARCH_STATES = 7;
+      VICTORY_POINTS = 8;
+      APPLY_PATCH = 9;
+      GAME_OPTIONS = 10;
+    }
+    int32 key = 1;
+    uint32 timemeasured = 2;
+    uint32 count = 3;
+  }
+  uint32 time = 1;
+  bytes patch = 2;
+  repeated Event event = 3;
+  bytes reversepatch = 4;
+  uint32 timestepsskipped = 7;
+  repeated uint32 skippedtimesteps = 8;
+  repeated Frame.MetricEntry metrics = 5;
+  repeated Command command = 6;
+}
+message FrameSequence {
+  repeated Frame frame = 1;
+  uint32 sendingworldtime = 2;
+  uint32 numberofframesqueued = 3;
+}
+message FramesRequest {
+  message ResolutionEntry {
+    enum Category {
+      TIME_STEP = 0;
+      LOW_PRIORITY = 1;
+      SLEEPING_UNIT = 2;
+      PARTICLES = 3;
+      GAME_OPTIONS = 4;
+      PARTICLES_SIMULATION_OUTPUT = 5;
+      LOW_PRIORITY_2 = 6;
+    }
+    int32 key = 1;
+    int32 gametimeresolution = 2;
+  }
+  repeated FramesRequest.ResolutionEntry desiredresolutions = 1;
+  bool disablecommands = 2;
+  bool disableparticles = 3;
+  repeated string particledefinitionwhitelist = 4;
+  bool disableparticleculling = 5;
+  bool processattacknotificationsforallplayers = 6;
+  bool resolvestickyunitlists = 7;
+}
+message InfoRequest {
+}
+message InfoResponse {
+  uint32 gameversion = 1;
+  uint32 apiversion = 2;
+  string basedirectory = 3;
+  repeated string enabledmoddirectories = 4;
+  repeated string disabledmoddirectories = 5;
+  string userdirectory = 6;
+  string languagecode = 7;
+  SelectedGameInfo selectedgame = 8;
+}
+message LoadGameRequest {
+  message Cancel {
+  }
+  message LoadReplay {
+    string filepath = 1;
+    bool cloud = 2;
+  }
+  message RestartAsReplay {
+  }
+  message SpectateLobby {
+    string lobbyid = 1;
+  }
+  oneof request {
+    LoadGameRequest.SpectateLobby spectatelobby = 1;
+    LoadGameRequest.LoadReplay loadreplay = 2;
+    LoadGameRequest.RestartAsReplay restartasreplay = 4;
+    LoadGameRequest.Cancel cancel = 5;
+  }
+  bool confirm = 3;
+  int32 timeoutseconds = 6;
+}
+message LoadGameResponse {
+  enum Code {
+    SUCCESS = 0;
+    FAILED_PLAYING_RANKED = 1;
+    FAILED_PLAYING_MULTIPLAYER = 2;
+    FAILED_PLAYING_NEED_CONFIRM = 3;
+    FAILED_UNKNOWN_FILE_EXTENSION = 4;
+    FAILED_NOT_A_RECORDED_GAME = 5;
+    FAILED_TO_FETCH_FILE = 6;
+    FAILED_TO_PARSE_FILE = 7;
+    FAILED_TO_PARSE_STRING = 8;
+    FAILED_UNKNOWN_ERROR = 9;
+    FAILED_INVALID_MATCH_ID = 10;
+    FAILED_START_OBSERVING = 11;
+    FAILED_TIMEOUT = 12;
+    CANCELLED = 13;
+  }
+  int32 code = 1;
+}
+message Modal {
+  enum Purpose {
+    ACCEPT_LOBBY_UGC_TRANSFER = 0;
+    REPLAY_DONE_ERROR = 1;
+  }
+  enum Action {
+    PRESS_CLOSE = 0;
+    PRESS_CANCEL = 1;
+    PRESS_YES = 2;
+    PRESS_NO = 3;
+    PRESS_OK = 4;
+  }
+  int32 id = 1;
+  int32 purpose = 2;
+  repeated int32 availableactions = 3;
+  string title = 4;
+  string text = 5;
+}
+message OracleMessage {
+  message EmptyModal {
+  }
+  message GameChat {
+    int32 playerid = 1;
+    int32 commplayerid = 2;
+    int32 channel = 3;
+    string text = 4;
+    int32 taunt = 5;
+    uint32 destinationmap = 6;
+  }
+  message GamePaused {
+    bool paused = 1;
+    bool nomoredata = 2;
+    int32 pausedbyplayerid = 3;
+  }
+  message InfoResponse {
+    string localplayerrelicid = 1;
+    bool restorewindowondisconnect = 2;
+  }
+  message InstallerAction {
+    string url = 1;
+  }
+  message LobbyInfo {
+    enum RankedType {
+      UNKNOWN = 0;
+      UNRANKED = 1;
+      RANDOM_MAP = 2;
+      DEATH_MATCH = 3;
+      EMPIRE_WARS = 4;
+      BATTLE_ROYALE = 5;
+      POMPEII_CUSTOM = 6;
+    }
+    message Slot {
+      oneof content {
+        OracleMessage.LobbyInfo.SlotUsed used = 1;
+      }
+    }
+    message SlotUsed {
+      string name = 1;
+      int32 teamid = 2;
+      int32 color = 3;
+      int32 civid = 4;
+      int32 platform = 5;
+      string iconid = 6;
+    }
+    string sessionid = 1;
+    int32 playercount = 2;
+    repeated OracleMessage.LobbyInfo.Slot slots = 3;
+    bool spectatable = 4;
+    int32 spectatorcount = 5;
+    bool ingame = 6;
+    string scenarioname = 7;
+    int32 rankedtype = 8;
+    int32 dataset = 9;
+    int32 chosenmaptype = 10;
+    int32 chosenmaptypestringid = 43;
+    string custommapname = 11;
+    string hostlanguage = 12;
+    string server = 13;
+    string gameid = 14;
+    int32 gamemode = 15;
+    int32 mapstyle = 16;
+    int32 mapsize = 17;
+    int32 difficulty = 18;
+    int32 resources = 19;
+    int32 populationcap = 20;
+    int32 gamespeed = 21;
+    int32 visibility = 22;
+    int32 startingage = 23;
+    int32 endingage = 24;
+    int32 treatylength = 25;
+    int32 victorytype = 26;
+    int32 victoryamount = 27;
+    bool lockteams = 28;
+    bool teamtogether = 29;
+    bool teampositions = 30;
+    bool sharedexploration = 31;
+    bool speedlocked = 32;
+    bool cheatsenabled = 33;
+    bool turboenabled = 34;
+    bool alltechsenabled = 35;
+    bool recordgame = 36;
+    bool hascustomcontent = 37;
+    bool hiddencivs = 38;
+    bool empirewarsmode = 39;
+    bool suddendeathmode = 40;
+    bool regicidemode = 41;
+    int32 battleroyaletime = 42;
+    int32 selectedgame = 44;
+    bool handicap = 45;
+    bool walkablefarms = 46;
+  }
+  message ModalClickResult {
+    int32 modalid = 1;
+    int32 action = 2;
+    bool success = 3;
+  }
+  message ObserverLeave {
+  }
+  message ObserverLobby {
+    string matchstarttime = 1;
+    string jointime = 2;
+    OracleMessage.LobbyInfo lobbyinfo = 3;
+  }
+  oneof content {
+    OracleMessage.ObserverLeave observerleave = 1;
+    OracleMessage.ObserverLobby observerlobby = 2;
+    OracleMessage.InstallerAction installeraction = 3;
+    OracleMessage.GamePaused gamepaused = 4;
+    WindowState currentwindowstate = 5;
+    ScreenState currentscreenstate = 6;
+    Modal currentmodal = 7;
+    int32 gametype = 8;
+    int32 gamestate = 9;
+    OracleMessage.InfoResponse inforesponse = 10;
+    OracleMessage.EmptyModal emptycurrentmodal = 11;
+    OracleMessage.ModalClickResult modalclickresult = 12;
+    CurrentReplay currentreplay = 13;
+    SelectedGameInfo selectedgame = 14;
+    OracleMessage.GameChat gamechat = 15;
+  }
+}
+message OraclePrayer {
+  message ClearInstallerAction {
+  }
+  message ClickModal {
+    int32 modalid = 1;
+    int32 action = 2;
+  }
+  message ConfigDisconnectSwitch {
+    bool restorewindow = 1;
+  }
+  message InfoRequest {
+  }
+  oneof content {
+    OraclePrayer.ClearInstallerAction clearinstalleraction = 1;
+    OraclePrayer.ClickModal clickmodal = 2;
+    OraclePrayer.InfoRequest inforequest = 3;
+    OraclePrayer.ConfigDisconnectSwitch configdisconnectswitch = 4;
+  }
+}
+message PauseRequest {
+  bool paused = 1;
+}
+message PauseResponse {
+  bool success = 1;
+  bool changed = 2;
+  bool paused = 3;
+}
+message ScreenState {
+  enum Location {
+    OTHER = 0;
+    MAIN_MENU = 1;
+    GAME_SCREEN = 2;
+    MULTIPLAYER_SPECTATE = 3;
+    LOAD_GAME_REPLAYS = 4;
+    MULTIPLAYER_LOBBY_SPECTATOR = 5;
+  }
+  int32 location = 1;
+}
+message SelectedGameInfo {
+  int32 enumvalue = 1;
+  string modepath = 2;
+}
+message SetDesiredGameRequest {
+  int32 desiredgame = 1;
+  bool confirm = 2;
+}
+message SetDesiredGameResponse {
+  enum Code {
+    SUCCESS = 0;
+    NO_CHANGE = 1;
+    FAILED = 2;
+    FAILED_PLAYING_RANKED = 3;
+    FAILED_PLAYING_MULTIPLAYER = 4;
+    FAILED_PLAYING_NEED_CONFIRM = 5;
+  }
+  int32 code = 1;
+  int32 selectedgame = 2;
+}
+message SetFogOfWarRequest {
+  bool fogofwar = 1;
+}
+message SetFogOfWarResponse {
+  bool success = 1;
+  bool changed = 2;
+  bool fogofwar = 3;
+}
+message SetGameSpeedRequest {
+  enum Speed {
+    SLOW = 0;
+    NORMAL = 1;
+    FAST = 2;
+    EXTRA_FAST = 3;
+  }
+  int32 speed = 1;
+}
+message SetGameSpeedResponse {
+  bool success = 1;
+}
+message SetPerspectiveRequest {
+  int32 playerid = 1;
+}
+message SetPerspectiveResponse {
+  bool success = 1;
+  int32 playerid = 2;
+}
+message StartScenarioRequest {
+  string scenarioPath = 1;
+  bool useTestDifficulty = 2;
+  bool restartIfRunning = 3;
+}
+message StartScenarioResponse {
+  bool accepted = 1;
+  string reason = 2;
+  uint64 launchId = 3;
+}
+message StoredPatchTimeEntry {
+  repeated Event event = 6;
+  repeated Command command = 7;
+}
+message WindowState {
+  enum Mode {
+    NO_WINDOW = 0;
+    NORMAL = 1;
+    MINIMIZED = 2;
+    MAXIMIZED = 3;
+    FULL_SCREEN = 4;
+    FULL_DESKTOP = 5;
+  }
+  int32 mode = 1;
+  bool foreground = 2;
+  bool focus = 3;
+  string hwnd = 4;
+  uint32 width = 5;
+  uint32 height = 6;
+  float renderscale = 7;
+}
+enum GameType {
+  UNKNOWN = 0;
+  SINGLEPLAYER = 1;
+  MULTIPLAYER = 2;
+  REPLAYING = 3;
+  SPECTATING = 4;
+}
+enum GameState {
+  NONE = 0;
+  CREATION = 1;
+  PLAYING = 2;
+  DONE = 3;
+}
+enum SelectedGame {
+  SG_NONE = 0;
+  EMPIRES1 = 1;
+  EMPIRES2 = 2;
+  PAPHOS = 3;
+}

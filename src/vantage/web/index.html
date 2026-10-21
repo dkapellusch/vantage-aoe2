@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vantage</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1 2 3v5c0 3.5 2.6 6 6 7 3.4-1 6-3.5 6-7V3z' fill='%23d9b45a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/hud.css">
+<link rel="stylesheet" href="/static/world.css">
+<link rel="stylesheet" href="/static/shell.css">
+<link rel="stylesheet" href="/static/overlays.css">
+</head>
+<body>
+<canvas id="world"></canvas>
+
+<div id="hud">
+  <header id="scoreboard" class="panel"></header>
+  <div id="leftcol">
+    <section id="overview" class="panel"></section>
+    <section id="techs" class="panel"></section>
+    <section id="production" class="panel hidden"></section>
+  </div>
+  <div id="leftcol2"></div>
+  <section id="events" class="panel">
+    <div class="events-head">
+      <span class="title" data-i18n="Events">Events</span>
+      <span id="event-filters"></span>
+    </div>
+    <ol id="event-list"></ol>
+    <div id="event-pager" class="hidden" data-i18n="New events ▾">New events ▾</div>
+  </section>
+  <section id="dashboard" class="panel">
+    <div class="dash-head"><button id="dash-prev" class="dash-nav" title="Previous page (Alt+X)">‹</button><span id="dash-title"></span><button id="dash-next" class="dash-nav" title="Next page (Alt+C)">›</button><span class="hint">Alt+C / Alt+X</span></div>
+    <table id="dash-table"></table>
+  </section>
+  <section id="minimap-wrap" class="panel">
+    <div id="minimap-tools">
+      <button id="btn-menu" title="Menu (Esc)">⛨</button>
+      <button id="btn-home" title="Replays &amp; recordings (Ctrl+O)">⌂</button>
+      <button id="btn-stats" title="Statistics (Ctrl+Alt+S)">▤</button>
+      <button id="btn-fog" title="Fog of war: click or right-click cycles off / spy / standard, middle-click combines team fog (Alt+F)">◐</button>
+      <button id="btn-mmmode" title="Minimap mode: click or right-click cycles (Alt+M)">▦</button>
+      <button id="btn-res" title="Resources left (Alt+R)">⛏</button>
+      <button id="btn-panels" title="Panels: show, hide and collapse (Alt+V)">▣</button>
+      <button id="btn-settings" title="Settings">⚙</button>
+      <button id="btn-help" title="Quick reference (?)">?</button>
+    </div>
+    <canvas id="minimap"></canvas>
+    <div id="fog-label"></div>
+  </section>
+  <section id="timebar" class="panel">
+    <div id="time-controls">
+      <button id="tc-back" title="Back 30s (-)">↺30</button>
+      <button id="tc-rew" title="Rewind: play backwards; again for faster (2×, 4×, 8×)">⏪</button>
+      <button id="tc-play" title="Play/pause (F3)">⏸</button>
+      <button id="tc-ff" title="Fast forward; again for faster (2×, 4×, 8×)">⏩</button>
+      <button id="tc-fwd" title="Forward 30s (=)">↻30</button>
+      <button id="tc-slower" title="Slower ([)">−</button>
+      <span id="tc-speed">1×</span>
+      <button id="tc-faster" title="Faster (])">+</button>
+      <button id="tc-bookmark" title="Bookmark 30s ago (F4)">⚑</button>
+      <button id="tc-live" title="Jump to live edge">LIVE</button>
+      <span id="tc-clock">0:00</span>
+    </div>
+    <div id="time-controls2">
+      <button id="tc-bm-prev" title="Previous bookmark (Shift+[)">◂⚑</button>
+      <button id="tc-bm-next" title="Next bookmark (Shift+])">⚑▸</button>
+      <span id="tc-real" title="Real speed: game time advanced per real second, against the target speed"></span>
+      <span class="tc-live-only">
+        <button id="tc-rec" title="Record this live session to a .vrec file">● <span data-i18n="REC">REC</span></button>
+        <button id="tc-stop" title="Stop watching">■</button>
+      </span>
+    </div>
+    <div id="scrub"><canvas id="scrub-canvas"></canvas><div id="scrub-skips"></div><div id="scrub-hover" class="hidden"><span></span></div></div>
+  </section>
+  <section id="unitpanel" class="panel hidden"></section>
+  <section id="resleft" class="panel hidden"></section>
+</div>
+
+<div id="overlay-stats" class="overlay hidden"></div>
+<div id="overlay-home" class="overlay hidden"></div>
+<div id="overlay-settings" class="overlay hidden"></div>
+<div id="overlay-help" class="overlay hidden"></div>
+<div id="overlay-endgame" class="overlay hidden"></div>
+<div id="overlay-docs" class="overlay hidden"></div>
+<nav id="omni-menu" class="panel hidden"></nav>
+<nav id="panels-menu" class="panel hidden"></nav>
+<div id="launch-status" class="panel hidden"></div>
+<div id="highlight-list" class="panel hidden"></div>
+<div id="status-line"></div>
+<div id="banners"><div id="highlight-bar" class="panel hidden"></div><div id="pause-banner" class="hidden"></div><div id="jump-banner" class="panel hidden"></div><div id="autocast-banner" class="hidden"></div><div id="toast"></div></div>
+<svg width="0" height="0" style="position:absolute"><filter id="gamma"><feComponentTransfer>
+  <feFuncR id="gamma-r" type="gamma" amplitude="1" exponent="1"/><feFuncG id="gamma-g" type="gamma" amplitude="1" exponent="1"/>
+  <feFuncB id="gamma-b" type="gamma" amplitude="1" exponent="1"/><feFuncA id="gamma-func" type="identity" exponent="1"/>
+</feComponentTransfer></filter></svg>
+<div id="selbox" class="hidden"></div>
+<div id="tooltip" class="hidden"></div>
+<div id="techtree" class="panel hidden"></div>
+
+<pre id="perf-view" class="hidden"></pre>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
