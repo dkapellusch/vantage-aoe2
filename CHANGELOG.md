@@ -26,6 +26,8 @@ All notable changes to Vantage are documented here. The format follows
 - `native_v32_pipeline --preview-on-checksum-failure`: when a conversion stops at a failing original
   checksum, it converts the part of the match up to the last passing checksum as an incomplete
   preview.
+- `tools/audit_resource_sources.py`, the resource-income inventory scanner, from the development
+  copy, and a `py.typed` marker so projects importing `vantage` type-check against it.
 - Approximate-checksum conversion (`native_v32_pipeline --approximate-checksums`, or
   `--approximate-on-checksum-failure` to rerun after a checksum stop): the derived host sets the
   game's ignore-checksum byte and runs to the end of the replay. The recording is labelled
