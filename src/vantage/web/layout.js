@@ -7,7 +7,7 @@
 
 import { settings, saveSettings, esc, tip } from './state.js';
 import { t } from './i18n.js';
-import { applyPanelSizes, resetPanelSizes } from './panel-resize.js';
+import { applyPanelSizes, resetPanelSizes, resetPanel, startMove, nudgePanel, arranging, setArranging } from './panel-resize.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -69,8 +69,17 @@ export function applyPreset(name) {
   applyPanels();
 }
 
+// Default placements (hud-layout.css): caster puts the scoreboard across the top,
+// the team board bottom left and the minimap with the time controls bottom right;
+// classic is the earlier layout (team board top left, minimap bottom left).
+export const LAYOUTS = [['caster', 'Caster'], ['classic', 'Classic']];
+export function hudLayout() { return settings.hudLayout === 'classic' ? 'classic' : 'caster'; }
+export function setHudLayout(name) { settings.hudLayout = name; saveSettings(); applyPanels(); }
+export function toggleArrange() { setArranging(!arranging()); }
+
 /** Mirror the settings onto the panels (cheap; called with every HUD render). */
 export function applyPanels() {
+  if (document.body.dataset.hudLayout !== hudLayout()) document.body.dataset.hudLayout = hudLayout();
   for (const p of PANELS) {
     const el = $(p.id);
     if (!el) continue;
@@ -97,7 +106,7 @@ function placeTools(p) {
   const r = host.getBoundingClientRect();
   if (!r.width || !r.height) { tools.classList.add('hidden'); return; }
   const coll = isCollapsed(p.id);
-  tools.innerHTML = `${p.collapse ? `<button data-pt="collapse" ${tip(coll ? t('Expand') : t('Collapse'))}>${coll ? '▾' : '▴'}</button>` : ''}<button data-pt="hide" ${tip(t('Hide {p}', { p: t(p.label) }), t('Bring it back from the Panels menu (▣ above the minimap, Alt+V)'))}>✕</button>`;
+  tools.innerHTML = `<button data-pt="move" ${tip(t('Move {p}', { p: t(p.label) }), t('Drag to move · Shift: no snapping · double-click: back to its place · arrow keys nudge · Alt+L: arrange every panel'))}>⠿</button>${p.collapse ? `<button data-pt="collapse" ${tip(coll ? t('Expand') : t('Collapse'))}>${coll ? '▾' : '▴'}</button>` : ''}<button data-pt="hide" ${tip(t('Hide {p}', { p: t(p.label) }), t('Bring it back from the Panels menu (▣ above the minimap, Alt+V)'))}>✕</button>`;
   tools.classList.remove('hidden');
   const w = tools.offsetWidth;
   tools.style.left = `${Math.max(0, Math.min(window.innerWidth - w, r.right - w - 2))}px`;
@@ -119,9 +128,27 @@ export function installPanelTools(onChange, toast) {
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => { tools.classList.add('hidden'); current = null; }, 250);
   });
+  tools.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('[data-pt="move"]') || !current) return;
+    const p = current;
+    tools.classList.add('hidden');
+    startMove($(p.host || p.id), e);
+  });
+  tools.addEventListener('dblclick', (e) => {
+    if (!e.target.closest('[data-pt="move"]') || !current) return;
+    resetPanel(current.host || current.id); onChange();
+  });
+  tools.addEventListener('keydown', (e) => {
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!d || !e.target.closest('[data-pt="move"]') || !current) return;
+    e.preventDefault(); e.stopPropagation();
+    const step = e.shiftKey ? 1 : 10;
+    nudgePanel($(current.host || current.id), d[0] * step, d[1] * step);
+    placeTools(current);
+  });
   tools.addEventListener('click', (e) => {
     const b = e.target.closest('[data-pt]');
-    if (!b || !current) return;
+    if (!b || !current || b.dataset.pt === 'move') return;
     const p = current;
     if (b.dataset.pt === 'collapse') setCollapsed(p.id, !isCollapsed(p.id));
     else {
@@ -143,7 +170,8 @@ function renderMenu() {
   const el = $('panels-menu');
   el.innerHTML = `<div class="omni-title">${t('Panels')}</div>
     ${PANELS.map((p) => `<div class="pm-row"><label><input type="checkbox" data-pm-show="${p.id}" ${isVisible(p.id) ? 'checked' : ''}> ${esc(t(p.label))}</label>${p.collapse ? `<button data-pm-collapse="${p.id}" class="${isCollapsed(p.id) ? 'on' : ''}" ${tip(t('Collapse to its top strip'))}>${isCollapsed(p.id) ? '▾' : '▴'}</button>` : ''}</div>`).join('')}
-    <div class="pm-presets"><button data-pm-preset="clean" ${tip(t('Clean'), t('Scoreboard, selection, time controls and minimap'))}>${t('Clean')}</button><button data-pm-preset="all" ${tip(t('Everything'), t('Every panel, none collapsed'))}>${t('Everything')}</button><button data-pm-reset-sizes>${t('Reset sizes')}</button></div>`;
+    <div class="pm-presets"><button data-pm-preset="clean" ${tip(t('Clean'), t('Scoreboard, selection, time controls and minimap'))}>${t('Clean')}</button><button data-pm-preset="all" ${tip(t('Everything'), t('Every panel, none collapsed'))}>${t('Everything')}</button><button data-pm-reset-sizes ${tip(t('Reset layout'), t('Every panel back to its place and size'))}>${t('Reset layout')}</button></div>
+    <div class="pm-presets pm-layouts"><span class="hint">${t('Layout')}</span>${LAYOUTS.map(([k, l]) => `<button data-pm-layout="${k}" class="${hudLayout() === k ? 'on' : ''}">${t(l)}</button>`).join('')}<button data-pm-arrange class="${arranging() ? 'on' : ''}" ${tip(t('Arrange panels (Alt+L)'), t('Drag any panel to move it'))}>${t('Arrange')}</button></div>`;
 }
 
 export function togglePanelsMenu(anchor) {
@@ -166,6 +194,9 @@ export function installPanelsMenu(onChange) {
   });
   el.addEventListener('click', (e) => {
     if (e.target.closest('[data-pm-reset-sizes]')) { resetPanelSizes(); onChange(); return; }
+    const lay = e.target.closest('[data-pm-layout]');
+    if (lay) { setHudLayout(lay.dataset.pmLayout); renderMenu(); onChange(); return; }
+    if (e.target.closest('[data-pm-arrange]')) { toggleArrange(); closePanelsMenu(); onChange(); return; }
     const c = e.target.closest('[data-pm-collapse]');
     const pr = e.target.closest('[data-pm-preset]');
     if (c) setCollapsed(c.dataset.pmCollapse, !isCollapsed(c.dataset.pmCollapse));

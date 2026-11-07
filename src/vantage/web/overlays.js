@@ -1415,7 +1415,7 @@ function interfaceTab() {
     ${chk('disableScoreboard', 'Show scoreboard', '', true)}
     ${chk('showElo', 'Show Elo')}${chk('showRankedEloForUnrankedGames', 'Show ranked Elo in unranked games', 'Use the random-map ladder rating when the lobby is unranked')}
     ${chk('hideScore', 'Hide score')}${chk('hideScoreDots', 'Hide score dots', 'The series score dots next to team names')}
-    ${chk('teamAverageScore', 'Team average score', 'Show the average score of each team in team games')}
+    ${sel('teamScore', 'Team score', [['sum', 'Total'], ['average', 'Average'], ['off', 'Off']], 'Team games: each team\'s score on the scoreboard, with the lead between them')}
     <h3>${t('Look')}</h3>
     <div class="form-row">${lab('Language')}<select id="lang-select">${Object.entries(LANGS).map(([c, n]) => `<option value="${c}" ${c === language ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
     ${sel('skin', 'Look', BUILTIN_SKINS, 'Built-in looks; custom skins are in Settings → Skins')}

@@ -89,6 +89,8 @@ UNIT_TRACK_MS = 100
 TERRAIN_MS = 3_000
 SERIES_MS = 5000
 APM_WINDOW_MS = 60_000
+#: The keys of a player's ``collected`` and ``collected_rate`` (per-minute) dicts.
+COLLECTED_KEYS = (*W.RESOURCE_NAMES, "total")
 #: A repeated identical unit order within this many game-ms is spam (eAPM).
 EAPM_REPEAT_MS = 2000
 #: One game "year" in game milliseconds (event texts count durations in years).
@@ -342,6 +344,8 @@ class Timeline:
         self._prev_frame_t = -1
         self._act_total: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
         self._act_window: dict[str, deque[tuple[int, dict[str, int], float]]] = defaultdict(deque)
+        #: player -> (keyframe time, ``collected`` then) over the last APM_WINDOW_MS
+        self._col_window: dict[str, deque[tuple[int, dict[str, int]]]] = defaultdict(deque)
         self._tc_idle: dict[str, float] = defaultdict(float)
         self._housed: dict[str, float] = defaultdict(float)
         self._housed_since: dict[str, int] = {}
@@ -822,6 +826,9 @@ class Timeline:
                 "pct_lm": _efficiency(lm),
             }
             s["efficiency_all"] = _efficiency_groups(acc)
+            rate = self._collected_rate(pid, t, s.get("collected"))
+            if rate is not None:
+                s["collected_rate"] = rate
             s["tc_idle_seconds"] = round(self._tc_idle[pid])
             s["housed_seconds"] = round(self._housed[pid])
             # The "Idle TC / Housed Time" dashboard column: both totals, seconds.
@@ -839,6 +846,31 @@ class Timeline:
                     if not log or log[-1][1] != W.ACT_GARRISONED:
                         log.append((t, W.ACT_GARRISONED))
         self._sample_pressure(t)
+
+    def _collected_rate(
+        self, pid: str, t: int, collected: dict[str, int] | None
+    ) -> dict[str, int] | None:
+        """Resources collected per game minute over the trailing :data:`APM_WINDOW_MS`.
+
+        The oldest sample kept is the last one at or before the window start, so the
+        window spans a full minute once the game has run one; before that the gain is
+        divided by the time so far. A step back in time starts the window again.
+        None when the view has no ``collected`` (older recordings).
+        """
+        if collected is None:
+            return None
+        window = self._col_window[pid]
+        if window and t < window[-1][0]:
+            window.clear()
+        now = {k: collected.get(k, 0) for k in COLLECTED_KEYS}
+        window.append((t, now))
+        while len(window) >= 2 and window[1][0] <= t - APM_WINDOW_MS:
+            window.popleft()
+        t0, base = window[0]
+        elapsed = t - t0
+        if elapsed <= 0:
+            return dict.fromkeys(COLLECTED_KEYS, 0)
+        return {k: round((now[k] - base[k]) * 60_000 / elapsed) for k in COLLECTED_KEYS}
 
     def _sample_pressure(self, t: int) -> None:
         """Sample only directly attacked workers, including those now garrisoned."""
@@ -953,11 +985,13 @@ class Timeline:
             ipid = int(pid)
             tasks = s["tasks"]
             lm = s.get("efficiency", {}).get("last_minute", {})
+            rate = s.get("collected_rate") or {}
             self.series[pid].append(
                 {
                     "t": v["time"],
                     **{f"res_{k}": s["resources"][k] for k in W.RESOURCE_NAMES},
-                    **{f"col_{k}": s["collected"][k] for k in (*W.RESOURCE_NAMES, "total")},
+                    **{f"col_{k}": s["collected"][k] for k in COLLECTED_KEYS},
+                    **{f"rate_{k}": rate.get(k, 0) for k in COLLECTED_KEYS},
                     "bonus_total": (s.get("resource_income") or {}).get("total", 0),
                     **{
                         f"bonus_{k}": (s.get("resource_income") or {}).get("bonus", {}).get(k, 0)
@@ -2325,6 +2359,7 @@ class Timeline:
                     "razings": s["razings"],
                     "buildings_lost": s["buildings_lost"],
                     "collected": s["collected"],
+                    "collected_rate": s.get("collected_rate"),
                     "resource_income": s.get("resource_income"),
                     "kill_value": s["kill_value"],
                     "relic_gold": s["relic_gold"],

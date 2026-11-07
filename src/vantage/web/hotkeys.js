@@ -29,7 +29,7 @@ export const KEYMAP = {
   toggleSlideoutGraph: ['Ctrl+Alt+P', 'Slide-out: graph'],
   toggleProduction: ['Alt+Shift+P', 'Production & composition'],
   toggleResourcesLeft: ['Alt+R', 'Resources left'],
-  togglePlayerResources: ['Ctrl+Alt+R', 'Team details (per-player rows)'],
+  togglePlayerResources: ['Ctrl+Alt+R', 'Team board: switch Teams / Players'],
   toggleOverview: ['Alt+Shift+R', 'Show/hide team overview'],
   cycleFogOfWar: ['Alt+F', 'Cycle fog mode (off / spy / standard)'],
   toggleFogOfWar: ['Alt+Shift+F', 'Fog on/off'],
@@ -103,6 +103,7 @@ export const KEYMAP = {
   showHighlights: ['Alt+Shift+A', 'Autocast: show all heroes'],
   showTutorial: ['F1', 'Tutorial'],
   togglePanelsMenu: ['Alt+V', 'Panels: show, hide and collapse HUD panels'],
+  arrangePanels: ['Alt+L', 'Arrange panels: drag any panel to move it'],
   toggleCrossThreadProfiling: ['Ctrl+Alt+Shift+P', 'Performance view (frame times, data fetches, memory)'],
 };
 

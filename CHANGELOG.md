@@ -8,6 +8,16 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Added
 
+- Team board: in team games and 1v1s the team overview compares the two sides stat by stat,
+  with bars and the leader's margin. It adds the collection rate (resources per minute over the
+  last game minute, a new `collected_rate` view field and `rate_*` series) and resources
+  collected over the whole game. A Players view gives a per-player table with team totals.
+- Panels can be moved as well as resized: drag the ⠿ button in a panel's hover toolbar, or
+  every panel in arrange mode (Alt+L). Panels snap to the window and to each other (Shift: no
+  snapping).
+- The Caster layout, now the default: the scoreboard across the top, the team overview bottom
+  left, the minimap and time controls bottom right. Classic stays in the Panels menu.
+
 - Experimental local replay playback from the development copy (`--native-replay`,
   `--native-profile`, `--native-profile-sha256`, `--native-cache-dir`, `--native-replay-root`,
   `--native-timeout`; `vantage-native.py`, `vantage-v32.py`). It converts a replay on this machine
@@ -33,6 +43,11 @@ All notable changes to Vantage are documented here. The format follows
   their artifacts (it used this package's folder, where their imports do not resolve).
 
 ### Changed
+
+- The two-team scoreboard shows a team score total per side (Settings → *Team score*: total,
+  average or off; replaces *Team average score*) with the score share and lead under the clock.
+  Team names are shortened, and players with a teammate's name are labelled by civilisation.
+  The balance bars moved into the team board. Only alliances across lobby teams are listed.
 
 - Brought up to date with the development copy of the viewer: the review workspace, player,
   combat, healing and resource reviews, review moments, panel resizing, camera follow and Autocast

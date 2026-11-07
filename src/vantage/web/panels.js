@@ -12,7 +12,7 @@ import {
 } from './games.js';
 import {
   S, settings, saveSettings, SPEEDS, fmtTime, fmtNum, fmtStock, esc, players, player, playerName, playerColor,
-  teams, teamIcon, plainTeamName, layoutKind, isTwoTeamLayout, sideTeams, teamName, unitInfo, entityStatsValid, legacyStatsFresh, unitIcon, techInfo, techIcon, emblem, playerStats,
+  teams, teamIcon, plainTeamName, teamMemberLabel, layoutKind, isTwoTeamLayout, sideTeams, teamName, unitInfo, entityStatsValid, legacyStatsFresh, unitIcon, techInfo, techIcon, emblem, playerStats,
   cyclePlayerColor, playerTextColor, AGE_NAMES, RES, tip, techInfoFor, techIconFor, ageName, ageIcon, civEra,
   skinOption, skinAsset,
   withAssetVersion,
@@ -23,6 +23,7 @@ import { setSelectionHtml } from './selection-panel.js';
 import { patchHtml, listDelta } from './dom.js';
 import { ownerIdentity, selectionHeader, militaryCard, wireReviewControls, reviewIcon, DASH_HISTORY, DASH_SELECTIONS } from './player-review.js';
 import { resourceTotalsHtml } from './resource-review.js';
+import { renderTeamBoard, toggleTeamBoardView } from './team-board.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -466,10 +467,60 @@ function playerTile(p, opts = {}) {
     <div><div class="sb-name"><span class="sb-pname" data-details="1">${captain}${esc(playerName(p.id, true))}</span> ${opts.king || ''}</div><div class="sb-sub">${esc(civName(p))}${elo}${opts.dots || ''}</div></div>${score}</div>`;
 }
 
-function centerBlock(speedLabel, sr, scoreLine = '') {
+function centerBlock(speedLabel, sr, scoreLine = '', extra = '') {
   const stage = settings.stageName ? ' · ' + esc(settings.stageName) : '';
   const seriesTxt = sr.text ? `<div class="sb-series">${esc(sr.text)}${scoreLine}</div>` : '';
-  return `<div class="sb-center">${seriesTxt}<div class="sb-clock">${fmtTime(S.t)}</div><div class="sb-speed">${esc(speedLabel)}${stage}</div></div>`;
+  return `<div class="sb-center">${seriesTxt}<div class="sb-clock">${fmtTime(S.t)}</div>${extra}<div class="sb-speed">${esc(speedLabel)}${stage}</div></div>`;
+}
+
+// -- two-team scoreboard: team label and score total per side, players as chips,
+// the score share and lead under the clock ------------------------------------------------
+
+const teamScoreOn = () => !settings.hideScore && settings.teamScore !== 'off';
+function teamScoreValue(team) {
+  const total = team.players.reduce((x, p) => x + playerScore(p.id), 0);
+  return settings.teamScore === 'average' ? total / Math.max(1, team.players.length) : total;
+}
+
+function teamChip(p, opts) {
+  const s = playerStats(p.id);
+  const e = settings.showElo ? eloOf(p) : null;
+  const tm = teamOf(p.id);
+  const solo = !tm || tm.players.length === 1;
+  const captain = !solo && settings.teamCaptains[p.team_key] === p.id ? `<span class="sb-captain" ${tip(t('Team captain'))}>★</span>` : '';
+  const flag = settings.playerImages[p.id] ? `<img class="flag" src="${esc(settings.playerImages[p.id])}" alt="">` : '';
+  const persp = S.fogMode !== 'off' && S.perspective === p.id ? ' persp' : '';
+  // A one-player side already shows the name in its heading: the chip shows the civ.
+  const label = solo ? civName(p) : teamMemberLabel(p.id);
+  const elo = e ? `<span class="sb-elo" ${tip(t('Elo'), t(ELO_TIP))}>${e.v}${e.kind ? ' ' + e.kind : ''}</span>` : '';
+  const score = settings.hideScore || solo ? '' : `<span class="sb-score" ${scoreTip(s, t('Score'))}>${fmtNum(playerScore(p.id))}</span>`;
+  const full = `${playerName(p.id, true)} · ${civName(p)}`;
+  return `<div class="sb-player sb-chip ${isDead(p.id) ? 'dead' : ''}${persp}" data-pid="${p.id}" style="--pc:${playerColor(p.id)}" ${tip(full, t('Click: change colour · click the name for team details (Ctrl+Alt+R) · hover the emblem for the tech tree'))}>
+    ${flag}<img class="emblem" src="${emblem(p.civ)}" alt=""><span class="sb-pname" data-details="1">${captain}${esc(label)}</span>${opts.king || ''}${elo}${score}</div>`;
+}
+
+function teamSide(team, right, sr, kingFor) {
+  const key = sideKey(team);
+  const seed = seedOf(key, team.key);
+  const ico = teamIcon(team);
+  const names = team.players.map((p) => playerName(p.id, true));
+  const twins = names.length > 1 && new Set(names).size === 1 && !settings.teamNames[team.key];
+  const avg = settings.teamScore === 'average';
+  const total = teamScoreOn() ? `<span class="sb-total" ${scoreTip(teamScoreStats(team), t(avg ? 'Team average score' : 'Team score'))}>${avg && team.players.length > 1 ? '⌀ ' : ''}${fmtNum(teamScoreValue(team))}</span>` : '';
+  const label = `<span class="sb-tname" data-details="1" ${tip(plainTeamName(team), t('Click: team details (Ctrl+Alt+R)'))}>${esc(teamName(team))}${twins ? `<small class="sb-count">×${names.length}</small>` : ''}</span>`;
+  const head = `<div class="sb-teamhead" style="--tc:${playerColor(team.players[0].id)}"><i class="sb-strip"></i>${ico ? `<img class="sb-team-ico" src="${esc(ico)}" alt="">` : ''}${label}${seed ? `<span class="sb-seed" ${tip(t('Seed'))}>${esc(seed)}</span>` : ''}${dotsHtml(sr, key)}${total}</div>`;
+  return `<div class="sb-side ${right ? 'right' : ''}">${head}<div class="team ${right ? 'right' : ''}">${team.players.map((p) => teamChip(p, { king: kingFor(p) })).join('')}</div></div>`;
+}
+
+function leadHtml(a, b) {
+  if (!teamScoreOn()) return '';
+  const va = teamScoreValue(a), vb = teamScoreValue(b), tot = va + vb;
+  if (!(tot > 0)) return '';
+  const d = va - vb, ahead = d > 0 ? a : b;
+  const lead = Math.round(d) === 0 ? `<div class="sb-lead even">${esc(t('even'))}</div>`
+    : `<div class="sb-lead" style="color:${playerTextColor(ahead.players[0].id)}" ${tip(t('Lead'), teamName(ahead))}>${d > 0 ? '<b class="arr">◀</b>' : ''}${fmtNum(Math.abs(d))}${d < 0 ? '<b class="arr">▶</b>' : ''}</div>`;
+  const share = (100 * va) / tot;
+  return `<div class="sb-share" ${tip(t('Score share'), `${Math.round(share)}% – ${Math.round(100 - share)}%`)}><i style="width:${share.toFixed(1)}%;background:${playerColor(a.players[0].id)}"></i><i style="background:${playerColor(b.players[0].id)}"></i></div>${lead}`;
 }
 
 export function renderScoreboard(speedLabel) {
@@ -491,18 +542,8 @@ export function renderScoreboard(speedLabel) {
     html = `${centerBlock(speedLabel, sr)}<div class="sb-empty">${esc(idle ? t('Nothing open') : t('Waiting for players…'))}</div>`;
   } else if (isTwoTeamLayout(kind)) {
     const [a, b] = sideTeams();
-    const side = (team, right) => {
-      const key = sideKey(team);
-      const seed = seedOf(key, team.key);
-      const avg = settings.teamAverageScore && !settings.hideScore && team.players.length > 1
-        ? team.players.reduce((x, p) => x + playerScore(p.id), 0) / team.players.length : null;
-      const teamIco = teamIcon(team);
-      const showHead = settings.teamNames[team.key] || seed || sr.n || avg != null || teamIco || teamName(team) !== plainTeamName(team);
-      const head = showHead ? `<div class="sb-teamhead">${teamIco ? `<img class="sb-team-ico" src="${esc(teamIco)}" alt="">` : ''}<span class="sb-tname" data-details="1" ${tip(t('Team'), t('Click: team details (Ctrl+Alt+R)'))}>${esc(teamName(team))}</span>${seed ? `<span class="sb-seed" ${tip(t('Seed'))}>${esc(seed)}</span>` : ''}${dotsHtml(sr, key)}${avg != null ? `<span class="sb-avg" ${scoreTip(teamScoreStats(team), t('Team average score'))}>⌀ ${fmtNum(avg)}</span>` : ''}</div>` : '';
-      return `<div class="sb-side ${right ? 'right' : ''}">${head}<div class="team ${right ? 'right' : ''}">${team.players.map((p) => playerTile(p, { king: kingFor(p) })).join('')}</div></div>`;
-    };
     const scoreLine = sr.n && !sr.override ? ` · <b>${sr.wins[sideKey(a)] || 0} – ${sr.wins[sideKey(b)] || 0}</b>` : '';
-    html = `${side(a, false)}${balance(a, b)}${centerBlock(speedLabel, sr, scoreLine)}${side(b, true)}${rbw4Timer()}`;
+    html = `${teamSide(a, false, sr, kingFor)}${centerBlock(speedLabel, sr, scoreLine, leadHtml(a, b))}${teamSide(b, true, sr, kingFor)}${rbw4Timer()}`;
   } else if (kind === 'community') {
     const ranked = rankedPlayers();
     html = `${centerBlock(speedLabel, sr)}<table class="sb-community">${ranked.map((p, i) => {
@@ -541,7 +582,14 @@ export function renderScoreboard(speedLabel) {
   }
   // An "Allies" header shows whenever the lobby's teams are not locked.
   const unlocked = teamsLocked() === false;
-  if (unlocked || (allies.length && !isTwoTeamLayout(kind))) {
+  if (isTwoTeamLayout(kind)) {
+    // Team games: alliances inside the lobby teams are the norm, so only the
+    // ones across teams are listed; unlocked teams get a one-line note.
+    const across = allies.filter(([x, y]) => player(x)?.team_key !== player(y)?.team_key);
+    const pair = ([x, y]) => `<span style="color:${playerTextColor(x)}">${esc(playerName(x))}</span>–<span style="color:${playerTextColor(y)}">${esc(playerName(y))}</span>`;
+    if (across.length) html += `<div class="sb-allies" ${tip(t('Allies across teams'), t('Teams are not locked: alliances can change during the game'))}><b class="sb-allies-h">${esc(t('Allies across teams'))}</b> ${across.map(pair).join(' · ')}</div>`;
+    else if (unlocked && teams().some((tm) => tm.players.length > 1)) html += `<div class="sb-allies sb-unlocked" ${tip(t('Teams are not locked'), allies.map(([x, y]) => `${playerName(x)} – ${playerName(y)}`).join('\n') || t('none'))}>${esc(t('Teams are not locked'))}</div>`;
+  } else if (unlocked || allies.length) {
     const pairs = allies.map(([a, b]) => `<span style="color:${playerTextColor(a)}">${esc(playerName(a))}</span>–<span style="color:${playerTextColor(b)}">${esc(playerName(b))}</span>`).join(' · ');
     html += `<div class="sb-allies" ${tip(t('Allies'), t('Teams are not locked: alliances can change during the game'))}>${unlocked ? `<b class="sb-allies-h">${esc(t('Allies'))}</b> ` : '🤝 '}${pairs || `<span class="hint">${esc(t('none'))}</span>`}</div>`;
   }
@@ -559,7 +607,7 @@ export function renderScoreboard(speedLabel) {
       if (king.dataset.king !== '') S.selection = new Set([+king.dataset.king]);
       return;
     }
-    if (ev.target.closest('[data-details]')) { S.teamDetails = !S.teamDetails; renderOverview(); return; }
+    if (ev.target.closest('[data-details]')) { toggleTeamBoardView(); renderOverview(); return; }
     if (d.dataset.pid) cyclePlayerColor(+d.dataset.pid);
   });
   delegate(el, 'mouseover', 'img.emblem', (im) => {
@@ -609,16 +657,6 @@ function powerTechsHtml(pid, s) {
 
 function teamSum(team, key) {
   return team.players.reduce((acc, p) => acc + ((playerStats(p.id) || {})[key] || 0), 0);
-}
-
-function balance(a, b) {
-  const bar = (label, key, detail) => {
-    const va = teamSum(a, key), vb = teamSum(b, key), tot = va + vb || 1;
-    const ca = playerColor(a.players[0].id), cb = playerColor(b.players[0].id);
-    return `<div class="ballabel" ${tip(t(label), t(detail))}><span>${fmtNum(va)}</span><span>${t(label)}</span><span>${fmtNum(vb)}</span></div>
-      <div class="balbar"><div style="width:${100 * va / tot}%;background:${ca}"></div><div style="width:${100 * vb / tot}%;background:${cb}"></div></div>`;
-  };
-  return `<div class="balance">${bar('Eco', 'eco_units', 'Economy units: villagers, fishing ships and trade units')}${bar('Military', 'military', 'Military unit count')}${settings.useMinimalUi ? '' : bar('Mil. value', 'army_value', 'Resources spent on the living army')}</div>`;
 }
 
 // -- victory status: King of the Hill, wonder / relic countdowns ---------------------------
@@ -688,23 +726,6 @@ function popCell(s) {
   return `<span class="pop ${housed ? 'housed' : ''}" ${tip(t('Population / cap'), t('Counts units in training, as the game does · flashes while housed'))}>${s.pop}/${s.pop_cap}${timer}</span>`;
 }
 
-function teamRow(team) {
-  const ss = team.players.map((p) => playerStats(p.id)).filter(Boolean);
-  if (!ss.length) return '';
-  const sum = (f) => ss.reduce((a, s) => a + f(s), 0);
-  const res = RES.map((r) => `<span class="${r}">${fmtNum(sum((s) => s.resources[r]))}<small>${sum((s) => (s.tasks || {})[r] || 0)}</small></span>`).join('');
-  const ages = team.players.map((p) => {
-    const s = playerStats(p.id);
-    if (!s) return '';
-    const researching = (s.research_active || []).some((a) => AGE_TECHS.includes(a.tech));
-    return `<img src="${AGE_ICON(s.age, p.id)}" alt="" class="${researching ? 'up' : ''}" ${tip(`${playerName(p.id)}: ${ageName(s.age, p.id)}`, researching ? t('advancing') : '')}>`;
-  }).join('');
-  const color = playerColor(team.players[0].id);
-  return `<div class="ov-row ov-team" data-team="${esc(team.key)}"><div class="ov-color" style="background:${color}"></div><div class="ov-ages">${ages}</div>
-    <div><div class="ov-name" data-details="1">${esc(teamName(team))}</div><div class="ov-civ">${t('{n} vil', { n: sum((s) => s.villagers) })} · ${t('{n} mil', { n: sum((s) => s.military) })} · ${t('{n} idle', { n: sum((s) => s.idle_villagers) })}</div></div>
-    <div class="ov-res">${res}<span>${sum((s) => s.pop)}/${sum((s) => s.pop_cap)}</span></div></div>`;
-}
-
 function ageShield(s, pid) {
   const ageTech = (s.research_active || []).find((a) => AGE_TECHS.includes(a.tech));
   const name = ageName(s.age, pid);
@@ -718,20 +739,29 @@ function ageShield(s, pid) {
   return `<div class="ov-shield">${cur}<div class="ov-next${antiq ? ' antiq' : ''}" ${tip(t('Advancing to: {age}', { age: ageName(s.age + 1, pid) }), `${pct}%${left}`)}><img src="${AGE_ICON(s.age + 1, pid)}" alt=""><i style="height:${pct}%"></i></div></div>`;
 }
 
+// panels.js helpers the team board (team-board.js) draws with.
+const boardCtx = {
+  setHtml: (el, html) => setHtml(el, html), delegate: (...a) => delegate(...a),
+  ageShield: (s, pid) => ageShield(s, pid),
+  ageRequirements: (s, pid) => ((s.research_active || []).some((a) => AGE_TECHS.includes(a.tech)) ? '' : ageRequirements(s, pid)),
+  isDead: (pid) => isDead(pid), fullName: (p) => `${playerName(p.id, true)} · ${civName(p)}`,
+  onAge: (pid) => goToBuilding(pid, TOWN_CENTERS), rerender: () => renderOverview(),
+};
+
 export function renderOverview() {
   const el = $('overview');
   ensureTrees();
-  delegate(el, 'click', '.ov-age, [data-details]', (d) => {
-    if (d.dataset.details) { S.teamDetails = !S.teamDetails; renderOverview(); return; }
-    goToBuilding(+d.dataset.pid, TOWN_CENTERS);
+  if (isTwoTeamLayout() && orderedTeams().length === 2) {
+    el.classList.add('team-board-host');
+    renderTeamBoard(el, orderedTeams(), boardCtx);
+    return;
+  }
+  el.classList.remove('team-board-host');
+  delegate(el, 'click', '.ov-age', (d) => {
+    if (!el.classList.contains('team-board-host')) goToBuilding(+d.dataset.pid, TOWN_CENTERS);
   });
   const rows = [];
   const resHead = `<div class="ov-res">${RES.map((r) => `<span><img src="/ui/resource_${r}.png" alt="${r}" ${tip(t(r), t('banked / workers'))}></span>`).join('')}<span><img src="/ui/pop.png" alt="pop" ${tip(t('Population / cap'))}></span></div>`;
-  if (isTwoTeamLayout() && players().length > 2 && !S.teamDetails) {
-    const head = `<div class="ov-row ov-head"><div></div><div></div><div class="hint" data-details="1" style="cursor:pointer">${t('Team totals — click a name or Ctrl+Alt+R for players')}</div>${resHead}</div>`;
-    setHtml(el, head + orderedTeams().map(teamRow).join(''));
-    return;
-  }
   for (const team of orderedTeams()) {
     for (const p of team.players) {
       const s = playerStats(p.id);
@@ -743,7 +773,7 @@ export function renderOverview() {
       rows.push(`<div class="ov-row${isDead(p.id) ? ' dead' : ''}" data-pid="${p.id}">
         <div class="ov-color" style="background:${playerColor(p.id)}"></div>
         ${ageShield(s, p.id)}
-        <div><div class="ov-name" data-details="1" ${tip(t('Click: team details (Ctrl+Alt+R)'))}>${esc(playerName(p.id))}</div>
+        <div><div class="ov-name">${esc(playerName(p.id))}</div>
           <div class="ov-civ"><span ${tip(t('Villagers'), t('Including garrisoned ones, as the game counts them'))}>${t('{n} vil', { n: s.villagers })}</span> · ${t('{n} mil', { n: s.military })} · <span ${tip(t('idle villagers'))} style="color:${s.idle_villagers ? 'var(--bad)' : 'inherit'}">${t('{n} idle', { n: s.idle_villagers })}</span></div>${reqs}</div>
         <div class="ov-res">${res}${popCell(s)}</div>
       </div>`);

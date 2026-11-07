@@ -30,7 +30,7 @@ The tables below give each control's label, the setting's name (the key you use 
 | Keep dead units in selection | `keepDeadInSelection` | on |
 | Autocast highlights: replay the most exciting moments automatically | `autocastHighlights` | on |
 
-Which panels are hidden or collapsed from the Panels menu is kept in `hiddenPanels` and `collapsedPanels`.
+Which panels are hidden or collapsed from the Panels menu is kept in `hiddenPanels` and `collapsedPanels`. The layout (Panels menu → Layout) is `hudLayout` (`caster`, the default, or `classic`). Moved and resized panels are kept in `panelSizes`, and the team board's view and folded sections in `teamBoardView` and `teamBoardCollapsed`.
 
 ### Scoreboard
 
@@ -41,7 +41,7 @@ Which panels are hidden or collapsed from the Panels menu is kept in `hiddenPane
 | Show ranked Elo in unranked games: use the random-map ladder rating when the lobby is unranked | `showRankedEloForUnrankedGames` | on |
 | Hide score | `hideScore` | off |
 | Hide score dots: the series dots next to team names | `hideScoreDots` | off |
-| Team average score | `teamAverageScore` | on |
+| Team score: each team's score on the scoreboard, with the lead between them | `teamScore` (`sum`, `average`, `off`) | `sum` |
 
 ### Look
 

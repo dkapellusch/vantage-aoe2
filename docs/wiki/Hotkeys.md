@@ -73,7 +73,7 @@ The **Name** column is the action's name, which you use when rebinding keys as J
 | <kbd>Ctrl+Alt+P</kbd> | Slide-out: graph | `toggleSlideoutGraph` |
 | <kbd>Alt+Shift+P</kbd> | Production & composition | `toggleProduction` |
 | <kbd>Alt+R</kbd> | Resources left | `toggleResourcesLeft` |
-| <kbd>Ctrl+Alt+R</kbd> | Team details (per-player rows) | `togglePlayerResources` |
+| <kbd>Ctrl+Alt+R</kbd> | Team board: switch Teams / Players | `togglePlayerResources` |
 | <kbd>Alt+Shift+R</kbd> | Show/hide team overview | `toggleOverview` |
 | <kbd>PageUp</kbd> | Events: page up | `notificationsPageUp` |
 | <kbd>PageDown</kbd> | Events: page down | `notificationsPageDown` |
@@ -85,6 +85,7 @@ The **Name** column is the action's name, which you use when rebinding keys as J
 | <kbd>Escape</kbd> | Close the top layer, or open the menu | `escape` |
 | <kbd>F1</kbd> | Tutorial | `showTutorial` |
 | <kbd>Alt+V</kbd> | Panels: show, hide and collapse HUD panels | `togglePanelsMenu` |
+| <kbd>Alt+L</kbd> | Arrange panels: drag any panel to move it | `arrangePanels` |
 
 ### Display
 

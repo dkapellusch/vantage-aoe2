@@ -7,6 +7,7 @@ import {
 import * as world from './world.js';
 import { loadMoments, toggleReviewTimeline, reviewStatus } from './review-workspace.js';
 import * as panels from './panels.js';
+import { toggleTeamBoardView } from './team-board.js';
 import * as overlays from './overlays.js';
 import { actionFor, rebuild as rebuildKeys, binding, describeConflicts } from './hotkeys.js';
 import { t, setLanguage, detectLanguage, language, translateStatic, keyLabel } from './i18n.js';
@@ -723,17 +724,41 @@ function placeDashboard() {
   }
   const d = $('dashboard'), m = $('minimap-wrap'), eventsPanel = $('events');
   if (eventsPanel) eventsPanel.style.maxHeight = '';
-  if (!d || d.classList.contains('hidden')) return;
-  const w = d.offsetWidth, vw = window.innerWidth;
-  // Clear of the minimap, and of the time bar above it when the dashboard is tall
-  // enough to reach its height (the time bar widens with a 1:00:00 clock).
-  let clear = m && !m.classList.contains('hidden') ? m.getBoundingClientRect().right + 8 : 8;
-  const tb = $('timebar');
-  if (tb && !tb.classList.contains('hidden')) {
-    const r = tb.getBoundingClientRect();
-    if (r.bottom > window.innerHeight - 8 - d.offsetHeight) clear = Math.max(clear, r.right + 8);
+  // Caster: the selection panel sits left of the minimap (hud-layout.css --mm-gap).
+  if (m) {
+    const gap = m.classList.contains('hidden') ? '8px' : `${Math.round(window.innerWidth - m.getBoundingClientRect().left + 8)}px`;
+    if (document.documentElement.style.getPropertyValue('--mm-gap') !== gap) document.documentElement.style.setProperty('--mm-gap', gap);
   }
-  const left = Math.max(clear, Math.round((vw - w) / 2));
+  if (!d || d.classList.contains('hidden')) return;
+  const vw = window.innerWidth;
+  const shown = (el) => el && !el.classList.contains('hidden') && !el.classList.contains('panel-off') && el.getClientRects().length;
+  const tb = $('timebar');
+  let left;
+  if (document.body.dataset.hudLayout === 'caster') {
+    // Between the panels stacked bottom left and the minimap bottom right.
+    const band = window.innerHeight - 8 - d.offsetHeight;
+    let lo = 8, hi = vw - 8;
+    for (const el of document.querySelectorAll('#leftcol > .panel, #leftcol2 > .panel')) {
+      if (!shown(el) || el.classList.contains('hud-custom-size')) continue;
+      const r = el.getBoundingClientRect();
+      if (r.bottom > band) lo = Math.max(lo, r.right + 8);
+    }
+    if (shown(m) && !m.classList.contains('hud-custom-size')) hi = Math.min(hi, m.getBoundingClientRect().left - 8);
+    if (shown(tb) && !tb.classList.contains('hud-custom-size') && tb.getBoundingClientRect().bottom > band) hi = Math.min(hi, tb.getBoundingClientRect().left - 8);
+    const maxW = `${Math.max(240, Math.round(hi - lo))}px`;
+    if (d.style.maxWidth !== maxW) d.style.maxWidth = maxW;
+    left = Math.round(Math.min(Math.max((vw - d.offsetWidth) / 2, lo), Math.max(lo, hi - d.offsetWidth)));
+  } else {
+    if (d.style.maxWidth) d.style.maxWidth = '';
+    // Clear of the minimap, and of the time bar above it when the dashboard is tall
+    // enough to reach its height (the time bar widens with a 1:00:00 clock).
+    let clear = shown(m) ? m.getBoundingClientRect().right + 8 : 8;
+    if (shown(tb)) {
+      const r = tb.getBoundingClientRect();
+      if (r.bottom > window.innerHeight - 8 - d.offsetHeight) clear = Math.max(clear, r.right + 8);
+    }
+    left = Math.max(clear, Math.round((vw - d.offsetWidth) / 2));
+  }
   const want = `${left}px`;
   if (d.style.left !== want) { d.style.left = want; d.style.transform = 'none'; }
   // A wide page on a narrow window reaches under the unit panel (bottom right):
@@ -761,11 +786,17 @@ function layoutLeftColumn() {
   document.documentElement.style.setProperty('--sb-bottom', `${!sb.classList.contains('hidden') && s.height > 0 ? Math.round(s.bottom) : 8}px`);
   const colRight = col.getBoundingClientRect().left + Math.max(col.scrollWidth, 340);
   const overlaps = !sb.classList.contains('hidden') && s.width > 0 && s.left < colRight;
-  const top = overlaps ? Math.max(64, Math.round(s.bottom + 6)) : 64;
-  const bottom = !tb.classList.contains('hidden') && b.height > 0 ? b.top - 6 : window.innerHeight - 8;
+  // Caster: the column fills the height under the scoreboard and its panels stack
+  // from the bottom (hud-layout.css); the time controls are bottom right.
+  const caster = document.body.dataset.hudLayout === 'caster';
+  const sbShown = !sb.classList.contains('hidden') && s.height > 0;
+  const top = caster ? Math.round((sbShown ? s.bottom : 2) + 6) : overlaps ? Math.max(64, Math.round(s.bottom + 6)) : 64;
+  const tbLeft = !tb.classList.contains('hidden') && b.height > 0 && b.left < colRight;
+  const bottom = (caster ? tbLeft : !tb.classList.contains('hidden') && b.height > 0) ? b.top - 6 : window.innerHeight - 8;
   const maxH = `${Math.max(120, Math.round(bottom - top))}px`;
   col.style.top = `${top}px`;
   col.style.maxHeight = maxH;
+  col.style.height = caster ? maxH : '';
   // Panels that do not fit under the overview (a short window) move to a second
   // column beside it instead of hiding below a scroll fold.
   const col2 = $('leftcol2');
@@ -788,6 +819,7 @@ function layoutLeftColumn() {
   document.documentElement.style.setProperty('--left-panels', `${Math.round(lastRight + 6)}px`);
   col2.style.top = `${top}px`;
   col2.style.maxHeight = maxH;
+  col2.style.height = caster && col2.children.length ? maxH : '';
   col2.style.left = `${left}px`;
   // Still no room (a small window with every panel on): a panel that would run
   // under the events panel or off the bottom is left out, with a note once,
@@ -1785,7 +1817,7 @@ const ACTIONS = {
   toggleSlideoutGraph: () => { S.slideout = S.slideout === 'graph' ? null : 'graph'; },
   toggleProduction: () => { settings.showProduction = !settings.showProduction; saveSettings(); },
   toggleResourcesLeft: () => { showResLeft = !showResLeft; },
-  togglePlayerResources: () => { S.teamDetails = !S.teamDetails; },
+  togglePlayerResources: () => { toggleTeamBoardView(); },
   cycleFogOfWar: cycleFog,
   toggleFogOfWar: () => { S.fogMode = S.fogMode === 'off' ? 'standard' : 'off'; liveControl('fog', S.fogMode !== 'off'); },
   toggleCombinedFogOfWar: () => { S.combinedFog = !S.combinedFog; toast(t(S.combinedFog ? 'Combined team fog' : 'Single-player fog')); },
@@ -1828,6 +1860,7 @@ const ACTIONS = {
   toggleCursorClip: () => world.toggleCursorLock(),
   toggleOverview: () => layout.setVisible('overview', !layout.isVisible('overview')),
   togglePanelsMenu: () => layout.togglePanelsMenu(),
+  arrangePanels: () => layout.toggleArrange(),
   toggleAutocast: () => { autocast.on = !autocast.on; if (!autocast.on) S.highlight.list = false; else { autocast.selection.resume(S.selection); autocast.nextMove = 0; } toast(t(autocast.on ? 'Autocast on' : 'Autocast off')); },
   showHighlights: () => { S.highlight.list = !S.highlight.list; },
   showTutorial: () => showTutorial(0),
@@ -2072,7 +2105,8 @@ async function boot() {
     && !(desc.mode === 'live' && desc.certs && (desc.certs.missing || []).length)) showTutorial(0);
   subscribe();
   hudTimer = setInterval(() => { if (!document.hidden) renderHud(); }, 250);
-  for (const id of ['scoreboard', 'timebar', 'leftcol']) if ($(id)) leftColObserver.observe($(id));
+  // The panels too: a caster column has a fixed height, so only they change size.
+  for (const id of ['scoreboard', 'timebar', 'leftcol', 'overview', 'techs', 'production']) if ($(id)) leftColObserver.observe($(id));
   window.addEventListener('resize', layoutLeftColumn);
   requestAnimationFrame(tick);
 }

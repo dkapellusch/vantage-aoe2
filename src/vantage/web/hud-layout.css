@@ -1,0 +1,39 @@
+/* Default panel placement (settings.hudLayout, layout.js). Caster: the scoreboard
+   spans the top, the events sit under it on the right, the team board and the
+   left column stack up from the bottom left, the minimap and the time controls
+   sit bottom right with the selection panel beside them, and the dashboard fills
+   the space between (app.js placeDashboard). Classic keeps style.css as is.
+   Panels the user moved or resized (.hud-custom-size) override all of this. */
+body[data-hud-layout="caster"] #scoreboard { left: 8px; right: 8px; transform: none; max-width: none; }
+body[data-hud-layout="caster"] #events { top: calc(var(--sb-bottom, 58px) + 6px); }
+body[data-hud-layout="caster"] #minimap-wrap { left: auto; right: 8px; }
+body[data-hud-layout="caster"] #timebar { left: auto; right: 8px; }
+body[data-hud-layout="caster"] #unitpanel { right: var(--mm-gap, 326px); }
+body[data-hud-layout="caster"] #dashboard { min-width: 0; }
+/* The left column fills the height below the scoreboard: the team board is
+   pinned to its bottom, the other panels (techs, production) stay at its top.
+   An auto margin, unlike justify-content, keeps an overflowing column scrollable. */
+body[data-hud-layout="caster"] #leftcol > :is(#overview, .panel-size-slot[data-for="overview"]) { order: 1; margin-top: auto; }
+
+/* Moved but never resized: keeps its natural size. */
+.hud-custom-size.hud-auto-size { width: auto !important; height: auto !important;
+  max-height: calc(100vh - var(--panel-top) - 8px) !important; }
+
+/* Snap guides while moving or resizing a panel (panel-resize.js). */
+#panel-guides { position: fixed; inset: 0; pointer-events: none; z-index: 5001; }
+#panel-guides i { position: fixed; background: var(--accent); opacity: .85; }
+#panel-guides i.x { top: 0; bottom: 0; width: 1px; }
+#panel-guides i.y { left: 0; right: 0; height: 1px; }
+body.hud-moving, body.hud-moving * { cursor: grabbing !important; user-select: none; }
+#panel-tools [data-pt="move"] { cursor: grab; touch-action: none; }
+
+/* Arrange mode (Alt+L): every panel is a drag handle. */
+body.hud-arrange #hud .panel[id]:not(.panel-off) { outline: 1px dashed rgba(217,180,90,.6); outline-offset: 2px; cursor: grab; }
+body.hud-arrange #hud .panel[id] > * { pointer-events: none; }
+#arrange-banner { position: fixed; left: 50%; top: calc(var(--sb-bottom, 58px) + 8px); transform: translateX(-50%); z-index: 26;
+  display: flex; gap: 10px; align-items: center; padding: 5px 8px 5px 12px; font-size: 12px; background: var(--panel-solid); border: 1px solid var(--accent); }
+#arrange-banner b { color: var(--accent); }
+#arrange-banner span { color: var(--muted); }
+#panels-menu .pm-layouts { align-items: center; border-top: 0; margin-top: 0; }
+#panels-menu .pm-layouts .hint { flex: none; }
+#panels-menu .pm-presets button.on { color: var(--accent); border-color: var(--accent); }

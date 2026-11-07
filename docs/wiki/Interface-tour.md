@@ -6,13 +6,24 @@ Vantage's screen is the map with HUD panels around it. Every panel can be hidden
 
 ## Layout at a glance
 
+The default **Caster** layout:
+
 | Where | Panel |
 |---|---|
-| Top | Scoreboard and team overview |
-| Left | Techs, production and composition, slide-outs |
-| Bottom | Dashboard |
-| Right | Event log and the selection (unit) panel |
-| Bottom right | Minimap, with the time controls above it and buttons beside it |
+| Top | Scoreboard, across the full width |
+| Top left | Techs, production and composition |
+| Bottom left | Team overview |
+| Bottom centre | Dashboard |
+| Top right | Event log |
+| Bottom right | Minimap with the time controls above it, the selection (unit) panel beside it |
+
+**Classic** (Panels menu → Layout) is the earlier arrangement: the team overview top left and the minimap bottom left.
+
+## Moving and resizing panels
+
+Hover a panel and drag the ⠿ button in its toolbar to move it, or drag one of its corners to resize it. Panels snap to the window edges and to the edges of other panels, or 6 px beside them; hold <kbd>Shift</kbd> while dragging to place a panel freely. <kbd>Esc</kbd> during a drag puts the panel back. With the ⠿ button focused, the arrow keys move a panel 10 px at a time (1 px with <kbd>Shift</kbd>).
+
+**Arrange panels** (<kbd>Alt+L</kbd>, or Panels menu → **Arrange**) outlines every panel so you can drag any of them by its body; <kbd>Esc</kbd> or **Done** ends it. Double-click a panel's ⠿ button to put it back in its place, or use **Reset layout** in the Panels menu for every panel.
 
 ## Panels menu
 
@@ -21,13 +32,20 @@ The ▣ button by the minimap (or <kbd>Alt+V</kbd>, or <kbd>Esc</kbd> → **Pane
 - **Clean**: scoreboard, selection, time controls and minimap.
 - **Everything**: every panel, none collapsed.
 
-Each panel also has a small toolbar that appears when you hover it: one button collapses the panel to its top strip, the other hides it. When you hide a panel, Vantage tells you how to bring it back.
+Each panel also has a small toolbar that appears when you hover it: ⠿ moves the panel, one button collapses it to its top strip, the other hides it. When you hide a panel, Vantage tells you how to bring it back.
 
 ## Scoreboard and team overview
 
 The **scoreboard** shows team and player names, the score, and the series score when a series is set up (see [Casting and OBS](Casting-and-OBS.md)). Hover the score for its parts: military, economy, technology and society.
 
-The **team overview** (<kbd>Alt+Shift+R</kbd>) has a row per player:
+In team games and 1v1s, each side shows its team name and team score (Settings → Interface → *Team score*: total, average or off), with its players beneath as chips: civilisation emblem, name and score. Under the clock, a bar shows each side's share of the score, and the lead says by how much the leader is ahead. Team names are shortened: copies of one AI are named once with a count ("v0d10f ×2"), words both teams share are dropped ("Immortal v0d10f" vs "Immortal v0d9" reads "v0d10f" vs "v0d9"), and a team of different players shows two names and a count. Players who share a name with a teammate are labelled by civilisation. Hover a name for the full one. Alliances are listed only when they cross the lobby teams.
+
+In team games and 1v1s the **team overview** (<kbd>Alt+Shift+R</kbd>) is a team board with two views, switched in its header or with <kbd>Ctrl+Alt+R</kbd>:
+
+- **Teams**: one row per stat, comparing the two sides. Each side has its value and a bar, and the difference between them is in the leader's colour. Rows cover age, villagers, military, army value, idle villagers, resources banked with their workers, the **collection rate** (resources collected per minute over the last game minute), **resources collected** over the whole game, population, kills and losses. Fewer idle villagers and fewer losses count as ahead. Click a section heading to fold it.
+- **Players**: a table with a row per player, grouped by team with a Σ total row. The best value in each column is marked, and five or more idle villagers is red. Under each player is the progress to the next age.
+
+In free-for-all games the team overview has a row per player:
 
 - the civilisation emblem. Hover it to see that civilisation's **tech tree**, with what the player has researched.
 - the player name. Click it to cycle the player's colour.
@@ -36,7 +54,7 @@ The **team overview** (<kbd>Alt+Shift+R</kbd>) has a row per player:
 - population and cap. The population flashes while the player is housed.
 - the current age and progress to the next one: food and gold against the age's cost, plus the two buildings it needs. Click the age icon to jump to the player's town centre.
 
-Team games also get **balance bars** comparing economy units, military units and army value. **Team details** (<kbd>Ctrl+Alt+R</kbd>) adds per-player rows. **Flip sides** (<kbd>Alt+S</kbd>) swaps the left and right teams and is remembered for each game.
+**Flip sides** (<kbd>Alt+S</kbd>) swaps the left and right teams and is remembered for each game.
 
 Special victory conditions get their own status: kings in regicide, the monument in King of the Hill, and wonder and relic countdowns. In free-for-all games, players who are out are marked.
 

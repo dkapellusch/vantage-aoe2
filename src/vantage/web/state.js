@@ -2,6 +2,7 @@
 
 import { t } from './i18n.js';
 import { ViewCache, mergeSeries, seriesEnd } from './playback.js';
+import { compactTeamLabels, memberLabel } from './team-names.js';
 
 export const S = {
   upcoming: [],   // read-ahead views (fast playback): their strips are requested early
@@ -70,7 +71,11 @@ export const DEFAULT_SETTINGS = {
   zoomSpeed: 1,
   showElo: true,
   hideScore: false,
-  teamAverageScore: true,
+  teamScore: 'sum',            // two-team scoreboard: sum | average | off
+  hudLayout: 'caster',         // default panel placement: caster (scoreboard bar, board bottom left) | classic
+  teamBoardView: 'teams',      // team overview in team games: teams (comparison) | players
+  teamBoardCollapsed: [],      // team board sections folded to their heading
+  panelOrder: [],              // moved panels, last-dragged on top (panel-resize.js)
   rangeCircleModeBuildings: 'always', // always | selected | none
   keepDeadInSelection: true,
   showUnitPanelWhenNothingSelected: false,
@@ -155,7 +160,7 @@ export const DEFAULT_SETTINGS = {
   autocastHighlights: true,
   toggleHTMLServer: false,      // skin-debugging HTTP server (live reload + /stats-dump)
   enabledSkins: [],             // several user skins merged (names); [] = default look
-  settingsVersion: 8,
+  settingsVersion: 9,
 };
 
 // One-off migrations for settings saved by older builds. Runs on every load
@@ -233,6 +238,14 @@ export function migrateSettings(s) {
     // used only as a game needs it. The old default moves up; a chosen value stays.
     if (s.atlasMemoryNormal === 768) s.atlasMemoryNormal = 1536;
     s.settingsVersion = 8;
+  }
+  if (v < 9) {
+    // The team average becomes a team score that is summed by default, and the
+    // caster layout (scoreboard bar on top, team board bottom left) the default.
+    s.teamScore = s.teamAverageScore === false ? 'off' : 'sum';
+    delete s.teamAverageScore;
+    s.hudLayout = 'caster';
+    s.settingsVersion = 9;
   }
   // "Wonders & relics" folded into the King category.
   if (Array.isArray(s.eventFilterOut) && s.eventFilterOut.includes('victory')) {
@@ -621,10 +634,28 @@ export function customPlayerInfo(refName) {
 export function plainTeamName(team) {
   return settings.teamNames[team.key] || team.players.map((p) => playerName(p.id)).join(' + ');
 }
+// The displayed name: a skin short name, a custom team name, else the compact
+// label (team-names.js). plainTeamName stays the skin lookup key.
 export function teamName(team) {
   const plain = plainTeamName(team);
   const info = customPlayerInfo(plain);
-  return (info && info.shortName) || plain;
+  if (info && info.shortName) return info.shortName;
+  if (settings.teamNames[team.key]) return settings.teamNames[team.key];
+  const ts = teams();
+  const i = ts.findIndex((x) => x.key === team.key);
+  if (i < 0) return plain;
+  return compactTeamLabels(ts.map((x) => x.players.map((p) => playerName(p.id, true))), (n) => t('Team {n}', { n: n + 1 }))[i];
+}
+/** The full team name for tooltips when the shown one is shortened. */
+export function teamFullName(team) { return plainTeamName(team); }
+/** A player's label inside its team: its name, or its civ when teammates share the name. */
+export function teamMemberLabel(pid) {
+  if (settings.playerNames[pid]) return settings.playerNames[pid];
+  const p = player(pid);
+  const team = p ? teams().find((x) => x.key === p.team_key) : null;
+  if (!p || !team) return playerName(pid);
+  const m = (q) => ({ id: q.id, name: playerName(q.id, true), civ: q.civ_name || S.catalog.civs?.[q.civ] || '' });
+  return memberLabel(m(p), team.players.map(m));
 }
 export function teamIcon(team) {
   const info = customPlayerInfo(plainTeamName(team));

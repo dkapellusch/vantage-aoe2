@@ -1152,3 +1152,79 @@ def test_a_track_stored_while_its_buffer_is_read_is_served_stored() -> None:
     assert json.loads(_track_json(stored, 1000, lambda: 1000, buffer)) == full
     assert json.loads(_track_json({}, 1000, lambda: 1000, lambda: full)) == full
     assert _track_json({}, 1000, lambda: 2000, lambda: full) == b"[]"
+
+
+# -- resources collected per minute ------------------------------------------------
+
+
+def _gather(tl: Timeline, t: int, food: float, wood: float = 0.0) -> dict[str, Any]:
+    """Feed player 1's collected totals at ``t``; return the view's ``collected_rate``."""
+    _feed(tl, t, set_attr(1, "foodTotal", food), set_attr(1, "woodTotal", wood))
+    v = tl.view_at(None)
+    assert v is not None and v["time"] == t
+    rate: dict[str, Any] = v["players"]["1"]["collected_rate"]
+    return rate
+
+
+def test_collected_rate_of_steady_gathering_is_per_minute() -> None:
+    tl = _start()
+    v = tl.view_at(0)
+    assert v is not None
+    assert v["players"]["1"]["collected_rate"] == dict.fromkeys(
+        ("food", "wood", "stone", "gold", "total"), 0
+    )
+    for i in range(1, 13):  # 10 food and 5 wood a second for two minutes
+        rate = _gather(tl, i * 10_000, food=100.0 * i, wood=50.0 * i)
+        assert rate == {"food": 600, "wood": 300, "stone": 0, "gold": 0, "total": 900}
+
+
+def test_collected_rate_before_a_full_minute_is_divided_by_the_time_so_far() -> None:
+    tl = _start()
+    # 100 food in the first 10 s is 600 a minute, not the 100 gathered so far.
+    assert _gather(tl, 10_000, food=100.0)["food"] == 600
+    assert _gather(tl, 30_000, food=200.0)["food"] == 400
+
+
+def test_collected_rate_counts_only_the_last_minute() -> None:
+    tl = _start()
+    food = 0.0
+    for t in range(10_000, 120_001, 10_000):
+        food += 100.0 if t <= 60_000 else 300.0  # 10 food a second, then 30
+        rate = _gather(tl, t, food=food)
+        if t == 90_000:
+            assert rate["food"] == 1200  # half a minute at each speed
+    # The first minute's slower gathering has left the window (the whole-game
+    # average would be 1200).
+    assert rate["food"] == 1800 and rate["total"] == 1800
+    assert [w[0] for w in tl._col_window["1"]] == list(range(60_000, 120_001, 10_000))
+
+
+def test_collected_rate_restarts_after_a_step_back_in_time() -> None:
+    tl = Timeline(GameData(None))
+    col = dict.fromkeys(("food", "wood", "stone", "gold", "total"), 0)
+    assert tl._collected_rate("1", 0, col) == col
+    assert tl._collected_rate("1", 30_000, {**col, "food": 300, "total": 300})["food"] == 600
+    # Rewound to 10 s: the later samples no longer describe the past.
+    assert tl._collected_rate("1", 10_000, {**col, "food": 100, "total": 100}) == col
+    assert tl._collected_rate("1", 20_000, {**col, "food": 150, "total": 150})["food"] == 300
+    assert tl._collected_rate("1", 30_000, None) is None
+
+
+def test_collected_rate_is_absent_without_collected_totals() -> None:
+    tl = Timeline(GameData(None))
+    v: dict[str, Any] = {"time": 1000, "players": {"1": {}}, "entities": []}
+    tl._activity(v)
+    assert "efficiency" in v["players"]["1"] and "collected_rate" not in v["players"]["1"]
+
+
+def test_series_rows_and_summary_carry_the_collected_rate() -> None:
+    tl = _start()
+    for i in range(1, 4):
+        _gather(tl, i * 10_000, food=100.0 * i, wood=50.0 * i)
+    rows = tl.series["1"]
+    assert all(f"rate_{k}" in r for r in rows for k in ("food", "wood", "stone", "gold", "total"))
+    last = rows[-1]
+    assert last["t"] == 30_000
+    assert (last["rate_food"], last["rate_wood"], last["rate_total"]) == (600, 300, 900)
+    assert rows[0]["rate_total"] == 0
+    assert tl.summary()["1"]["collected_rate"]["total"] == 900
