@@ -114,6 +114,18 @@ def profile_repository(profile: dict[Any, Any]) -> Path:
     return Path(profile["artifact_root"]).resolve().parents[2]
 
 
+def research_pythonpath(profile: dict[Any, Any]) -> Path:
+    """Where the research scripts import the development copy's modules from.
+
+    A profile can name a frozen tree of the exact sources it pins
+    ("research_root", written by tools/native_profile_repin.py --freeze-*):
+    the development copy's own forge.spectate is now an alias of this package,
+    so the pinned code lives there. Without one it is the profile's repository.
+    """
+    root = profile.get("research_root")
+    return Path(root) if root else profile_repository(profile)
+
+
 def headless_environment(profile: dict[Any, Any]) -> dict[Any, Any]:
     result = dict(os.environ)
     for key in ("DISPLAY", "WAYLAND_DISPLAY", "PYTHONHOME", "WINELOADER", "WINESERVER"):
@@ -126,7 +138,7 @@ def headless_environment(profile: dict[Any, Any]) -> dict[Any, Any]:
             "winemenubuilder.exe=d;mscoree,mshtml=d;winex11.drv,winemac.drv,winewayland.drv=d"
         ),
         PYTHONDONTWRITEBYTECODE="1",
-        PYTHONPATH=str(profile_repository(profile)),
+        PYTHONPATH=str(research_pythonpath(profile)),
     )
     return result
 

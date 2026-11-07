@@ -14,12 +14,21 @@ ARTIFACTS = ROOT / "artifacts/game-internals/2026-10-18-world-envelope"
 LAUNCHER = (
     ROOT / "src/vantage/native_isolated_launch.py"
 )  # this package's port of the research launcher
-DEFAULT_PROFILE = ARTIFACTS / "native-local-conversion-current-encoder-v1/experimental-profile.json"
-DEFAULT_SHA = "37badd8cb33026301bdd3378161fddbf76e48ad655df61132d9c122290fc39f1"
-LOCALIZED_PROFILE = (
-    ARTIFACTS / "native-current-localization-candidate-v1/master-storage-profile.proposed.json"
+# Re-pinned 2026-11-07 (tools/native_profile_repin.py): Wine was upgraded, and the development
+# copy's forge/spectate became an alias of this package, so the exact sources each profile was
+# verified with are restored into its repinned-2026-11-07/frozen-sources (research_root).
+# The originals are kept as evidence.
+DEFAULT_PROFILE = (
+    ARTIFACTS
+    / "native-local-conversion-current-encoder-v1/repinned-2026-11-07/experimental-profile.json"
 )
-LOCALIZED_SHA = "0ec3d9fccd4bffe0d52a6783fe3ecf06d495891b6777b2d82ad86f51b505edc1"
+DEFAULT_SHA = "7ff27c0446d9f919d2671fc99eb6c382f1d36f689c3d71b6b392c75944870a93"
+LOCALIZED_PROFILE = (
+    ARTIFACTS
+    / "native-current-localization-candidate-v1/repinned-2026-11-07"
+    / "master-storage-profile.proposed.json"
+)
+LOCALIZED_SHA = "a1e5199cbb7babbb44a08ba82b56ec5e8d2301d3f0cc4ff02df555871edbe737"
 BUILTIN_PROFILES = {
     "default": (DEFAULT_PROFILE, DEFAULT_SHA),
     "localized": (LOCALIZED_PROFILE, LOCALIZED_SHA),

@@ -354,7 +354,9 @@ class V32Encoder:
         env = {
             "PATH": "/usr/bin:/bin",
             "LANG": "C.UTF-8",
-            "PYTHONPATH": str(root),
+            # A frozen tree of the exact pinned sources, when the configuration names
+            # one (native_conversion.research_pythonpath); the working folder stays.
+            "PYTHONPATH": str(config.get("research_root") or root),
             "PYTHONDONTWRITEBYTECODE": "1",
         }
         start, reason = time.monotonic(), None

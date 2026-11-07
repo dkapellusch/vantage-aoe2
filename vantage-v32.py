@@ -14,10 +14,16 @@ PROFILES = (
     / "artifacts/game-internals/2026-10-18-world-envelope"
     / "native-v32-file-diagnostics-stderr-v1"
 )
+# The runtime and encoder profiles were re-pinned on 2026-11-07 (tools/native_profile_repin.py)
+# after a system upgrade replaced the pinned Wine, bwrap and Xvfb. The encoder runs the exact
+# development-copy sources it was verified with, restored into repinned-2026-11-07/frozen-sources
+# (that copy's forge.spectate is now an alias of this package). The originals beside them are
+# kept as evidence; the source profile still holds as pinned.
+REPINNED = PROFILES / "repinned-2026-11-07"
 SOURCE_SHA = "8304b4c3823e94eb935fcbb68e8345e22af5be9c5619728df3bae23a02a959c2"
-RUNTIME_SHA = "b9227cb713737fe8dea8a3c4d5776baf051b56f55281eea42f96774b4b477d31"
-ENCODER_SHA = "0c30e4d16c400b3d38d58377c2b1dc443340ee5bc51c38cb2d890ccb5c7f1946"
-FAST_ENCODER_SHA = "5b08fd2ee6a91b9eed1987fd3ba8b02ad8ec9d4d52d716204f5b2e8b57465e20"
+RUNTIME_SHA = "f025eb4a0982fc1a06127730c17142976db28b715f2a753c3bb0f1d5c76044bd"
+ENCODER_SHA = "8b4d1d2cabf3181f11b85bd5f69101d7d4ad575a37c631021dac7d5138ba9818"
+FAST_ENCODER_SHA = "771664e68dbcb22c9f389924600e7368e1da954b054612870dd1ce68824c7e3d"
 
 
 def main() -> None:
@@ -79,11 +85,11 @@ def main() -> None:
         "--source-profile-sha256",
         SOURCE_SHA,
         "--runtime-profile",
-        str(PROFILES / "runtime-profile.json"),
+        str(REPINNED / "runtime-profile.json"),
         "--runtime-profile-sha256",
         RUNTIME_SHA,
         "--encoder-config",
-        str(PROFILES / encoder),
+        str(REPINNED / encoder),
         "--encoder-config-sha256",
         encoder_sha,
         "--cache-dir",

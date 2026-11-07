@@ -123,5 +123,5 @@ def test_fast_encoder_requires_explicit_opt_in(tmp_path):
         entry.main()
     argv = execute.call_args.args[1]
     selected = argv[argv.index("--encoder-config") + 1]
-    assert selected == str(entry.PROFILES / "encoder-fast-config.json")
+    assert selected == str(entry.REPINNED / "encoder-fast-config.json")
     assert argv[argv.index("--encoder-config-sha256") + 1] == entry.FAST_ENCODER_SHA
