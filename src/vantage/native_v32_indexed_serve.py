@@ -9,59 +9,18 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from importlib import resources
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from vantage.frames import read_header
 from vantage.gamedata import GameData, find_game_dir
 from vantage.native_session import NativeSession
 from vantage.playback_index import ReadOnlyTimeline, load_completed
-from vantage.server import WEB_PACKAGE, _bytes, serve
+from vantage.server import serve
 from vantage.sprites import _drop_pool
 
 if TYPE_CHECKING:
     from typing import TYPE_CHECKING
-
-
-_INCOMPLETE_TITLE = "INCOMPLETE-checksum-prefix"
-_PREVIEW_NOTICE = b"""
-<div id="vantage-incomplete-preview" role="status"
- style="position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:9999;
- background:#382900;color:#fff3b0;border:1px solid #e9b949;border-radius:5px;
- padding:7px 12px;font:600 14px sans-serif;pointer-events:none">
- Incomplete replay preview \xe2\x80\x94 the match continues beyond this recording
-</div>
-<script>
-const previewNotice = document.getElementById('vantage-incomplete-preview');
-const previewEvents = new EventSource('/api/stream');
-previewEvents.onmessage = (event) => {
-  try {
-    const state = JSON.parse(event.data);
-    previewNotice.hidden = !(state.mode === 'recording' &&
-      state.source?.header?.title === 'INCOMPLETE-checksum-prefix');
-  } catch {}
-};
-</script>
-"""
-
-
-def _mark_incomplete_preview(server: Any, header: dict[Any, Any]) -> None:
-    """Label this experimental server's preview without changing shared web assets."""
-    if header.get("title") != _INCOMPLETE_TITLE:
-        return
-    app = server.app
-    ordinary_static = app._static
-
-    def static(handler: Any, name: Any) -> Any:
-        if name != "index.html":
-            return ordinary_static(handler, name)
-        body = resources.files(WEB_PACKAGE).joinpath("web", "index.html").read_bytes()
-        if body.count(b"</body>") != 1:
-            raise ValueError("Vantage index has an unexpected body")
-        _bytes(handler, body.replace(b"</body>", _PREVIEW_NOTICE + b"</body>"), "text/html")
-
-    app._static = static
 
 
 def main() -> int:
@@ -129,7 +88,8 @@ def main() -> int:
             {"patch": {}, "force_default": False},
             follow_live=False,
         )
-        _mark_incomplete_preview(server, header)
+        # The page labels incomplete and approximate recordings itself, from the
+        # header (web/recording-fidelity.js), so nothing is injected here.
         print(
             f"Vantage on http://127.0.0.1:{args.port}/ (indexed recording: {recording})", flush=True
         )

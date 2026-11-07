@@ -1,6 +1,5 @@
 """The indexed server only adopts a completed recording with the expected extent."""
 
-import io
 import sys
 import threading
 from types import SimpleNamespace
@@ -8,39 +7,6 @@ from types import SimpleNamespace
 import pytest
 
 from vantage import native_v32_indexed_serve as indexed
-
-
-def test_preview_notice_only_wraps_preview_index():
-    calls = []
-    app = SimpleNamespace(_static=lambda _handler, name: calls.append(name))
-    server = SimpleNamespace(app=app)
-    original = app._static
-    indexed._mark_incomplete_preview(server, {"title": "ordinary recording"})
-    assert app._static is original
-    indexed._mark_incomplete_preview(server, {"title": "INCOMPLETE-checksum-prefix"})
-
-    class Handler:
-        def __init__(self):
-            self.wfile = io.BytesIO()
-            self.status = None
-
-        def send_response(self, status):
-            self.status = status
-
-        def send_header(self, _key, _value):
-            pass
-
-        def end_headers(self):
-            pass
-
-    handler = Handler()
-    app._static(handler, "index.html")
-    body = handler.wfile.getvalue()
-    assert handler.status == 200
-    assert b"vantage-incomplete-preview" in body and b"the match continues" in body
-    assert b"state.source?.header?.title" in body
-    app._static(handler, "style.css")
-    assert calls == ["style.css"]
 
 
 @pytest.mark.parametrize("bad_status", [None, {"frames": 9}, {"errors": 1}, {"desynced": True}])
