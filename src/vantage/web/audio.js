@@ -10,6 +10,8 @@
 
 import { S, settings, unitInfo } from './state.js';
 import { scene } from './world.js';
+import { selectedOwners, eventAllowed, AlertCadence } from './audio-focus.js';
+import { eventIndexAfter } from './playback.js';
 
 let ctx = null;
 const buffers = new Map();
@@ -145,19 +147,24 @@ function tauntLanguage() {
   return encodeURIComponent(lang);
 }
 
-// Should a sound for this player's event play? "all" / "selected" (current perspective) / "none".
-function allowed(kind, player) {
+// Event relevance is independent of the fog/statistics perspective.
+function allowed(kind, event, owners, toScreen) {
   const mode = (settings.soundEventConfig || {})[kind] || 'selectedPlayer';
-  if (mode === 'none') return false;
-  if (mode === 'all') return true;
-  return !S.perspective || player === S.perspective;
+  return eventAllowed(mode, event, S.perspective, owners, onScreen(event.x, event.y, toScreen) !== null);
 }
 
 function onScreen(x, y, toScreen) {
-  if (x == null) return null;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   const [px, py] = toScreen(x, y);
   if (px < -100 || py < -100 || px > innerWidth + 100 || py > innerHeight + 100) return null;
   return (px / innerWidth) * 2 - 1;
+}
+
+const alertCadence = new AlertCadence();
+function alert(name, event, owners, toScreen, kind) {
+  if (!allowed(kind, event, owners, toScreen)) return;
+  if (!alertCadence.allow(performance.now(), settings.soundAlertInterval ?? 3000)) return;
+  play(notify(name), 'events', onScreen(event.x, event.y, toScreen) ?? 0);
 }
 
 // Called every frame with the playback clock; plays what was crossed since last call.
@@ -169,18 +176,22 @@ export function tick(toScreen) {
   const running = !(prev == null || t <= prev || t - prev > 3000 || !S.playing);
   world(running, toScreen);
   if (!running) return; // seeking / rewinding / paused: silence
-  for (const e of S.events) {
-    if (e.t <= prev || e.t > t) continue;
+  const owners = selectedOwners(S);
+  // The events of this frame's step only (the log is sorted by time): scanning
+  // the whole game's log every frame grew with the game.
+  const events = S.events;
+  for (let i = eventIndexAfter(events, prev); i < events.length && events[i].t <= t; i++) {
+    const e = events[i];
     switch (e.kind) {
       case 'age_up': play(notify('age_up')); break;
-      case 'researched': if (e.cat !== 'age' && allowed('research', e.player)) play(notify('tech_researched')); break;
+      case 'researched': if (e.cat !== 'age' && allowed('research', e, owners, toScreen)) play(notify('tech_researched')); break;
       case 'trained': {
         const snd = unitInfo(e.master).sounds?.created;
         const pan = onScreen(e.x, e.y, toScreen);
-        if (snd && allowed('train', e.player) && pan !== null) play(ev(snd), 'units', pan);
+        if (snd && allowed('train', e, owners, toScreen) && pan !== null) play(ev(snd), 'units', pan);
         break;
       }
-      case 'under_attack': if (allowed('attack', e.player)) play(notify(e.alert === 2 ? 'under_attack_town' : e.alert === 1 ? 'under_attack_animals' : 'under_attack')); break;
+      case 'under_attack': alert(e.alert === 2 ? 'under_attack_town' : e.alert === 1 ? 'under_attack_animals' : 'under_attack', e, owners, toScreen, 'attack'); break;
       case 'kill': {
         const pan = onScreen(e.x, e.y, toScreen);
         const snd = e.victim && unitInfo(e.victim.master).sounds?.death;
@@ -193,7 +204,7 @@ export function tick(toScreen) {
         if (e.event && pan !== null) play(ev(e.event), e.bus || 'combatImpacts', pan);
         break;
       }
-      case 'conversion': if (allowed('conversion', e.player)) play(notify('under_attack_conversion')); break;
+      case 'conversion': alert('under_attack_conversion', e, owners, toScreen, 'conversion'); break;
       case 'tribute': play(notify('tribute')); break;
       case 'buy': play(notify('market_buy')); break;
       case 'sell': play(notify('market_sell')); break;

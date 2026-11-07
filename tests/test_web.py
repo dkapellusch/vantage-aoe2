@@ -15,13 +15,11 @@ def test_browser_playback() -> None:
         [
             node,
             "--test",
-            str(Path(__file__).with_name("web.test.mjs")),
-            str(Path(__file__).with_name("render_cache.test.mjs")),
-            str(Path(__file__).with_name("graphics_cache.test.mjs")),
-            str(Path(__file__).with_name("sprite_gl.test.mjs")),
+            # Every DOM-free browser test: tests/*.test.mjs and tests/*.test.cjs.
+            *sorted(str(f) for f in Path(__file__).parent.glob("*.test.[mc]js")),
         ],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr

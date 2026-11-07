@@ -1,0 +1,173 @@
+{
+  "target": "/home/dan/re/aoe2de/AoE2DE_s.dec.exe",
+  "target_sha256": "69832b9d51145a4bb280da876880198ee0347947098e77098016b9bcbb8d8788",
+  "address": "0x141229a20",
+  "code_bytes": 100,
+  "code_sha256": "3d679772064012fe612ef2a3845b5441c5e7c85b0482687fe688d430f4793a1d",
+  "code_hex": "48895c2418554883ec2033db488be93959107e45488974243048897c24388bfb488b4508488b3407488bce488b06ff503084c0740f488b06488bceff5018ffcb4883ef08ffc34883c7083b5d107cd1488b7c2438488b742430488b5c24404883c4205dc3",
+  "probe_sha256": "d63ee36559c9c2856922954824e7845e45e4ffbfee69246e74d6e71097be4718",
+  "host_machine": "x86_64",
+  "executed_scope": "only exact100B helper, controlled list/vtables/ms_abi callbacks",
+  "game_launched": false,
+  "original_imports_or_globals_used": false,
+  "cases": [
+    {
+      "name": "empty",
+      "trace": "",
+      "final_count": 0,
+      "active_ids": [],
+      "updates": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "negative_count",
+      "trace": "",
+      "final_count": -1,
+      "active_ids": [],
+      "updates": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "stable",
+      "trace": "U1,U2,U3",
+      "final_count": 3,
+      "active_ids": [
+        1,
+        2,
+        3
+      ],
+      "updates": [
+        1,
+        1,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "post_swap_remove",
+      "trace": "U1,P1,U3,U2",
+      "final_count": 2,
+      "active_ids": [
+        3,
+        2
+      ],
+      "updates": [
+        1,
+        1,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "post_shift_remove",
+      "trace": "U1,P1,U2,U3",
+      "final_count": 2,
+      "active_ids": [
+        2,
+        3
+      ],
+      "updates": [
+        1,
+        1,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "append_reallocate",
+      "trace": "U1,U2,U3",
+      "final_count": 3,
+      "active_ids": [
+        1,
+        2,
+        3
+      ],
+      "updates": [
+        1,
+        1,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "shrink_count",
+      "trace": "U1",
+      "final_count": 1,
+      "active_ids": [
+        1
+      ],
+      "updates": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "replace_later",
+      "trace": "U1,U4,U3",
+      "final_count": 3,
+      "active_ids": [
+        1,
+        4,
+        3
+      ],
+      "updates": [
+        1,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "post_without_removal",
+      "trace": "U1,P1,U1,U2",
+      "final_count": 2,
+      "active_ids": [
+        1,
+        2
+      ],
+      "updates": [
+        2,
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "negative_during_update",
+      "trace": "U1",
+      "final_count": -1,
+      "active_ids": [],
+      "updates": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "update_removes_itself",
+      "trace": "U1,P1,U2,U3",
+      "final_count": 2,
+      "active_ids": [
+        2,
+        3
+      ],
+      "updates": [
+        1,
+        1,
+        1,
+        0
+      ]
+    }
+  ]
+}

@@ -52,10 +52,21 @@ class Schema:
             self._fields[mt] = specs
             self._by_name[mt] = {s.name: s.fid for s in specs.values()}
 
+        # Index the final normalized IDs, retaining the first matching name.
+        # Custom non-string names keep the original equality-based lookup.
+        self._model_ids: dict[str, int] | None = {}
+        for mt, name in self._names.items():
+            if type(name) is not str:
+                self._model_ids = None
+                break
+            self._model_ids.setdefault(name, mt)
+
     def name(self, model: int) -> str:
         return self._names.get(model, f"Model{model}")
 
     def model_id(self, name: str) -> int:
+        if type(name) is str and self._model_ids is not None:
+            return self._model_ids[name]
         for mt, n in self._names.items():
             if n == name:
                 return mt

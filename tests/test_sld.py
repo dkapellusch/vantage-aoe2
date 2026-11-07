@@ -147,3 +147,18 @@ def test_reuse_continues_an_animation_only_within_one_facing() -> None:
     per_frame = SLD(data)
     per_frame.set_frames_per_facing(1)  # frame 1 is another facing
     assert per_frame.layers(1)[LAYER_MAIN].blocks[0] is None
+
+
+def test_a_facing_with_no_pixels_of_its_own_repeats_the_frame_before_it() -> None:
+    rect = (0, 0, 8, 4)
+    first = _layer(rect, 0, [(0, 2)], [RED, GREY])
+    repeat = _layer(rect, 0x80, [(2, 0)], [])  # reuse flag, skips everything, draws nothing
+    data = _sld([(LAYER_MAIN, [first]), (LAYER_MAIN, [repeat])])
+    per_frame = SLD(data)
+    per_frame.set_frames_per_facing(1)
+    assert per_frame.layers(1)[LAYER_MAIN].blocks == [RED, GREY]
+    # Frames with their own pixels still start afresh at a facing (the trebuchet fix).
+    drawn = _layer(rect, 0x80, [(1, 1)], [GREY])
+    own = SLD(_sld([(LAYER_MAIN, [first]), (LAYER_MAIN, [drawn])]))
+    own.set_frames_per_facing(1)
+    assert own.layers(1)[LAYER_MAIN].blocks[0] is None

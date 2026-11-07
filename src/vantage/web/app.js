@@ -2,17 +2,22 @@
 
 import {
   S, settings, saveSettings, SPEEDS, api, fetchView, cachedView, cachedViewAt, clearViewCache, toast, players, playerName,
-  playerColor, fmtTime, unitInfo, unitIcon, applyServerConfig, tip, esc, tooltipLevel,
+  playerColor, fmtTime, unitInfo, unitIcon, applyServerConfig, tip, esc, tooltipLevel, refreshSeries, probeAssetOrigin, abortViews, viewTimings, viewStats,
 } from './state.js';
 import * as world from './world.js';
+import { loadMoments, toggleReviewTimeline, reviewStatus } from './review-workspace.js';
 import * as panels from './panels.js';
 import * as overlays from './overlays.js';
 import { actionFor, rebuild as rebuildKeys, binding, describeConflicts } from './hotkeys.js';
 import { t, setLanguage, detectLanguage, language, translateStatic, keyLabel } from './i18n.js';
+import { fidelityNotice } from './recording-fidelity.js';
 import * as audio from './audio.js';
 import * as layout from './layout.js';
-import { shuttleSpeed } from './playback.js';
+import { patchHtml } from './dom.js';
+import { shuttleSpeed, eventIndexAfter } from './playback.js';
 import { GOTO_BUILDINGS, applyGame } from './games.js';
+import { chooseFight, FightSelection, highlightParticipants } from './autocast-focus.js';
+import { installPanelResizing } from './panel-resize.js';
 
 const $ = (id) => document.getElementById(id);
 let generation = -1;
@@ -44,20 +49,13 @@ async function loadStatic() {
 // Performance view (Ctrl+Alt+Shift+P): frame time percentiles, view fetch
 // latency and sprite memory, updated twice a second.
 const perf = { on: false, frames: [], work: [], update: [], minimap: [], fetches: [], last: 0 };
-const origApi = window.fetch.bind(window);
-window.fetch = (url, opts) => {
-  const t0 = performance.now();
-  return origApi(url, opts).then((r) => {
-    if (perf.on && String(url).includes('/api/view')) perf.fetches.push(performance.now() - t0);
-    return r;
-  });
-};
 function perfTick(now, dt) {
   if (!perf.on) return;
   perf.frames.push(dt * 1000);
   if (perf.frames.length > 240) perf.frames.shift();
   for (const xs of [perf.work, perf.update, perf.minimap]) if (xs.length > 240) xs.splice(0, xs.length - 240);
-  if (perf.fetches.length > 60) perf.fetches.splice(0, perf.fetches.length - 60);
+  // View requests (in the view worker): their timings come from state.js.
+  perf.fetches = viewTimings.slice(-60);
   if (now - perf.last < 500) return;
   perf.last = now;
   const pct = (xs, p) => { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
@@ -84,7 +82,7 @@ function gpuLine() {
   const p = gpuPrev || g;
   gpuPrev = g;
   const per = (k) => (g[k] - p[k]) * 2;
-  return `GPU sprites: ${per('draws') ? Math.round(per('instances') / per('draws')) : 0} per batch · ${per('uploads')} frame uploads/s · ${g.memory.used}/${g.memory.layers} atlas layers · ${g.evictions} evictions · ${g.tooLarge} too large\n`;
+  return `GPU sprites: ${per('draws') ? Math.round(per('instances') / per('draws')) : 0} per batch · ${per('uploads')} frame uploads/s (${per('deferred')} deferred) · ${g.memory.used}/${g.memory.layers} atlas layers (${g.grows} grows) · ${g.evictions} evictions · ${g.flushes} pressure flushes · ${g.full} atlas misses · ${g.tooLarge} too large\n`;
 }
 
 // The game's spectator API must be new enough for what Vantage asks of it
@@ -121,11 +119,43 @@ function checkGameData(desc) {
   toast(t('Age of Empires II: DE install not found: showing plain graphics without sound. Set the game folder in Settings → Interface → Game directory.'));
 }
 
-async function refreshSession(desc) {
+// Session updates arrive on every timeline change (many a second while a
+// recording loads or a game streams). Apply one at a time, always the newest:
+// overlapping runs each fetched the events and the whole series again. A hidden
+// tab keeps only the newest and applies it when shown again.
+let refreshing = null, pendingDesc = null;
+function refreshSession(desc) {
+  pendingDesc = desc;
+  if (!refreshing && !document.hidden) {
+    refreshing = (async () => {
+      try {
+        while (pendingDesc && !document.hidden) {
+          const next = pendingDesc;
+          pendingDesc = null;
+          // One failed update (a request that failed) must not stop the next.
+          await applySession(next).catch(console.error);
+        }
+      } finally { refreshing = null; }
+    })();
+  }
+  return refreshing || Promise.resolve();
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && pendingDesc) refreshSession(pendingDesc).catch(console.error); });
+
+function renderFidelityNotice(desc) {
+  const el = document.getElementById('fidelity-banner');
+  if (!el) return;
+  const notice = fidelityNotice(desc);
+  el.textContent = notice ? t(notice) : '';
+  el.classList.toggle('hidden', !notice);
+}
+
+async function applySession(desc) {
   checkCompatibility(desc);
   checkGameData(desc);
   askToContinue(desc);
   S.session = desc;
+  renderFidelityNotice(desc);
   // Age names, techs and age-up rules follow the game (AoE2 or Return of Rome).
   S.game = desc.game || 'aoe2';
   if (applyGame(S.game)) {
@@ -140,7 +170,9 @@ async function refreshSession(desc) {
     clearViewCache();
     resetViews();
     S.events = []; S.eventsTo = -1; S.series = null; S.summary = null; S.selection = new Set();
+    if (autocast.on) { autocast.selection.resume(S.selection); autocast.nextMove = 0; }
     S.bookmarks = await api('/api/bookmarks').catch(() => []);
+    await loadMoments(); S.reviewPlaybackUntil = null;
     endgameShown = false;
     S.highlight.seq = null;
     S.followLive = desc.mode === 'live';
@@ -159,13 +191,13 @@ async function refreshSession(desc) {
     if (S.t === 0 && desc.mode === 'recording') S.t = tl.start;
     // New events since the last fetch.
     if (tl.end > S.eventsTo) {
-      const evs = await api(`/api/events?from=${S.eventsTo + 1}&to=${tl.end}`).catch(() => []);
-      S.events.push(...evs);
-      S.eventsTo = tl.end;
+      const from = S.eventsTo + 1, events = S.events;
+      const evs = await api(`/api/events?from=${from}&to=${tl.end}`, undefined, { priority: 'low' }).catch(() => null);
+      // One push per event: spreading a large first batch overflows the call stack.
+      if (evs && events === S.events) { for (const e of evs) events.push(e); S.eventsTo = tl.end; }
     }
     if (!S.series || (S.end - S.seriesAt > 15000) || (tl.complete && S.seriesAt !== S.end)) {
-      S.series = await api('/api/series').catch(() => S.series);
-      S.seriesAt = S.end;
+      await refreshSeries().catch(() => S.series);
     }
   }
   $('status-line').textContent = statusText(desc);
@@ -212,6 +244,11 @@ function statusText(desc) {
   // A stopped live session keeps its last error; it is no longer retrying.
   const stopped = desc.mode === 'live' && (desc.source || {}).status === 'ended';
   if (desc.error && !stopped) return `⚠ ${overlays.friendlyError(desc.error)}`;
+  if (desc.mode === 'native_replay') {
+    const labels = { queued: 'Replay queued', converting: 'Converting replay…', failed: 'Replay conversion failed', cancelled: 'Replay conversion cancelled' };
+    const src = desc.source || {};
+    return t(src.status === 'converting' && src.phase === 'loading' ? 'Loading replay…' : (labels[src.status] || 'Replay queued'));
+  }
   const tl = desc.timeline;
   if (desc.mode === 'live') {
     const src = desc.source || {};
@@ -241,6 +278,7 @@ const LAUNCH_FAILED = ['noGameExe', 'launchFailed', 'exited'];
 const launch = { status: null, detail: '', timer: null, since: 0, connectedAt: 0, liveAsked: false };
 
 function setLaunchStatus(r) {
+  if (serverConfig && serverConfig.native_replays) return;
   const st = r && typeof r === 'object' ? r.status : null;
   if (!st) return;
   if (st !== launch.status && st === 'connected') launch.connectedAt = performance.now();
@@ -255,6 +293,7 @@ function setLaunchStatus(r) {
 }
 
 async function pollLaunch() {
+  if (serverConfig && serverConfig.native_replays) return;
   clearTimeout(launch.timer);
   const r = await api('/api/launch_game').catch(() => null);
   if (r) setLaunchStatus(r);
@@ -263,6 +302,7 @@ async function pollLaunch() {
 }
 
 async function startGame() {
+  if (serverConfig && serverConfig.native_replays) return;
   launch.since = performance.now();
   launch.liveAsked = false;
   launch.status = 'opening'; launch.detail = '';
@@ -288,6 +328,8 @@ function gameDetails(src) {
 let launchKey = '';
 function renderLaunchStatus() {
   const el = $('launch-status');
+  if (S.end > S.start && !(source().status === 'needs_confirm')) { el.classList.add('hidden'); return; }
+  if (serverConfig && serverConfig.native_replays) { el.classList.add('hidden'); return; }
   const src = source();
   const st = src.status;
   const connected = !!(S.session && S.session.live_connected);
@@ -329,12 +371,12 @@ function renderLaunchStatus() {
   el.classList.remove('hidden');
   if (key === launchKey) return;
   launchKey = key;
-  el.innerHTML = `<div class="ls-title">${spinning ? '<span class="ls-spin"></span>' : ''}${esc(title)}</div>
+  patchHtml(el, `<div class="ls-title">${spinning ? '<span class="ls-spin"></span>' : ''}${esc(title)}</div>
     ${details.map((x) => `<div class="ls-detail">${x}</div>`).join('')}
     <div class="ls-actions">
     ${canStart ? `<button data-ls-start class="on" ${tip(t('Start Age II'), t('Starts Age of Empires II: DE through Steam so Vantage is ready to watch games. Make sure you are logged in to Steam, or the game will fail to launch.'))}>▶ ${t('Start Age II')}</button>` : ''}
     ${liveCard ? `<button data-ls-stop ${tip(t('Stop watching'), t('Disconnect from the game and go back to the home screen'))}>■ ${t('Stop watching')}</button>` : `<button data-ls-dismiss>${t('Close')}</button>`}
-    </div>`;
+    </div>`);
   const stop = el.querySelector('[data-ls-stop]');
   if (stop) stop.onclick = stopWatching;
   const start = el.querySelector('[data-ls-start]');
@@ -417,11 +459,21 @@ function openHtmlServer() {
 }
 
 let pendingView = null, viewEpoch = 0, viewRetryAt = 0;
-function resetViews() {
+// While the time bar is dragged, views are asked for on the shared 1 s grid (as
+// look-ahead is): positions a few pixels apart then reuse one request and one
+// cached view. The release asks for its exact time.
+function viewRequestTime(t) {
+  return S.scrubbing ? Math.max(S.start, Math.floor(t / 1000) * 1000) : t;
+}
+// `keepView`: a seek in the same game keeps drawing the current view (still,
+// as at the live edge) until the new one arrives, instead of a blank world.
+function resetViews(keepView = false) {
   viewEpoch++;
   pendingView = null;
   viewRetryAt = 0;
-  S.view = null; S.nextView = null; S.aheadView = null; S.upcoming = [];
+  abortViews();
+  if (!keepView) S.view = null;
+  S.nextView = null; S.aheadView = null; S.upcoming = [];
 }
 
 // Use a shared request grid so adjacent keyframes reuse the same look-ahead
@@ -440,9 +492,12 @@ function primeViews(v, epoch) {
   for (const at of viewRequests(v)) {
     fetchView(at).then((a) => {
       if (epoch !== viewEpoch || !a || a.time <= v.time) return;
-      if (S.view === v && (!S.nextView || a.time < S.nextView.time)) S.nextView = a;
+      // A refetch of a view that was not final (its track was still filling)
+      // replaces the one held for the same time.
+      const newer = (held) => held && held !== a && held.time === a.time && held.final === false;
+      if (S.view === v && (!S.nextView || a.time < S.nextView.time || newer(S.nextView))) S.nextView = a;
       if (a.time > S.t && !S.upcoming.includes(a)) {
-        S.upcoming = [...S.upcoming.filter((u) => u.time > S.t), a].sort((x, y) => x.time - y.time);
+        S.upcoming = [...S.upcoming.filter((u) => u.time > S.t && u.time !== a.time), a].sort((x, y) => x.time - y.time);
         S.aheadView = S.upcoming.at(-1);
       }
     });
@@ -455,9 +510,15 @@ async function updateView() {
   // At the live edge, retry look-ahead as the stream grows, without issuing a
   // different request for every animation frame.
   if (S.view && !S.nextView && S.t >= S.view.time && S.t < S.view.time + 3000) {
-    if (performance.now() >= viewRetryAt) {
+    if (!S.scrubbing && performance.now() >= viewRetryAt) {
       viewRetryAt = performance.now() + 100;
       primeViews(S.view, viewEpoch);
+      // The newest keyframe's track fills in after it is first served: take
+      // the final version once the cache lets it be fetched again.
+      if (S.view.final === false) {
+        const held = S.view, epoch = viewEpoch;
+        fetchView(held.time).then((a) => { if (epoch === viewEpoch && S.view === held && a && a !== held && a.time === held.time) S.view = a; });
+      }
     }
     return;
   }
@@ -468,7 +529,7 @@ async function updateView() {
     const n = S.nextView;
     const cached = cachedViewAt(S.t);
     const v = n && S.view && n.time > S.view.time && S.t >= n.time && S.t < n.time + 1500
-      ? n : cached && S.t - cached.time < 3000 ? cached : await fetchView(S.t);
+      ? n : cached && S.t - cached.time < 3000 ? cached : await fetchView(viewRequestTime(S.t));
     if (epoch !== viewEpoch) return;
     if (v && v.time != null) {
       S.view = v;
@@ -482,7 +543,8 @@ async function updateView() {
       }
       // Normal speed and live playback need look-ahead too, so the following
       // target and its graphics arrive before this interpolation finishes.
-      primeViews(v, epoch);
+      // Not while the scrub bar is dragged: only the released position matters.
+      if (!S.scrubbing) primeViews(v, epoch);
       world.refreshTrees(S.t);
       world.refreshTerrain(S.t);
     }
@@ -554,7 +616,7 @@ function reportPlaybackEnd(live) {
   api('/api/playback_ended', {}).catch(() => {});
 }
 function gameOver(live) {
-  if (!live) return S.complete;
+  if (!live) return !!(S.view && S.view.game_ended === true);
   if (source().status === 'ended' || S.complete) return true;
   const now = performance.now();
   if (now < gameOverCheckAt) return false;
@@ -613,6 +675,7 @@ function tick(now) {
       }
     }
   }
+  if (S.reviewPlaybackUntil != null && S.t >= S.reviewPlaybackUntil) { S.t = S.reviewPlaybackUntil; S.playing = false; S.reviewPlaybackUntil = null; }
   if (!endgameShown && S.end > 0 && S.t >= S.end - 1500 && !S.highlight.seq && gameOver(live)) { endgameShown = true; showEndgame(); }
   if (S.end > 0 && S.t >= S.end) reportPlaybackEnd(live);
   measureSpeed(now);
@@ -626,8 +689,7 @@ function tick(now) {
   world.edgeScroll(mouse.x, mouse.y, dt);
   autocastTick(now, dt);
   audio.tick(world.toScreen);
-  world.followSelection();
-  world.draw();
+  world.draw(dt);
   const tm = performance.now();
   world.drawMinimap();
   if (perf.on) {
@@ -646,8 +708,21 @@ function tick(now) {
 // the time bar. Re-measured only when one of them changes size.
 // The dashboard is centred at the bottom unless that would put it over the minimap
 // (left) or past the window (right): then it starts just right of the minimap.
+// Placing the dashboard resets and measures panel boxes, a forced layout: do it
+// when one of the panels involved changed size (or the window did), and once a
+// second for anything else (a panel dragged elsewhere), not four times a second.
+let placeDirty = true, placedAt = 0;
+const placeObserver = new ResizeObserver(() => { placeDirty = true; });
+let placeObserved = false;
 function placeDashboard() {
-  const d = $('dashboard'), m = $('minimap-wrap');
+  placeDirty = false; placedAt = performance.now();
+  if (!placeObserved) {
+    placeObserved = true;
+    for (const id of ['dashboard', 'minimap-wrap', 'timebar', 'unitpanel', 'events']) if ($(id)) placeObserver.observe($(id));
+    window.addEventListener('resize', () => { placeDirty = true; });
+  }
+  const d = $('dashboard'), m = $('minimap-wrap'), eventsPanel = $('events');
+  if (eventsPanel) eventsPanel.style.maxHeight = '';
   if (!d || d.classList.contains('hidden')) return;
   const w = d.offsetWidth, vw = window.innerWidth;
   // Clear of the minimap, and of the time bar above it when the dashboard is tall
@@ -669,6 +744,10 @@ function placeDashboard() {
   const a = d.getBoundingClientRect(), b = up.getBoundingClientRect();
   if (a.right <= b.left || b.right <= a.left || a.bottom <= b.top) return;
   const ev = $('events');
+  if (ev && !ev.classList.contains('hidden') && ev.getBoundingClientRect().right > b.left) {
+    const reserve = Math.min(350, window.innerHeight * .55);
+    ev.style.maxHeight = `${Math.max(80, Math.floor(a.top - ev.getBoundingClientRect().top - reserve - 18))}px`;
+  }
   const evBottom = ev && !ev.classList.contains('hidden') && ev.getBoundingClientRect().right > b.left ? ev.getBoundingClientRect().bottom : 0;
   up.style.bottom = `${Math.round(window.innerHeight - a.top + 6)}px`;
   up.style.maxHeight = `${Math.max(120, Math.round(a.top - 12 - evBottom))}px`;
@@ -695,12 +774,13 @@ function layoutLeftColumn() {
     const el = $(id);
     if (!el) continue;
     el.classList.remove('no-room');
+    if (el.classList.contains('hud-custom-size')) continue;
     if (el.parentElement !== col) col.appendChild(el);
   }
   for (const id of ['production', 'techs']) {
     if (col.scrollHeight <= col.clientHeight + 1) break;
     const el = $(id);
-    if (el && !el.classList.contains('hidden')) col2.prepend(el);
+    if (el && !el.classList.contains('hidden') && !el.classList.contains('hud-custom-size')) col2.prepend(el);
   }
   const left = Math.round(col.getBoundingClientRect().right + 6);
   // Slide-outs (right-anchored) stop short of the left-hand panels.
@@ -717,7 +797,7 @@ function layoutLeftColumn() {
   col2.style.maxWidth = `${Math.max(200, right - left)}px`; // production's rows wrap to fit
   for (const id of ['techs', 'production']) {
     const el = $(id);
-    if (!el || el.parentElement !== col2 || el.classList.contains('hidden')) continue;
+    if (!el || el.parentElement !== col2 || el.classList.contains('hidden') || el.classList.contains('hud-custom-size')) continue;
     if (el.scrollWidth > el.clientWidth + 1 || col2.scrollHeight > col2.clientHeight + 1) {
       el.classList.add('no-room');
       if (!noRoomNoted.has(id)) {
@@ -748,6 +828,7 @@ window.addEventListener('mouseup', releasePress, true);
 window.addEventListener('contextmenu', releasePress, true);
 window.addEventListener('blur', releasePress);
 function renderHud() {
+  reviewStatus(autocast.on ? 'Auto' : S.followSelection ? 'Follow selection' : 'Free');
   if (uiPress && performance.now() - uiPress < 400) return;
   const sp = SPEEDS[S.speedIndex];
   const label = isLive() && S.followLive ? t('LIVE') : `${S.playing ? '' : t('paused') + ' · '}${sp}×`;
@@ -756,7 +837,7 @@ function renderHud() {
   panels.renderTechs();
   panels.renderProduction();
   panels.renderDashboard();
-  placeDashboard();
+  if (placeDirty || performance.now() - placedAt > 1000) placeDashboard();
   if (settings.showEvents) panels.renderEvents(seek);
   $('events').classList.toggle('hidden', !settings.showEvents);
   panels.renderUnitPanel();
@@ -765,8 +846,12 @@ function renderHud() {
   layout.applyPanels();
   const pp = settings.post || {};
   const g = pp.gamma || 1;
-  $('gamma-func').setAttribute('exponent', String(1 / g));
-  ['gamma-r', 'gamma-g', 'gamma-b'].forEach((id) => $(id).setAttribute('exponent', String(1 / g)));
+  // Only on change: rewriting the SVG filter invalidates the CSS filter using it.
+  const exponent = String(1 / g);
+  for (const id of ['gamma-func', 'gamma-r', 'gamma-g', 'gamma-b']) {
+    const el = $(id);
+    if (el && el.getAttribute('exponent') !== exponent) el.setAttribute('exponent', exponent);
+  }
   // A CSS filter on the full-screen canvas costs a filter pass every frame (heavy in
   // Firefox), so the neutral picture uses none at all.
   const b = pp.brightness || 1, c = pp.contrast || 1, sat = pp.saturation || 1;
@@ -809,7 +894,8 @@ let jumpKey = '';
 function renderJumpBanner() {
   const el = $('jump-banner');
   const j = S.jump;
-  const loading = !S.view && S.end > 0;
+  // A seek keeps drawing the old view until the new one arrives: still loading.
+  const loading = (!S.view || (j && !j.wait && Math.abs(S.view.time - j.to) > 2500)) && S.end > 0;
   const show = !!(j && j.wait) || (loading && (!j || performance.now() - j.at > 150));
   if (!show) { el.classList.add('hidden'); jumpKey = ''; return; }
   const text = j ? t('Jumping to {time}', { time: fmtTime(j.to) }) : t('Rendering');
@@ -819,8 +905,8 @@ function renderJumpBanner() {
   const key = `${text}|${!!j}|${pct == null}|${language}`;
   if (key !== jumpKey) {
     jumpKey = key;
-    el.innerHTML = `<div class="jb-text">${esc(text)}</div><div class="jb-bar${pct == null ? ' indeterminate' : ''}"><i></i></div>
-      ${j ? `<button data-stop-jump ${tip(t('Stop Jump'), t('Cancel the jump'))}>${t('Stop Jump')}</button>` : ''}`;
+    patchHtml(el, `<div class="jb-text">${esc(text)}</div><div class="jb-bar${pct == null ? ' indeterminate' : ''}"><i></i></div>
+      ${j ? `<button data-stop-jump ${tip(t('Stop Jump'), t('Cancel the jump'))}>${t('Stop Jump')}</button>` : ''}`);
     const b = el.querySelector('[data-stop-jump]');
     if (b) b.onclick = () => { stopJump(); renderHud(); };
   }
@@ -898,6 +984,8 @@ function fogLabel() {
 
 export function seek(time, force = false) {
   if (seekLocked() && !force) { toast(t('Seeking is disabled')); return; }
+  S.seekVersion++;
+  autocast.selection.focus = null; autocast.nextMove = 0;
   const from = S.jump && S.jump.wait ? S.jump.from : S.t;
   const target = Math.max(S.start, time);
   // A recording that is still loading can be jumped past its loaded end: the
@@ -906,7 +994,7 @@ export function seek(time, force = false) {
   S.t = Math.min(S.end, target);
   S.jump = { from, to: wait ? target : S.t, at: performance.now(), wait };
   S.followLive = false;
-  resetViews();
+  resetViews(true);
   speedMeter.t = null;
   // Seeking (e.g. "click to jump back") closes the end-game screen.
   if (overlays.isOpen('overlay-endgame')) overlays.closeAll();
@@ -1011,14 +1099,21 @@ function gameWindow(state) {
 
 function onSelect(sel) {
   if (sel.perspective) { setPerspective(sel.perspective); return; }
+  if (autocast.on || S.highlight.seq) autocast.selection.enabled = false;
   const ids = sel.rows.map((r) => r[0]);
   if (sel.ctrl) { for (const id of ids) { if (S.selection.has(id)) S.selection.delete(id); else S.selection.add(id); } }
   else if (sel.shift) ids.forEach((id) => S.selection.add(id));
   else S.selection = new Set(ids);
   if (sel.rows.length && !sel.ctrl) audio.selectionSound(sel.rows[0][2]);
   panels.rememberSelection();
+  // A hidden selection panel looks like a broken click: say where it went, once.
+  if (S.selection.size && !layout.isVisible('unitpanel') && !hiddenSelectionHinted) {
+    hiddenSelectionHinted = true;
+    toast(t('{p} hidden · ▣ Panels (Alt+V) brings it back', { p: t('Selection panel') }));
+  }
   renderHud();
 }
+let hiddenSelectionHinted = false;
 
 // Perspective 0 is Gaia: the whole map, no fog.
 function setPerspective(pid) {
@@ -1098,7 +1193,7 @@ function selectAllOf(action) {
 // Entry points: the end-game "Most kills" commendation's "Show all" (event
 // 'vantage:autocast' {unitId}) and the hero list (Alt+Shift+A).
 
-const autocast = { on: false, nextMove: 0, nextBook: 0, announced: new Set() };
+const autocast = { on: false, nextMove: 0, nextBook: 0, announced: new Set(), selection: new FightSelection() };
 const HERO_KILLS = 3;
 const SPREE_GAP_MS = 10000;           // consecutive kills closer than this form one spree
 const EL_LEAD_MS = 5000, EL_TAIL_MS = 2000;
@@ -1108,18 +1203,35 @@ const SPEED_FROM = 1.7, SPEED_TO = 0.5; // game speed (game s per real s) eased 
 
 // Kill events grouped by killer entity, up to a time. Every hero carries its
 // death event (`fellEv`) when it died.
+// The kill events of S.events, kept in step as the log grows (it only appends;
+// a new game replaces the array): killers() runs four times a second and
+// scanned the whole log twice each time.
+const killLog = { events: null, seen: 0, kills: [] };
+function killEvents() {
+  if (killLog.events !== S.events || killLog.seen > S.events.length) { killLog.events = S.events; killLog.seen = 0; killLog.kills = []; }
+  for (; killLog.seen < S.events.length; killLog.seen++) {
+    const e = S.events[killLog.seen];
+    if (e.kind === 'kill') killLog.kills.push(e);
+  }
+  return killLog.kills;
+}
+
 function killers(upTo = S.t) {
   const by = new Map();
-  for (const e of S.events) {
-    if (e.kind !== 'kill' || e.t > upTo || e.friendly || !e.killer || e.killer.id == null) continue;
+  const kills = killEvents();
+  const end = upTo === Infinity ? kills.length : eventIndexAfter(kills, upTo);
+  for (let i = 0; i < end; i++) {
+    const e = kills[i];
+    if (e.friendly || !e.killer || e.killer.id == null) continue;
     let h = by.get(e.killer.id);
     if (!h) by.set(e.killer.id, (h = { id: e.killer.id, mid: e.killer.master, owner: e.killer.owner, kills: [], victims: new Map(), fell: null, fellEv: null }));
     h.kills.push(e);
     const vm = e.victim && e.victim.master;
     if (vm != null) h.victims.set(vm, (h.victims.get(vm) || 0) + 1);
   }
-  for (const e of S.events) {
-    if (e.kind === 'kill' && e.t <= upTo && e.victim && by.has(e.victim.id)) { const h = by.get(e.victim.id); h.fell = e.t; h.fellEv = e; }
+  for (let i = 0; i < end; i++) {
+    const e = kills[i];
+    if (e.victim && by.has(e.victim.id)) { const h = by.get(e.victim.id); h.fell = e.t; h.fellEv = e; }
   }
   return by;
 }
@@ -1151,21 +1263,23 @@ function mostKilledTag(h) {
 function autocastTick(now, dt) {
   runSequence(dt);
   if (!autocast.on || !S.view || S.highlight.seq) return;
+  autocast.selection.observe(S.selection);
   if (now >= autocast.nextBook) {
     autocast.nextBook = now + 250;
     bookkeepHeroes();
   }
   if (now < autocast.nextMove) return;
-  const recent = S.events.filter((e) => e.kind === 'kill' && e.t <= S.t && e.t > S.t - 20000 && e.x != null);
-  if (!recent.length) return;
+  const best = chooseFight(S.events, S.t);
+  // Nothing to watch: look again in half a second, not every frame.
+  if (!best) { autocast.nextMove = now + 500; return; }
   autocast.nextMove = now + 4000;
-  // Densest cluster: the recent kill with the most neighbours within 8 tiles.
-  let best = null, bestN = -1;
-  for (const a of recent) {
-    const n = recent.filter((b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2 < 64).length;
-    if (n > bestN) { best = a; bestN = n; }
+  const info = autocast.selection.select(best, S.events, S.view.entities || [], S.t);
+  if (info) {
+    S.selection = new Set(info.keys());
+    for (const [id, identity] of info) S.selectionInfo.set(id, identity);
+    S.followSelection = false;
   }
-  if (best) world.centerOn(best.x, best.y, Math.max(S.camera.zoom, 1.3));
+  world.centerOn(best.x, best.y, Math.max(S.camera.zoom, 1.3));
 }
 
 // Hero announcements (settings.autocastHighlights): born, sprees, falls. A
@@ -1211,7 +1325,7 @@ function heroLabel(h) {
 let bannerTimer = null;
 function banner(text, sub = '') {
   const el = $('autocast-banner');
-  el.innerHTML = `${esc(text)}${sub ? `<div class="ac-sub">${esc(sub)}</div>` : ''}`;
+  patchHtml(el, `${esc(text)}${sub ? `<div class="ac-sub">${esc(sub)}</div>` : ''}`);
   el.classList.remove('hidden');
   clearTimeout(bannerTimer);
   bannerTimer = setTimeout(() => el.classList.add('hidden'), 3500);
@@ -1277,6 +1391,7 @@ async function startSequence(hero, auto = false) {
   const back = prev ? prev.back : { t: S.t, live: isLive() && S.followLive, speedIndex: S.speedIndex, playing: S.playing, follow: S.followSelection };
   const q = { hero, els: [], idx: -1, paused: false, done: false, loading: true, rate: null, back, auto, cam: null };
   S.highlight.seq = q;
+  if (!auto) autocast.selection.resume(S.selection);
   S.highlight.list = false;
   S.followSelection = false;
   renderHud();
@@ -1292,10 +1407,14 @@ function playElement(i) {
   if (!q || !q.els.length) return;
   q.idx = Math.max(0, Math.min(q.els.length - 1, i));
   const el = q.els[q.idx];
-  q.paused = false; q.done = false; q.cam = null;
+  q.paused = false; q.done = false; q.cam = null; q.selectionReady = false;
   seek(el.start, true);
   S.playing = true;
-  S.selection = new Set([q.hero.id]);
+  if (autocast.selection.enabled) {
+    S.selection = new Set([q.hero.id]);
+    S.selectionInfo.set(q.hero.id, { mid: q.hero.mid, owner: q.hero.owner });
+    autocast.selection.owned = new Set(S.selection);
+  }
   panels.rememberSelection();
   banner(elementTag(el), `${heroLabel(q.hero)} · ${t('Total kills: {n}', { n: q.hero.kills.length })}`);
   renderHud();
@@ -1342,6 +1461,7 @@ function runSequence(dt) {
   const q = S.highlight.seq;
   if (!q || q.loading || q.idx < 0) return;
   const el = q.els[q.idx];
+  autocast.selection.observe(S.selection);
   if (q.paused || q.done) { q.rate = null; return; }
   if (S.t >= Math.min(el.end, S.end)) {
     if (q.idx + 1 < q.els.length) { playElement(q.idx + 1); return; }
@@ -1353,10 +1473,17 @@ function runSequence(dt) {
   q.rate = sequenceSpeed(el, S.t);
   if (!S.view) return; // still jumping: hold the camera
   const tgt = sequenceTarget(q, el, S.t);
-  const row = world.currentRows().find((r) => r[0] === tgt.id);
+  const row = (S.view.entities || []).find((r) => r[0] === tgt.id);
   let x = row ? row[3] : tgt.x, y = row ? row[4] : tgt.y;
   if (x == null && q.cam) { x = q.cam.x; y = q.cam.y; }
   if (x == null) return;
+  if (autocast.selection.enabled && !q.selectionReady) {
+    const info = highlightParticipants(q.hero, el, { x, y }, S.events, S.view.entities || [], S.t);
+    S.selection = new Set(info.keys());
+    for (const [id, identity] of info) S.selectionInfo.set(id, identity);
+    autocast.selection.owned = new Set(S.selection);
+    q.selectionReady = true;
+  }
   const zoom = zoomForLevel(ZOOM_LEVEL_TO * ease((S.t - el.start) / (el.t - el.start || 1)));
   if (!q.cam || (q.cam.x - x) ** 2 + (q.cam.y - y) ** 2 > 30 * 30) q.cam = { x, y };
   else {
@@ -1411,11 +1538,12 @@ function renderHighlights() {
   const showBar = autocast.on || !!q;
   bar.classList.toggle('hidden', !showBar);
   if (showBar) {
-    const key = `${autocast.on}|${q ? `${q.hero.id}:${q.idx}:${q.paused}:${q.done}:${q.loading}` : ''}|${S.highlight.list}|${language}`;
+    const key = `${autocast.on}|${autocast.selection.enabled}|${q ? `${q.hero.id}:${q.idx}:${q.paused}:${q.done}:${q.loading}` : ''}|${S.highlight.list}|${language}`;
     if (key !== hlBarKey) {
       hlBarKey = key;
-      bar.innerHTML = q ? sequenceBar(q) : `<span class="hl-label">${t('Autocast')}</span>
-        <button data-hl="all" class="${S.highlight.list ? 'on' : ''}" ${tip(t('Show all'), t('Every hero so far, with their kills'))}>${t('Show all')}</button>`;
+      patchHtml(bar, q ? sequenceBar(q) : `<span class="hl-label">${t('Autocast')}</span>
+        ${fightSelectButton()}
+        <button data-hl="all" class="${S.highlight.list ? 'on' : ''}" ${tip(t('Show all'), t('Every hero so far, with their kills'))}>${t('Show all')}</button>`);
     }
   } else hlBarKey = '';
   list.classList.toggle('hidden', !S.highlight.list);
@@ -1424,17 +1552,21 @@ function renderHighlights() {
   const key = `${hs.map((h) => `${h.id}:${h.kills.length}:${h.fell}`).join(',')}|${language}`;
   if (key === hlListKey) return;
   hlListKey = key;
-  list.innerHTML = `<h3>${t('Heroes')} <span class="hint">${t('units with {n}+ kills — click to replay their story', { n: HERO_KILLS })}</span></h3>
+  patchHtml(list, `<h3>${t('Heroes')} <span class="hint">${t('units with {n}+ kills — click to replay their story', { n: HERO_KILLS })}</span></h3>
     ${hs.length ? hs.map((h) => `<div class="hl-row" data-hero="${h.id}" ${tip(heroName(h), t('Replay its birth, kills and death'))}>
       ${unitIcon(h.mid) ? `<img src="${unitIcon(h.mid)}" alt="">` : ''}
       <div><div style="color:${playerColor(h.owner)};font-weight:600">${esc(heroName(h))}${h.fell != null ? ` <span class="hl-tag">✝ ${fmtTime(h.fell)}</span>` : ''}</div>
       <div class="hl-tag">${esc(mostKilledTag(h))}</div></div>
-      <span class="hl-kills">${t('{n} kills', { n: h.kills.length })}</span></div>`).join('') : `<div class="hint">${t('No heroes yet.')}</div>`}`;
+      <span class="hl-kills">${t('{n} kills', { n: h.kills.length })}</span></div>`).join('') : `<div class="hint">${t('No heroes yet.')}</div>`}`);
 }
 
 // The autocasting control bar: title, pause/resume, "Kills by entity <icon>",
 // Previous / Current / Next element buttons (labelled with the element, or
 // "None"), stop and the hero list.
+function fightSelectButton() {
+  return `<button data-hl="selection" aria-pressed="${autocast.selection.enabled}" class="${autocast.selection.enabled ? 'on' : ''}" ${tip(t('Select fight'), t('Select recent attackers and targets plus nearby fighting or healing units. Click a unit yourself to hold its details; click here to resume automatic selection.'))}>${t('Select fight')}</button>`;
+}
+
 function sequenceBar(q) {
   const h = q.hero;
   const icon = unitIcon(h.mid);
@@ -1443,6 +1575,7 @@ function sequenceBar(q) {
   const pauseLabel = q.paused || q.done ? t('Resume') : t('Pause');
   return `<div class="hl-row1">
       <span class="hl-label">${t('Autocasting')}</span>
+      ${fightSelectButton()}
       <button data-hl="pause" ${q.loading ? 'disabled' : ''} ${tip(pauseLabel, t('Pause or resume the sequence; resuming returns to the paused moment'))}>${q.paused || q.done ? '▶' : '⏸'} ${pauseLabel}</button>
       <span class="hl-kbe" style="color:${playerColor(h.owner)}">${t('Kills by entity')}${icon ? ` <img src="${icon}" alt="">` : ''}</span>
       ${q.loading ? `<span class="hl-tag">${t('Preparing…')}</span>` : `${navBtn('prev', q.idx - 1, t('Previous'), t('Jump to the previous moment'))}
@@ -1574,7 +1707,7 @@ function toggleOmni() {
   if (omniOpen()) { closeOmni(); return; }
   const items = [...OMNI];
   if (isLive()) items.push(['Stop watching', 'stopWatching']);
-  if (!(S.session && S.session.live_connected)) items.push(['Start Age II', 'startGame']);
+  if (!(serverConfig && serverConfig.native_replays) && !(S.session && S.session.live_connected)) items.push(['Start Age II', 'startGame']);
   if (settings.toggleHTMLServer) items.push(['Open webpage', 'openHtmlServer']);
   el.innerHTML = `<div class="omni-title">Vantage</div>${items.map(([label, a]) => {
     const k = ['openSettings', 'stopWatching', 'startGame', 'openHtmlServer'].includes(a) ? '' : binding(a);
@@ -1666,9 +1799,9 @@ const ACTIONS = {
     toast(t(BASE_COLOR_NAMES[settings.baseColorMode]));
   },
   cycleColorMode: () => { S.colorMode = S.colorMode === 'game' ? 'team' : 'game'; },
-  setZoomLevelOne: () => world.centerOn(S.camera.x, S.camera.y, settings.zoomLevels.one),
-  setZoomLevelTwo: () => world.centerOn(S.camera.x, S.camera.y, settings.zoomLevels.two),
-  setZoomLevelThree: () => world.centerOn(S.camera.x, S.camera.y, settings.zoomLevels.three),
+  setZoomLevelOne: () => world.zoomTo(settings.zoomLevels.one),
+  setZoomLevelTwo: () => world.zoomTo(settings.zoomLevels.two),
+  setZoomLevelThree: () => world.zoomTo(settings.zoomLevels.three),
   updateZoomLevelOne: () => { settings.zoomLevels.one = S.camera.zoom; saveSettings(); toast(t('Zoom preset 1 saved')); },
   updateZoomLevelTwo: () => { settings.zoomLevels.two = S.camera.zoom; saveSettings(); toast(t('Zoom preset 2 saved')); },
   updateZoomLevelThree: () => { settings.zoomLevels.three = S.camera.zoom; saveSettings(); toast(t('Zoom preset 3 saved')); },
@@ -1695,7 +1828,7 @@ const ACTIONS = {
   toggleCursorClip: () => world.toggleCursorLock(),
   toggleOverview: () => layout.setVisible('overview', !layout.isVisible('overview')),
   togglePanelsMenu: () => layout.togglePanelsMenu(),
-  toggleAutocast: () => { autocast.on = !autocast.on; if (!autocast.on) S.highlight.list = false; toast(t(autocast.on ? 'Autocast on' : 'Autocast off')); },
+  toggleAutocast: () => { autocast.on = !autocast.on; if (!autocast.on) S.highlight.list = false; else { autocast.selection.resume(S.selection); autocast.nextMove = 0; } toast(t(autocast.on ? 'Autocast on' : 'Autocast off')); },
   showHighlights: () => { S.highlight.list = !S.highlight.list; },
   showTutorial: () => showTutorial(0),
 };
@@ -1751,17 +1884,40 @@ function wireScrub() {
   };
   scrub.addEventListener('mousedown', (e) => {
     if (e.button !== 0 || seekLocked()) return;
-    scrubbing = true; showHover(e); seek(panels.scrubTime(e));
+    scrubbing = true; S.scrubbing = true; showHover(e); seek(panels.scrubTime(e));
   });
   scrub.addEventListener('mousemove', (e) => { if (!seekLocked()) showHover(e); });
   scrub.addEventListener('mouseleave', () => { if (!scrubbing) hover.classList.add('hidden'); });
-  window.addEventListener('mousemove', (e) => { if (scrubbing) { showHover(e); seek(panels.scrubTime(e)); } });
-  window.addEventListener('mouseup', () => { if (scrubbing) { scrubbing = false; hover.classList.add('hidden'); } });
+  // While dragging, seek at most every SCRUB_MS (each seek is a view request) and
+  // land exactly where the mouse is released.
+  const SCRUB_MS = 80;
+  let scrubAt = 0, scrubLast = null, scrubTimer = 0;
+  const scrubSeek = () => { scrubTimer = 0; scrubAt = performance.now(); if (scrubLast != null) seek(scrubLast); scrubLast = null; };
+  // A release the page never saw (outside the window, a focus change) ends the drag.
+  const endScrub = () => { if (scrubbing) window.dispatchEvent(new MouseEvent('mouseup')); };
+  window.addEventListener('blur', endScrub);
+  window.addEventListener('mousemove', (e) => {
+    if (!scrubbing) return;
+    if (!(e.buttons & 1)) { endScrub(); return; }
+    showHover(e);
+    scrubLast = panels.scrubTime(e);
+    if (performance.now() - scrubAt >= SCRUB_MS) scrubSeek();
+    else if (!scrubTimer) scrubTimer = setTimeout(scrubSeek, SCRUB_MS - (performance.now() - scrubAt));
+  });
+  window.addEventListener('mouseup', () => {
+    if (!scrubbing) return;
+    scrubbing = false; hover.classList.add('hidden');
+    S.scrubbing = false;
+    // Land exactly where released (a move still waiting for the throttle).
+    if (scrubTimer) clearTimeout(scrubTimer);
+    if (scrubLast != null) scrubSeek(); else scrubTimer = 0;
+  });
   scrub.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!seekLocked()) removeBookmarkNear(panels.scrubTime(e)); });
 }
 
 function wire() {
   window.addEventListener('resize', world.resize);
+  new ResizeObserver(world.resizeMinimap).observe($('minimap'));
   // Edge scrolling follows the pointer only while it is over the map: not over a
   // HUD control near the edge, and not after it has left the window.
   window.addEventListener('mousemove', (e) => {
@@ -1823,6 +1979,9 @@ function wire() {
   $('tc-ff').onclick = () => { shuttle(1); renderHud(); };
   $('tc-slower').onclick = () => { setSpeed(S.speedIndex - 1); renderHud(); };
   $('tc-faster').onclick = () => { setSpeed(S.speedIndex + 1); renderHud(); };
+  const reviewButton = document.createElement('button'); reviewButton.id = 'tc-review'; reviewButton.textContent = t('Review'); reviewButton.onclick = () => toggleReviewTimeline(seek); $('time-controls2').prepend(reviewButton);
+  window.addEventListener('vantage-review-ready', () => panels.renderUnitPanel());
+  window.addEventListener('vantage-investigate', (event) => { S.investigatePlayer = event.detail?.pid; overlays.toggle('overlay-stats', () => overlays.renderStats(seek, event.detail?.metric)); });
   $('tc-bookmark').onclick = () => addBookmark(S.t - 30000);
   $('tc-bm-prev').onclick = () => { ACTIONS.bookmarkPrev(); renderHud(); };
   $('tc-bm-next').onclick = () => { ACTIONS.bookmarkNext(); renderHud(); };
@@ -1851,12 +2010,17 @@ function wire() {
   $('btn-panels').onclick = () => layout.togglePanelsMenu();
   layout.installPanelsMenu(renderHud);
   layout.installPanelTools(renderHud, toast);
+  installPanelResizing(renderHud);
   $('btn-help').onclick = ACTIONS.openHelp;
   $('highlight-bar').onclick = (e) => {
     const b = e.target.closest('[data-hl]');
     if (!b) return;
     const q = S.highlight.seq;
-    if (b.dataset.hl === 'pause') toggleSequencePause();
+    if (b.dataset.hl === 'selection') {
+      if (autocast.selection.enabled) autocast.selection.enabled = false;
+      else { autocast.selection.resume(S.selection); autocast.nextMove = 0; if (q) q.selectionReady = false; }
+    }
+    else if (b.dataset.hl === 'pause') toggleSequencePause();
     else if (b.dataset.hl === 'stop') endSequence();
     else if (q && b.dataset.hl === 'prev') playElement(q.idx - 1);
     else if (q && b.dataset.hl === 'cur') playElement(q.idx);
@@ -1891,7 +2055,9 @@ async function boot() {
   }
   world.resize();
   wire();
+  const probing = probeAssetOrigin();
   serverConfig = await api('/api/config').catch(() => null);
+  await probing;
   S.version = (serverConfig && serverConfig.version) || '';
   applyServerConfig(serverConfig);
   document.body.dataset.tooltips = tooltipLevel();
@@ -1905,7 +2071,7 @@ async function boot() {
   else if (!settings.seenTutorial && !document.body.classList.contains('overlay-mode')
     && !(desc.mode === 'live' && desc.certs && (desc.certs.missing || []).length)) showTutorial(0);
   subscribe();
-  hudTimer = setInterval(renderHud, 250);
+  hudTimer = setInterval(() => { if (!document.hidden) renderHud(); }, 250);
   for (const id of ['scoreboard', 'timebar', 'leftcol']) if ($(id)) leftColObserver.observe($(id));
   window.addEventListener('resize', layoutLeftColumn);
   requestAnimationFrame(tick);
@@ -1913,6 +2079,6 @@ async function boot() {
 
 // Debug/automation handle (used by the headless UI checks). openDocs and
 // hotkey conflicts are also reachable from other modules through it.
-window.vantage = { S, settings, seek, actions: ACTIONS, world, openDocs, heroes, startSequence, topKiller, autocastEntity, reloadSkins };
+window.vantage = { S, settings, seek, viewTimings, viewStats, actions: ACTIONS, world, openDocs, heroes, startSequence, topKiller, autocastEntity, reloadSkins };
 
 boot();

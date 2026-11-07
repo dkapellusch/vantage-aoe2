@@ -15,6 +15,8 @@ import os
 import re
 import struct
 import sys
+import threading
+import time
 import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -22,6 +24,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any, ClassVar
 
+from vantage.assetcache import SingleFlight, atomic_write
 from vantage.bc7 import decode_bc7
 from vantage.paths import local_data_dir
 
@@ -240,6 +243,10 @@ _MOD_SWITCHES = {
 }
 
 
+#: Seconds a scan of the mod folders is reused (:meth:`ModConfig._cached`).
+MOD_RESCAN_S = 5.0
+
+
 @dataclass
 class ModConfig:
     """Which mods the spectator reads, shared by every :class:`GameData` view
@@ -254,9 +261,52 @@ class ModConfig:
     live_mods: list[Path] | None = None
     #: Extra folders from the UI's ``modDirectories`` setting.
     extra: list[Path] = field(default_factory=list)
+    #: Folder scans by (settings, subfolder): (when, folders). See :meth:`_cached`.
+    _scans: dict[Any, tuple[float, list[Path]]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+    _scans_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
+
+    def _settings(self) -> tuple[Any, ...]:
+        """Everything here a scan depends on (the fields are replaced or edited in
+        place by the server, so they are read afresh each time)."""
+        live = tuple(self.live_mods) if self.live_mods is not None else None
+        return (tuple(self.profiles), live, tuple(self.extra))
+
+    def _cached(self, sub: Path | None, scan: Any) -> list[Path]:
+        """``scan()`` for these settings, reused for :data:`MOD_RESCAN_S`.
+
+        With graphics or sprite mods on, every sprite request asked for the mod
+        folders: a read of ``mod-status.json`` and a listing of the profile's mod
+        folders each time. Settings changes take effect at once; a mod installed or
+        enabled in the game is seen within the rescan interval.
+        """
+        key = (self._settings(), sub)
+        now = time.monotonic()
+        with self._scans_lock:
+            got = self._scans.get(key)
+        if got is not None and now - got[0] < MOD_RESCAN_S:
+            return list(got[1])
+        folders: list[Path] = scan()
+        with self._scans_lock:
+            if len(self._scans) > 64:  # settings that are long gone
+                self._scans.clear()
+            self._scans[key] = (now, folders)
+        return list(folders)
 
     def mod_folders(self) -> list[Path]:
         """Mod folders in priority order (first wins)."""
+        return self._cached(None, self._scan_folders)
+
+    def subfolders(self, sub: Path) -> list[Path]:
+        """``<mod>/<sub>`` for each mod folder that has one, in priority order."""
+        return self._cached(
+            sub, lambda: [m / sub for m in self.mod_folders() if (m / sub).is_dir()]
+        )
+
+    def _scan_folders(self) -> list[Path]:
         out: list[Path] = []
         if self.live_mods is not None:
             out += self.live_mods
@@ -526,6 +576,64 @@ TREE_LAYOUT: tuple[tuple[str, str, tuple[dict[str, Any], ...]], ...] = (
 )  # fmt: skip
 
 
+@dataclass(frozen=True)
+class TerrainType:
+    """One row of the game's terrain table (same meaning as the stream's TerrainType)."""
+
+    pict: str
+    rows: int
+    mask: str
+    color: int
+
+
+_DAT_STRING = b"\x60\x0a"
+_TERRAIN_FIRST = _DAT_STRING + b"\x05\x00Grass" + _DAT_STRING + b"\x05\x00g_grs"
+#: Bytes between the picture name and the mask name, and field offsets after the mask.
+_TERRAIN_NAME_GAP = 28
+_TERRAIN_COLOR_OFFSET = 1
+_TERRAIN_ROWS_OFFSET = 146
+_TERRAIN_COUNT = 200
+
+
+def _dat_string(d: bytes, offset: int) -> tuple[str, int]:
+    if d[offset : offset + 2] != _DAT_STRING:
+        raise ValueError(f"no terrain string at {offset:#x}")
+    size = struct.unpack_from("<H", d, offset + 2)[0]
+    end = offset + 4 + size
+    if end > len(d):
+        raise ValueError("truncated terrain string")
+    return d[offset + 4 : end].decode("latin-1"), end
+
+
+def parse_terrain_types(d: bytes) -> list[TerrainType]:
+    """Read the terrain table from a decompressed ``empires2_x2_p1.dat``.
+
+    Layout was checked against a game-streamed table (134 of 134 rows) and is the
+    same in the build 54800 and 57257 data files. Raises ValueError if it differs.
+    """
+    offset = d.find(_TERRAIN_FIRST)
+    if offset < 0:
+        raise ValueError("terrain table not found")
+    rows: list[TerrainType] = []
+    for index in range(_TERRAIN_COUNT):
+        _name, offset = _dat_string(d, offset)
+        pict, offset = _dat_string(d, offset)
+        mask, tail = _dat_string(d, offset + _TERRAIN_NAME_GAP)
+        rows.append(
+            TerrainType(
+                pict,
+                struct.unpack_from("<H", d, tail + _TERRAIN_ROWS_OFFSET)[0],
+                mask,
+                d[tail + _TERRAIN_COLOR_OFFSET],
+            )
+        )
+        if index + 1 < _TERRAIN_COUNT:
+            offset = d.find(_DAT_STRING, tail)
+            if offset < 0:
+                raise ValueError("truncated terrain table")
+    return rows
+
+
 class GameData:
     """Lazily-loaded game assets. Every accessor degrades to a neutral default."""
 
@@ -547,6 +655,8 @@ class GameData:
         self._lang_strings: dict[str, dict[int, str]] = {}
         #: Mod settings, shared with every view of this install (``with_mode``).
         self.mods = mods if mods is not None else ModConfig()
+        #: Conversions in progress by cache file: concurrent requests convert once.
+        self._converting: SingleFlight[Any] = SingleFlight()
 
     def mod_roots(self, kind: str) -> list[Path]:
         """Folders holding ``kind`` content ('graphics', 'sprites', 'terrain',
@@ -555,7 +665,7 @@ class GameData:
         sub = MOD_SUBDIRS.get(kind)
         if sub is None or not any(self.mods.enabled.get(k) for k in _MOD_SWITCHES[kind]):
             return []
-        return [m / sub for m in self.mods.mod_folders() if (m / sub).is_dir()]
+        return self.mods.subfolders(sub)
 
     @cached_property
     def build(self) -> int | None:
@@ -1179,6 +1289,20 @@ class GameData:
                 "image/png",
                 json.loads(meta_path.read_text(encoding="utf-8")),
             )
+        got: tuple[bytes, str, dict[str, Any]] | None = self._converting.run(
+            cached, lambda: self._convert_particle_atlas(src, frames_doc, cached, meta_path)
+        )
+        return got
+
+    def _convert_particle_atlas(
+        self, src: Path, frames_doc: dict[str, Any], cached: Path, meta_path: Path
+    ) -> tuple[bytes, str, dict[str, Any]] | None:
+        if cached.is_file() and meta_path.is_file():  # finished just before this call
+            return (
+                cached.read_bytes(),
+                "image/png",
+                json.loads(meta_path.read_text(encoding="utf-8")),
+            )
         data = src.read_bytes()
         (width,) = struct.unpack_from("<I", data, 16)
         mip = 2 if width >= 4096 else 1 if width >= 2048 else 0
@@ -1191,9 +1315,8 @@ class GameData:
         (png_width,) = struct.unpack_from(">I", png, 16)
         scale = png_width / width if width else 1.0
         meta = {"scale": scale, "frames": frames_doc.get("frames", [])}
-        cached.parent.mkdir(parents=True, exist_ok=True)
-        cached.write_bytes(png)
-        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        if atomic_write(cached, png):  # the image first: cached once the meta exists
+            atomic_write(meta_path, json.dumps(meta).encode())
         return png, "image/png", meta
 
     def civ_emblem(self, civ_id: int | None) -> Path | None:
@@ -1215,6 +1338,17 @@ class GameData:
         return None
 
     # -- colours --------------------------------------------------------------
+
+    @cached_property
+    def terrain_types(self) -> list[TerrainType]:
+        """The game's terrain table, for recordings whose stream does not carry one."""
+        if self.game_dir is None:
+            return []
+        path = self.game_dir / "resources" / "_common" / "dat" / "empires2_x2_p1.dat"
+        try:
+            return parse_terrain_types(zlib.decompress(path.read_bytes(), -15))
+        except (OSError, zlib.error, ValueError, struct.error):
+            return []
 
     @cached_property
     def interface_palette(self) -> list[tuple[int, int, int]]:
@@ -1268,13 +1402,8 @@ class GameData:
         src = self._icon_source(self._ICON_DIRS[kind], icon_id)
         if src is None:
             return None
-        try:
-            png = dds_to_png(src.read_bytes())
-        except (ValueError, struct.error):
-            return None
-        cached.parent.mkdir(parents=True, exist_ok=True)
-        cached.write_bytes(png)
-        return png
+        got: bytes | None = self._converting.run(cached, lambda: _convert_dds(src, cached))
+        return got
 
     @cached_property
     def _icon_index(self) -> dict[str, dict[int, Path]]:
@@ -1438,17 +1567,25 @@ class GameData:
         cached = self.cache_dir / "terrain" / (f"{key}-{name}.png" if key else f"{name}.png")
         if cached.is_file():
             return cached.read_bytes()
-        try:
-            png = dds_to_png(src.read_bytes(), mip=2)
-        except (ValueError, struct.error):
-            return None
-        cached.parent.mkdir(parents=True, exist_ok=True)
-        cached.write_bytes(png)
-        return png
+        got: bytes | None = self._converting.run(cached, lambda: _convert_dds(src, cached, mip=2))
+        return got
 
     def emblem_png(self, civ_id: int) -> bytes | None:
         p = self.civ_emblem(civ_id)
         return p.read_bytes() if p is not None else None
+
+
+def _convert_dds(src: Path, cached: Path, mip: int = 0) -> bytes | None:
+    """A DDS converted to PNG and stored at ``cached`` (once per file at a time,
+    through :attr:`GameData._converting`)."""
+    if cached.is_file():  # finished just before this call
+        return cached.read_bytes()
+    try:
+        png = dds_to_png(src.read_bytes(), mip=mip)
+    except (ValueError, struct.error):
+        return None
+    atomic_write(cached, png)
+    return png
 
 
 def _cache_key(p: Path) -> str:

@@ -45,8 +45,7 @@ img.agg-icon { width: 20px; height: 20px; vertical-align: -5px; }
 .about { margin: 0 0 8px; }
 .rf-row { flex-wrap: wrap; }
 .more-row { justify-content: center; }
-.rec-dot { color: var(--bad, #e06a5c); animation: ovl-blink 1.4s steps(2, start) infinite; }
-@keyframes ovl-blink { to { visibility: hidden; } }
+.rec-dot { color: var(--bad, #e06a5c); }
 .saved { color: var(--good, #7fc27a); }
 .list td.warn .hint { color: var(--warn, #e0a030); opacity: .8; }
 

@@ -63,6 +63,14 @@ class Layer:
     blocks: list[bytes | None]  # one entry per 4x4 block, None = transparent
 
 
+def _only_repeats(layers: dict[int, Layer]) -> bool:
+    """True for a frame whose main layer sets the reuse flag and draws no block."""
+    main = layers.get(LAYER_MAIN)
+    return (
+        main is not None and bool(main.flag & 0x80) and all(block is None for block in main.blocks)
+    )
+
+
 class SLDError(ValueError):
     pass
 
@@ -126,8 +134,22 @@ class SLD:
         return out
 
     def _decode(self, index: int) -> dict[int, Layer]:
-        if self.per_facing > 0 and index % self.per_facing == 0:
+        previous = self._prev
+        starts_facing = self.per_facing > 0 and index % self.per_facing == 0
+        if starts_facing:
             self._prev = {}
+        out = self._decode_layers(index)
+        if starts_facing and previous and _only_repeats(out):
+            # No pixels of its own: the frame is a plain repeat of the one before it
+            # (reeds stored as variants), not a new facing's picture. Left empty, it
+            # would not be drawn at all.
+            self._prev = previous
+            out = self._decode_layers(index)
+        _fill_zero_blocks(out)
+        self._prev.update(out)
+        return out
+
+    def _decode_layers(self, index: int) -> dict[int, Layer]:
         fr = self.frames[index]
         data = self.data
         pos = fr.offset + 12
@@ -153,8 +175,6 @@ class SLD:
             if bit in (LAYER_MAIN, LAYER_SHADOW, LAYER_DAMAGE, LAYER_PLAYER):
                 out[bit] = self._blocks(data, p, end, rect, flag, self._prev.get(bit))
             pos = nxt
-        _fill_zero_blocks(out)
-        self._prev.update(out)
         return out
 
     @staticmethod

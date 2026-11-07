@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from vantage import smx as smx_mod
+from vantage.assetcache import SingleFlight, atomic_write
 from vantage.gamedata import _png
 from vantage.patch import Node
 from vantage.schema import SCHEMA
@@ -90,8 +91,9 @@ class SpriteInfo:
 #: on disk by an older version are rendered again (3: degenerate SLD blocks filled;
 #: 4: inter-frame reuse across differing rectangles; 5: shadow parts as shade;
 #: 6: damage shading as the game's shader; 7: inter-frame reuse within a facing;
-#: 8: meta "pc", whether a strip has any player colour).
-RENDER_VERSION = 8
+#: 8: meta "pc", whether a strip has any player colour; 9: a facing's first frame
+#: with no pixels of its own repeats the frame before it).
+RENDER_VERSION = 9
 
 
 #: Worker processes rendering strips (shared by every store in the process). A
@@ -212,6 +214,8 @@ class SpriteStore:
         self.cache = cache_dir / "sprites"
         self._open: dict[str, SLD | SMX] = {}
         self._lock = threading.Lock()
+        #: Strips being rendered, by cache key: a second request waits for the first.
+        self._rendering: SingleFlight[tuple[bytes, dict[str, Any]] | None] = SingleFlight()
 
     def resolve(self, name: str, hd: bool = False) -> Path | None:
         """The SLD (or SMX) for a sprite-table name: standard resolution, or UHD (x2)
@@ -280,6 +284,28 @@ class SpriteStore:
         meta_path = self.cache / f"{key}.json"
         if png_path.is_file() and meta_path.is_file():
             return png_path.read_bytes(), json.loads(meta_path.read_text(encoding="utf-8"))
+        return self._rendering.run(
+            key,
+            lambda: self._render_and_cache(
+                info, facet, rgb, hd, damage, layer, player_mask, png_path, meta_path
+            ),
+        )
+
+    def _render_and_cache(
+        self,
+        info: SpriteInfo,
+        facet: int,
+        rgb: tuple[int, int, int] | None,
+        hd: bool,
+        damage: int,
+        layer: str,
+        player_mask: bool,
+        png_path: Path,
+        meta_path: Path,
+    ) -> tuple[bytes, dict[str, Any]] | None:
+        """Render one strip and store it (:meth:`strip` once per key at a time)."""
+        if png_path.is_file() and meta_path.is_file():  # finished just before this call
+            return png_path.read_bytes(), json.loads(meta_path.read_text(encoding="utf-8"))
         path = self.resolve(info.name, hd)
         if path is None:
             return None
@@ -304,9 +330,9 @@ class SpriteStore:
             meta["layer"] = layer
         if damage:
             meta["damage"] = damage
-        self.cache.mkdir(parents=True, exist_ok=True)
-        png_path.write_bytes(png)
-        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        # The PNG first: a strip counts as cached once its meta file exists.
+        if atomic_write(png_path, png):
+            atomic_write(meta_path, json.dumps(meta).encode())
         return png, meta
 
     def _render_pooled(
@@ -406,10 +432,15 @@ class SpriteStore:
                 o = dy * stride + dx * 4
                 sheet[o : o + len(row)] = row
                 if masks is not None:
+                    # Grey levels: each mask byte to R, G and B, alpha opaque, by
+                    # strided slices rather than a Python loop per pixel.
                     mrow = masks[n][y * w + bx0 : y * w + bx1]
                     mo = o + ch * stride
-                    for i, v in enumerate(mrow):
-                        sheet[mo + i * 4 : mo + i * 4 + 4] = bytes((v, v, v, 255))
+                    end = mo + len(mrow) * 4
+                    sheet[mo:end:4] = mrow
+                    sheet[mo + 1 : end : 4] = mrow
+                    sheet[mo + 2 : end : 4] = mrow
+                    sheet[mo + 3 : end : 4] = b"\xff" * len(mrow)
         meta = {
             "cw": cw,
             "ch": ch,

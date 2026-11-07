@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -976,3 +977,178 @@ def test_unit_track_records_where_units_went_between_keyframes() -> None:
     moves = [[u[0], u[1]] for _, units in track for u in units]
     assert moves == [[104, 4.0], [104, 5.0], [104, 6.0]]
     assert after["unit_track"] == []
+
+
+def test_a_repeated_snapshot_of_the_same_moment_is_skipped(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A game that ended or paused answers every reconnect with the same full
+    snapshot; re-applying one (seconds of CPU late in a game) changes nothing."""
+    tl = Timeline(GameData(None))
+    assert tl.feed(snapshot_frame(5000)) is True
+    patcher, frames, version = tl.patcher, tl.frames, tl.version
+    assert tl.feed(snapshot_frame(5000)) is False
+    assert tl.patcher is patcher and tl.frames == frames and tl.version == version
+    assert tl.repeated_snapshots == 1
+    # Another state at the same moment, a snapshot after a delta, and a snapshot
+    # that resynchronises a broken tree are all applied.
+    assert tl.feed(Frame(time=5000, patch=snapshot_frame(4000).patch)) is True
+    assert tl.feed(Frame(time=5000, patch=delta(5000, set_attr(1, "food", 5.0)).forward()))
+    assert tl.feed(snapshot_frame(5000)) is True
+    tl.feed(Frame(time=5000, patch=b"\xff"))  # an unknown instruction
+    assert tl.desynced and tl.feed(snapshot_frame(5000)) is True and not tl.desynced
+    # A later moment is never a repeat.
+    assert tl.feed(snapshot_frame(6000)) is True
+    assert tl.repeated_snapshots == 1
+
+    from vantage import timeline as T
+
+    settled: list[int] = []
+    monkeypatch.setattr(T, "settle_heap", lambda: settled.append(1))
+    path = tmp_path / "paused.vrec"
+    with RecordingWriter(path) as w:
+        for f in game_frames(2):
+            w.write(f)
+        for _ in range(5):
+            w.write(snapshot_frame(2000))  # stream reopened on a paused game
+    loaded = load_recording(str(path), GameData(None))
+    # After a delta the first one applies; the four after it are skipped, and
+    # the heap is settled only for snapshots that were applied.
+    assert loaded.repeated_snapshots == 4
+    assert loaded.frames == 6 and len(settled) == 2
+
+
+def test_events_between_reads_without_the_lock_in_or_out_of_order() -> None:
+    import threading
+
+    tl = _timeline()
+
+    def scan(t0: int, t1: int) -> list[dict[str, Any]]:
+        return [e for e in tl.events if t0 <= e["t"] <= t1]
+
+    for t0, t1 in ((0, 1 << 62), (3000, 3000), (3001, 4999), (5000, 9000), (7000, 1000)):
+        assert tl.events_between(t0, t1) == scan(t0, t1)
+    held, release = threading.Event(), threading.Event()
+
+    def ingest() -> None:
+        with tl._lock:
+            held.set()
+            release.wait(5)
+
+    th = threading.Thread(target=ingest)
+    th.start()
+    try:
+        assert held.wait(5)
+        got: list[Any] = []
+        reader = threading.Thread(target=lambda: got.append(tl.events_between(0, 1 << 62)))
+        reader.start()
+        reader.join(2)
+        assert not reader.is_alive() and got[0] == scan(0, 1 << 62)
+    finally:
+        release.set()
+        th.join()
+    # An event logged with an earlier time than the last one still turns up.
+    tl.add_event({"t": 3500, "cat": "status", "kind": "waiting", "players": []})
+    tl.add_event({"t": 99_000, "cat": "status", "kind": "waiting", "players": []})
+    for t0, t1 in ((3400, 3600), (0, 1 << 62), (98_000, 99_000)):
+        assert tl.events_between(t0, t1) == scan(t0, t1)
+
+
+def test_series_since_a_time_and_cached_between_versions() -> None:
+    tl = _timeline()
+    full = tl.series_json()
+    assert full == {pid: list(rows) for pid, rows in tl.series.items()}
+    assert tl.series_json() is full  # nothing new: the same result
+    times = [r["t"] for r in full["1"]]
+    assert times == sorted(times) and len(times) >= 3
+    since = tl.series_json(times[1])
+    assert set(since) == set(full)
+    assert all(rows == [r for r in full[pid] if r["t"] >= times[1]] for pid, rows in since.items())
+    assert tl.series_json(times[1] + 1)["1"] == full["1"][2:]
+    assert tl.series_json(10**9) == {pid: [] for pid in full}
+    tl.add_event({"t": 1, "cat": "status", "kind": "waiting", "players": []})
+    assert tl.series_json() is not full and tl.series_json() == full
+
+
+def _encoded(v: Any) -> bytes:
+    """``/api/view`` as the server encoded the parsed view before view_json."""
+    return json.dumps(v, separators=(",", ":"), default=str).encode()
+
+
+def test_view_json_is_the_view_byte_for_byte_and_caches_final_keyframes(
+    monkeypatch: Any,
+) -> None:
+    from vantage import timeline as T
+
+    tl = _missile_timeline()
+    _feed(tl, 1200, set_entity(104, "Entity", "worldX", "Float", 4.5))
+    _feed(tl, 1450)  # the newest keyframe's tracks are still filling
+    for t in (None, -100, 0, 50, 1099, 1100, 1300, 99_000):
+        v = tl.view_at(t)
+        assert v is not None and tl.view_json(t) == _encoded(v), t
+    assert tl.view_at(0)["missile_track"] and tl.view_at(1100)["missile_track"]  # type: ignore[index]
+    # The newest keyframe has no successor yet: its tracks may still grow.
+    newest = json.loads(tl.view_json(1300) or b"")
+    assert newest["final"] is False and newest["time"] == 1100
+    assert "final" not in json.loads(tl.view_json(0) or b"")
+    # Only final responses are kept, and the same bytes are served again.
+    assert tl.view_json(0) is tl.view_json(50)
+    assert set(tl._view_cache) == {(0, False)}
+    tl.finish()  # nothing more comes: the newest keyframe is final too
+    for t in (None, 0, 1100, 1450):
+        v = tl.view_at(t)
+        assert v is not None and "final" not in v and tl.view_json(t) == _encoded(v)
+    monkeypatch.setattr(T, "VIEW_CACHE_SIZE", 2)
+    tl._view_cache.clear()
+    for t in (0, 1100, None):
+        tl.view_json(t)
+    assert len(tl._view_cache) == 2
+
+
+def test_views_of_a_whole_game_match_byte_for_byte() -> None:
+    tl = Timeline(GameData(None))
+    for f in game_frames(12):
+        tl.feed(f)
+    for t in (None, *range(-500, 13_000, 250)):
+        v = tl.view_at(t)
+        assert v is not None and tl.view_json(t) == _encoded(v), t
+    assert Timeline(GameData(None)).view_json(0) is None
+
+
+def test_unit_and_group_panels_decode_the_keyframe_outside_the_lock(monkeypatch: Any) -> None:
+    tl = _timeline()
+    before = (tl.unit_stats(104, 5000), tl.group_stats([104, 100], 5000), tl.unit_stats(104))
+    real = tl.keyframe_at
+    held: list[bool] = []
+
+    def keyframe_at(t: int | None) -> Any:
+        held.append(tl._lock._is_owned())  # type: ignore[attr-defined]
+        return real(t)
+
+    def no_view(t: int | None) -> Any:
+        raise AssertionError("the whole view is not needed")
+
+    monkeypatch.setattr(tl, "keyframe_at", keyframe_at)
+    monkeypatch.setattr(tl, "view_at", no_view)
+    after = (tl.unit_stats(104, 5000), tl.group_stats([104, 100], 5000), tl.unit_stats(104))
+    assert after == before and held == [False, False, False]
+    assert real(5000) is real(5400)  # decoded once for both
+
+
+def test_a_track_stored_while_its_buffer_is_read_is_served_stored() -> None:
+    """Ingestion stores a keyframe's full buffer, then starts the next keyframe's;
+    a reader without the lock that sees the next buffer must not serve it."""
+    import zlib
+
+    from vantage.timeline import _track_json
+
+    stored: dict[int, bytes] = {}
+    full = [[1100, [[104, 4.0, 1.0, 0]]]]
+
+    def buffer() -> list[Any]:
+        stored[1000] = zlib.compress(json.dumps(full, separators=(",", ":")).encode())
+        return [[2050, [[104, 9.0, 1.0, 0]]]]  # already the next keyframe's samples
+
+    assert json.loads(_track_json(stored, 1000, lambda: 1000, buffer)) == full
+    assert json.loads(_track_json({}, 1000, lambda: 1000, lambda: full)) == full
+    assert _track_json({}, 1000, lambda: 2000, lambda: full) == b"[]"

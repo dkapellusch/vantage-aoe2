@@ -5,6 +5,7 @@ from __future__ import annotations
 import struct
 import zlib
 from pathlib import Path
+from typing import Any
 
 from tests.test_sld import FULL, GREY, RED, _layer, _sld
 from vantage.patch import Node
@@ -291,3 +292,33 @@ def test_worker_processes_render_the_same_strip(tmp_path: Path) -> None:
     finally:
         SP._drop_pool()
     assert here is not None and pooled == here
+
+
+def test_concurrent_requests_for_one_strip_render_it_once(tmp_path: Path, monkeypatch: Any) -> None:
+    import threading
+    import time
+
+    store = SpriteStore(_install(tmp_path, 4), tmp_path / "cache")
+    real = SpriteStore._render_strip
+    renders: list[int] = []
+
+    def slow(*args: Any, **kw: Any) -> Any:
+        renders.append(1)
+        time.sleep(0.2)  # long enough for every request to arrive meanwhile
+        return real(*args, **kw)
+
+    monkeypatch.setattr(SpriteStore, "_render_strip", staticmethod(slow))
+    info = SpriteInfo(7, "u_test_idle", frames=2, facets=2, duration=0.1)
+    got: list[Any] = []
+    threads = [
+        threading.Thread(target=lambda: got.append(store.strip(info, 1, (0, 0, 255), "0")))
+        for _ in range(4)
+    ]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(5)
+    assert len(renders) == 1 and len(got) == 4 and got[0] is not None
+    assert all(g == got[0] for g in got)
+    # Written whole: no temporary files left beside the cached strip.
+    assert sorted(p.suffix for p in (tmp_path / "cache" / "sprites").iterdir()) == [".json", ".png"]

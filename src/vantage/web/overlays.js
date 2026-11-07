@@ -6,10 +6,15 @@ import { ECO_TECHS, MIL_TECHS } from './games.js';
 import {
   S, SPEEDS, settings, saveSettings, resetSettings, replaceSettings, DEFAULT_SETTINGS, api, fetchView, fmtTime, fmtNum, esc, players,
   gameKey, playerName, playerColor, playerTextColor, teams, sideTeams, teamName, unitInfo, unitIcon, AGE_NAMES, toast, tip, tooltipLevel,
+  refreshSeries,
 } from './state.js';
 import * as HK from './hotkeys.js';
+import { DASH_HISTORY } from './player-review.js';
+import { investigationHtml, wireInvestigation } from './review-workspace.js';
 import { t, LANGS, language, setLanguage, keyLabel } from './i18n.js';
 import * as PN from './panels.js';
+import { patchHtml } from './dom.js';
+import { bonusIncomeHtml } from './resource-review.js';
 
 const $ = (id) => document.getElementById(id);
 // app.js publishes its actions (pause, seek, speed, …) on window.vantage.
@@ -18,6 +23,7 @@ const seekFn = (s) => s || (window.vantage && window.vantage.seek) || null;
 const baseName = (p) => String(p || '').split(/[\\/]/).pop();
 const ordinal = (n) => (n === 1 ? t('1st') : n === 2 ? t('2nd') : n === 3 ? t('3rd') : t('{n}th', { n }));
 let openId = null;
+let nativeReplays = false;
 
 export const REPO_URL = 'https://github.com/dkapellusch/vantage-aoe2';
 const LIVE_DOCS_URL = `${REPO_URL}/wiki/Live-games`;
@@ -83,16 +89,18 @@ const TABS = {
       'trade_units', 'eco_units'],
   },
   technology: { title: 'Technology', series: ['techs', 'age'] },
+  bonus: { title: 'Bonus resources', series: ['bonus_total', 'bonus_food', 'bonus_wood', 'bonus_gold', 'bonus_stone'] },
   society: { title: 'Society', series: ['explored', 'relics', 'pop', 'eco_pop', 'mil_pop'] },
   apm: { title: 'APM', series: ['apm', 'apm_eco', 'apm_mil'] },
   timeline: {
     title: 'Timeline',
     series: ['villagers', 'military', 'pop', 'eco_pop', 'mil_pop', 'eco_units', 'army_value', 'col_total', 'res_food', 'res_wood',
       'res_gold', 'res_stone', 'explored', 'apm', 'task_food', 'task_wood', 'task_gold', 'task_stone', 'task_idle', 'gather_food_lm',
-      'gather_wood_lm', 'gather_gold_lm', 'gather_stone_lm'],
+      'gather_wood_lm', 'gather_gold_lm', 'gather_stone_lm', 'tc_idle', 'housed'],
   },
 };
 export const SERIES_LABEL = {
+  bonus_total: 'Bonus resources', bonus_food: 'Bonus food', bonus_wood: 'Bonus wood', bonus_gold: 'Bonus gold', bonus_stone: 'Bonus stone',
   score: 'Score', col_total: 'Resources collected', army_value: 'Military value', military: 'Military units',
   kills: 'Kills', deaths: 'Losses', razings: 'Buildings razed', villagers: 'Villagers', col_food: 'Food collected',
   col_wood: 'Wood collected', col_gold: 'Gold collected', col_stone: 'Stone collected', idle: 'Idle villagers',
@@ -338,7 +346,7 @@ export function drawChart(canvas, opts, seek) {
     const at = tAt(ev.clientX);
     let i = 0; while (i < n - 1 && times[i + 1] <= at) i++;
     tipEl.classList.remove('hidden');
-    tipEl.innerHTML = `<b>${fmtTime(times[i])}</b> · ${esc(seriesLabel(key))}<br>` + series.map((s, k) => `<span style="color:${playerTextColor(s.p.id)}">${esc(playerName(s.p.id))}</span> ${fmtNum(matrix[k][i])}${pct}`).join('<br>');
+    patchHtml(tipEl, `<b>${fmtTime(times[i])}</b> · ${esc(seriesLabel(key))}<br>` + series.map((s, k) => `<span style="color:${playerTextColor(s.p.id)}">${esc(playerName(s.p.id))}</span> ${fmtNum(matrix[k][i])}${pct}`).join('<br>'));
     // Beside the pointer, flipped to the other side near the window's edges.
     const r = tipEl.getBoundingClientRect();
     const x = ev.clientX + 14 + r.width > window.innerWidth - 4 ? ev.clientX - 14 - r.width : ev.clientX + 14;
@@ -362,7 +370,7 @@ export function drawChart(canvas, opts, seek) {
 
 // -- statistics overlay -------------------------------------------------------------------
 
-let statsSeek = null, statsTimer = null, aggAt = -1e12, aggPending = false;
+let statsSeek = null, statsTimer = null, aggAt = -1e12, aggPending = false, statsRenderVersion = 0;
 const statsDrawn = { t: -1, end: -1, series: null, span: -1, from: -1 };
 
 function summaryUrl(at) {
@@ -428,7 +436,7 @@ function refreshAggregates(force) {
   api(summaryUrl(at)).then((sm) => {
     S.summary = sm; aggAt = at;
     const box = $('stats-agg');
-    if (box && isOpen('overlay-stats')) box.innerHTML = aggregates(chartState.tab);
+    if (box && isOpen('overlay-stats')) patchHtml(box, aggregates(chartState.tab));
   }).catch(() => {}).finally(() => { aggPending = false; });
 }
 
@@ -440,14 +448,25 @@ function statsTick() {
   refreshAggregates(false);
 }
 
-export async function renderStats(seek) {
+export async function renderStats(seek, metric = null) {
+  const mapped = DASH_HISTORY[metric] || metric;
+  const tab = mapped && Object.keys(TABS).find((key) => TABS[key].series.includes(mapped));
+  if (tab) { chartState.tab = tab; chartState.key = mapped; }
   if (seek) statsSeek = seek;
-  const el = $('overlay-stats');
-  if (!S.series || S.seriesAt < S.end - 5000 || !S.complete) {
-    S.series = await api('/api/series').catch(() => S.series);
-    S.seriesAt = S.end;
+  const el = $('overlay-stats'), version = ++statsRenderVersion, generation = S.session?.generation;
+  el.setAttribute('aria-busy', 'true');
+  if (!el.querySelector('#chart') || el._statsGeneration !== generation) {
+    el.innerHTML = `${closeBtn()}<div role="status" class="review-loading" aria-label="${t('Loading')}">◌</div>`;
   }
-  S.summary = await api(summaryUrl(S.t)).catch(() => S.summary);
+  wireClose(el);
+  const needSeries = !S.series || S.seriesAt < S.end - 5000 || !S.complete;
+  const [series, summary] = await Promise.all([
+    needSeries ? refreshSeries().catch(() => S.series) : Promise.resolve(S.series),
+    api(summaryUrl(S.t)).catch(() => S.summary),
+  ]);
+  if (version !== statsRenderVersion || generation !== S.session?.generation) return;
+  S.series = series; S.summary = summary;
+  el._statsGeneration = generation;
   aggAt = S.t;
   const keys = tabSeries(chartState.tab);
   if (!keys.includes(chartState.key)) chartState.key = keys[0];
@@ -457,11 +476,14 @@ export async function renderStats(seek) {
     ${settings.showStatsTimeControls ? timeStrip() : ''}
     <div class="chart-controls">
       <select id="ch-key" ${tip(t('Chart'), t('The value plotted for every player'))}>${keys.map((k) => `<option value="${k}" ${k === chartState.key ? 'selected' : ''}>${esc(seriesLabel(k))}</option>`).join('')}</select>
+      <details class="review-chart-options"><summary>${t('Chart options')}</summary><div>
       <select id="ch-type"><option value="line">${t('Line')}</option><option value="stacked">${t('Stacked')}</option></select>
       <select id="ch-transform"><option value="actual">${t('Actual')}</option><option value="percent">${t('% of current total')}</option><option value="relative">${t('Relative to max')}</option></select>
       <label><input type="checkbox" id="ch-techs" ${chartState.techMarks ? 'checked' : ''}> ${t('Age-ups')}</label>
       <label><input type="checkbox" id="ch-eco" ${chartState.ecoTechs ? 'checked' : ''}> ${t('Eco techs')}</label>
       <label><input type="checkbox" id="ch-mil" ${chartState.milTechs ? 'checked' : ''}> ${t('Military techs')}</label>
+      <button id="ch-save">${t('Save options')}</button><button id="ch-reset">${t('Reset')}</button><button id="ch-export" ${tip(t('Export stats'), t('Download the statistics as JSON and the series as CSV'))}>${t('Export stats')}</button>
+      </div></details>
       <span class="chart-zoom">
         ${zb('ch-prev', '◀', 'Previous', 'Page to the earlier part of the game')}
         ${zb('ch-zoomout', '−', 'Zoom out')}
@@ -470,20 +492,32 @@ export async function renderStats(seek) {
         ${zb('ch-next', '▶', 'Next', 'Page to the later part of the game')}
         ${zb('ch-zoomreset', t('All'), 'Whole game')}
       </span>
-      <button id="ch-save">${t('Save options')}</button><button id="ch-reset">${t('Reset')}</button><button id="ch-export" ${tip(t('Export stats'), t('Download the statistics as JSON and the series as CSV'))}>${t('Export stats')}</button>
     </div>
     <div class="legend">${players().map((p) => `<label><input type="checkbox" data-pid="${p.id}" ${chartState.hidden.has(p.id) ? '' : 'checked'}><i style="background:${playerColor(p.id)}"></i>${esc(playerName(p.id))}</label>`).join('')}
       <span class="hint">${t('Hover to compare · wheel to zoom · right-click to jump to that time')}</span></div>
+    ${chartState.tab === 'bonus' ? `<div id="stats-agg">${aggregates('bonus')}</div><details class="review-chart-options"><summary>${t('Investigate')}</summary>${investigationHtml(chartState.key)}</details>` : investigationHtml(chartState.key)}
     <div class="chart-wrap"><canvas id="chart"></canvas></div>
-    <div id="stats-agg">${aggregates(chartState.tab)}</div>`;
+    ${chartState.tab === 'bonus' ? '' : `<details class="review-details"><summary>${t('Totals')}</summary><div id="stats-agg">${aggregates(chartState.tab)}</div></details>`}`;
+  el.setAttribute('aria-busy', 'false');
   wireClose(el);
+  const investigateRange = (from, to, pids) => {
+    chartState.from = from; chartState.span = Math.max(1, to - from);
+    chartState.hidden = new Set(players().map((p) => p.id).filter((pid) => !pids.includes(pid)));
+    el.querySelectorAll('.legend input').forEach((checkbox) => { checkbox.checked = !chartState.hidden.has(+checkbox.dataset.pid); });
+    drawStatsChart();
+  };
+  wireInvestigation(el, chartState.key, seekFn(statsSeek), closeAll, investigateRange);
   $('ch-type').value = chartState.type;
   $('ch-transform').value = chartState.transform;
   const redraw = () => drawStatsChart();
   // A new tab opens on its own first chart (keeping the old key showed the same
   // chart under a different tab).
   el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { if (chartState.tab !== b.dataset.tab) chartState.key = null; chartState.tab = b.dataset.tab; loadChartDefinition(chartState.tab); renderStats(); }));
-  $('ch-key').addEventListener('change', (e) => { chartState.key = e.target.value; redraw(); });
+  $('ch-key').addEventListener('change', (e) => {
+    chartState.key = e.target.value;
+    el.querySelector('.review-investigation').outerHTML = investigationHtml(chartState.key);
+    wireInvestigation(el, chartState.key, seekFn(statsSeek), closeAll, investigateRange); redraw();
+  });
   $('ch-type').addEventListener('change', (e) => { chartState.type = e.target.value; redraw(); });
   $('ch-transform').addEventListener('change', (e) => { chartState.transform = e.target.value; redraw(); });
   $('ch-techs').addEventListener('change', (e) => { chartState.techMarks = e.target.checked; redraw(); });
@@ -652,6 +686,7 @@ function aggregates(tab) {
   const vp = (S.view && S.view.players) || {};
   const ps = players().filter((p) => sm[p.id] || vp[p.id]);
   if (!ps.length) return '';
+  if (tab === 'bonus') return bonusIncomeHtml(ps.map((p) => ({ id: p.id, name: playerName(p.id), color: playerTextColor(p.id), income: vp[p.id]?.resource_income || sm[p.id]?.resource_income })));
   const data = ps.map((p) => ({ p, s: sm[p.id] || {}, v: vp[p.id] || {} }));
   const rows = (AGG[tab] || []).map(([lbl, f, detail, opts = {}]) => {
     const label = typeof lbl === 'function' ? lbl() : lbl;
@@ -817,6 +852,8 @@ function replayRow(r, i, rf, withDetails) {
 const certsMissing = (sess) => (sess && sess.certs && sess.certs.missing) || [];
 let watchBlock = '';
 function watchAttrs() {
+  // Local replay playback converts the replay here: no game, no certificates.
+  if (nativeReplays) return tip(t('Watch'), t('Convert and watch this replay'));
   return watchBlock ? `disabled ${tip(t('Watch'), watchBlock)}` : tip(t('Watch'), t('Ask the running game to open this replay and stream it here'));
 }
 const certsGuide = (sess) => extLink((sess.certs && sess.certs.docs) || LIVE_DOCS_URL, t('About the certificate files'));
@@ -931,7 +968,7 @@ function replaysBody(reps, f, sess) {
   const shown = rows.slice(0, replayLimit);
   const more = rows.length - shown.length;
   return `${watchBlock ? `<p class="warn">⚠ ${esc(watchBlock)} ${certsGuide(sess)}</p>` : ''}
-    <p class="hint">${t('Recorded games from your profile. Playing one asks the running game to open it and streams it here (the game must be running).')}
+    <p class="hint">${t(nativeReplays ? 'Replays are converted locally before playback.' : 'Recorded games from your profile. Playing one asks the running game to open it and streams it here (the game must be running).')}
       <button class="link" data-folder="profile">${t('Open profile folder')}</button></p>
     <div class="form-row rf-row">
       <select id="rf-game">${opt('', t('All games'), rf.game)}${opt('aoe2', 'AoE2', rf.game)}${opt('ror', t('Return of Rome'), rf.game)}</select>
@@ -992,7 +1029,8 @@ async function playReplay(r, confirmed = false) {
   if (res && res.needs_certs) { toast(t('Certificate files missing: live games and replays cannot connect')); return; }
   if (!res || !res.ok) { toast(t('Could not load the replay: {error}', { error: (res && (res.error || res.code)) || t('failed') })); return; }
   const result = res.load_result ?? res.code;
-  toast(result != null ? t('Game load result: {code}', { code: typeof result === 'object' ? JSON.stringify(result) : result }) : t('Asked the game to load the replay…'));
+  if (res.state === 'queued') toast(t('Replay queued'));
+  else toast(result != null ? t('Game load result: {code}', { code: typeof result === 'object' ? JSON.stringify(result) : result }) : t('Asked the game to load the replay…'));
   closeAll();
   if (homeOpened) homeOpened();
 }
@@ -1003,17 +1041,20 @@ export async function renderHome(onOpened) {
   // Listing the replays reads every header: show something on the first open.
   if (!el.innerHTML.trim()) { el.innerHTML = `${closeBtn()}<h2>${t('Vantage')}</h2><p class="hint">${t('Loading…')}</p>`; wireClose(el); }
   const arr = (x) => (Array.isArray(x) ? x : []);
-  const [recs, reps, sess] = await Promise.all([
+  const [recs, reps, sess, config] = await Promise.all([
     api('/api/recordings').then(arr, () => []), api('/api/replays').then(arr, () => []), api('/api/session?probe=1').catch(() => ({})),
+    api('/api/config').catch(() => ({})),
   ]);
-  watchBlock = certsMissing(sess).length ? t('Watching a replay needs the certificate files, missing from {dir}.', { dir: sess.certs.dir }) : '';
+  nativeReplays = config.native_replays === true;
+  if (nativeReplays && homeTab === 'live') homeTab = 'replays';
+  watchBlock = !nativeReplays && certsMissing(sess).length ? t('Watching a replay needs the certificate files, missing from {dir}.', { dir: sess.certs.dir }) : '';
   const f = homeFilter.toLowerCase();
   const body = homeTab === 'overview' ? overviewBody(recs, reps, sess)
     : homeTab === 'recordings' ? recordingsBody(recs, f)
       : homeTab === 'replays' ? replaysBody(reps, f, sess) : liveBody(sess);
   const tabBtn = (k, label) => `<button data-tab="${k}" class="${homeTab === k ? 'on' : ''}">${t(label)}</button>`;
   el.innerHTML = `${closeBtn()}<h2>${t('Vantage')}</h2>
-    <div class="tabs">${tabBtn('overview', 'Overview')}${tabBtn('replays', 'Replays')}${tabBtn('recordings', 'Recordings')}${tabBtn('live', 'Live game')}
+    <div class="tabs">${tabBtn('overview', 'Overview')}${tabBtn('replays', 'Replays')}${tabBtn('recordings', 'Recordings')}${nativeReplays ? '' : tabBtn('live', 'Live game')}
       ${homeTab === 'replays' || homeTab === 'recordings' ? `<input id="home-filter" placeholder="${esc(t('Search…'))}" value="${esc(homeFilter)}" style="margin-left:auto">` : ''}
     </div>${body}`;
   wireClose(el);
@@ -1894,6 +1935,7 @@ function graphicsTab() {
     ${rng('postExtra.red', 'Red', 0.5, 1.5, 0.05)}${rng('postExtra.green', 'Green', 0.5, 1.5, 0.05)}${rng('postExtra.blue', 'Blue', 0.5, 1.5, 0.05)}
     ${rng('postExtra.alpha', 'Opacity', 0, 1, 0.05)}
     <h3>${t('Bloom & anti-aliasing')}</h3>
+    <p class="hint">${t('Bloom, anti-aliasing and the red, green, blue and opacity sliders draw units without the GPU sprite batch: much slower in large battles at high speed.')}</p>
     ${chk('postExtra.bloomEnable', 'Enable bloom')}
     ${rng('postExtra.bloomBrightness', 'Bloom brightness', 0, 2, 0.05)}
     ${rng('postExtra.bloomThreshold', 'Bloom threshold', 0, 1, 0.05)}
@@ -1908,7 +1950,7 @@ function soundTab() {
   const BUS = { events: 'Events', units: 'Units', combat: 'Combat', selection: 'Selection', taunts: 'Taunts' };
   const EXTRA = { villagers: 'Villager work', critters: 'Animals', ambience: 'Ambience', reverb: 'Outdoor reverb', combatImpacts: 'Combat impacts' };
   const SEV = { train: 'Units trained', research: 'Research done', attack: 'Under attack', conversion: 'Conversions' };
-  const modes = [['all', 'All players'], ['selectedPlayer', 'Current player'], ['none', 'None']];
+  const modes = [['screen', 'On screen'], ['selectedOwners', 'Selected owners'], ['screenOrSelectedOwners', 'On screen or selected owners'], ['selectedPlayer', 'Perspective'], ['all', 'All players'], ['none', 'None']];
   return `<div class="grid2"><div>
     <h3>${t('Volume')}</h3>
     ${rng('soundOutputVolume', 'Output volume', 0, 1, 0.05)}
@@ -1917,6 +1959,7 @@ function soundTab() {
   </div><div>
     <h3>${t('Event sounds')}</h3>
     ${Object.entries(SEV).map(([k, l]) => sel(`soundEventConfig.${k}`, l, modes)).join('')}
+    ${sel('soundAlertInterval', 'Attack / conversion spacing', [[0, 'No limit'], [1000, '1 second'], [3000, '3 seconds'], [5000, '5 seconds']])}
     ${sel('chatEventSoundOption', 'Chat event sounds', [['none', 'None'], ['chatAlert', 'Sound only'], ['chatAlertAndTaunt', 'Sound and taunt']])}
     ${sel('tauntLanguage', 'Taunt language', [['', 'Same as the interface'], ...Object.entries(LANGS)])}
   </div></div>`;

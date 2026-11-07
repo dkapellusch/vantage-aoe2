@@ -1,10 +1,11 @@
 // Shared state, server API, persisted settings and small helpers.
 
 import { t } from './i18n.js';
-import { ViewCache } from './playback.js';
+import { ViewCache, mergeSeries, seriesEnd } from './playback.js';
 
 export const S = {
   upcoming: [],   // read-ahead views (fast playback): their strips are requested early
+  scrubbing: false, // the time bar is being dragged: no look-ahead until it is released
   session: null,
   version: '',         // the server's Vantage version (/api/config)
   game: 'aoe2',        // 'aoe2' or 'ror' (Return of Rome)
@@ -35,6 +36,9 @@ export const S = {
   events: [],
   eventsTo: -1,
   bookmarks: [],
+  reviewScope: 'life',
+  seekVersion: 0,
+  reviewRange: null,
   minimapMode: 'standard', // standard | military | resource
   rangeCircles: true,
   flipSides: false,
@@ -84,7 +88,8 @@ export const DEFAULT_SETTINGS = {
   language: '',        // '' = follow the browser
   soundOutputVolume: 1,
   soundVolumes: { events: 1, units: 0.8, combat: 1, selection: 1, taunts: 1 },
-  soundEventConfig: { train: 'selectedPlayer', research: 'selectedPlayer', attack: 'selectedPlayer', conversion: 'selectedPlayer' },
+  soundEventConfig: { train: 'selectedPlayer', research: 'selectedPlayer', attack: 'screenOrSelectedOwners', conversion: 'screenOrSelectedOwners' },
+  soundAlertInterval: 3000,
   chatEventSoundOption: 'chatAlertAndTaunt',
   tooltips: true,
   autoRecord: false,   // live sessions started with --live still record
@@ -138,7 +143,7 @@ export const DEFAULT_SETTINGS = {
   replayReadAhead: true,        // replays the game plays: run them at its fastest speed, watch from the buffer
   autoMinimizeGame: true,       // minimise the game while Vantage has focus (live)
   toggleForScience: false,      // experimental features: renderings inferred, not documented
-  atlasMemoryNormal: 768,       // MB of decoded sprite strips kept (standard graphics): a busy 8x battle needs ~600
+  atlasMemoryNormal: 1536,      // MB of decoded sprite strips kept (standard graphics); filled only as a game needs it
   atlasMemoryUhd: 1536,         // MB when UHD (x2) graphics are on
   gameWarningsDismissed: false, // the game-version compatibility warning was hidden
   htmlServerInfo: true,         // show the OBS browser-source URL in Casting
@@ -150,7 +155,7 @@ export const DEFAULT_SETTINGS = {
   autocastHighlights: true,
   toggleHTMLServer: false,      // skin-debugging HTTP server (live reload + /stats-dump)
   enabledSkins: [],             // several user skins merged (names); [] = default look
-  settingsVersion: 7,
+  settingsVersion: 8,
 };
 
 // One-off migrations for settings saved by older builds. Runs on every load
@@ -221,6 +226,14 @@ export function migrateSettings(s) {
     s.limitToSixtyFps = false;
     s.settingsVersion = 7;
   }
+  if (v < 8) {
+    // At 768 MB the whole-map view of a late eight-player game at 8x evicted
+    // strips it was about to draw: playback held for graphics on 11 % of frames
+    // (2 % at 1536 MB) and fell to 90 % of the speed asked for. The memory is
+    // used only as a game needs it. The old default moves up; a chosen value stays.
+    if (s.atlasMemoryNormal === 768) s.atlasMemoryNormal = 1536;
+    s.settingsVersion = 8;
+  }
   // "Wonders & relics" folded into the King category.
   if (Array.isArray(s.eventFilterOut) && s.eventFilterOut.includes('victory')) {
     s.eventFilterOut = [...new Set(s.eventFilterOut.filter((k) => k !== 'victory').concat('king'))];
@@ -249,6 +262,7 @@ function loadSettings() {
 // Server-side launch config: --patch-config overrides, --force-default-config.
 export function applyServerConfig(cfg) {
   if (!cfg) return;
+  assetVersion = typeof cfg.asset_version === 'string' ? cfg.asset_version : '';
   if (cfg.force_default) settings = { ...DEFAULT_SETTINGS };
   Object.assign(settings, cfg.patch || {});
   migrateSettings(settings);
@@ -272,18 +286,129 @@ export function resetSettings() {
 
 // -- API ----------------------------------------------------------------------
 
-export async function api(path, body) {
+/**
+ * JSON from the server. `priority` ('high' | 'low') is the fetch priority: the
+ * browser's few connections to the server go to the views playback is waiting
+ * for before statistics and unit details.
+ */
+export async function api(path, body, { priority, signal } = {}) {
   const opts = body === undefined ? {} : {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   };
+  if (priority) opts.priority = priority;
+  if (signal) opts.signal = signal;
   const r = await fetch(path, opts);
   if (!r.ok) throw new Error(`${path}: ${r.status}`);
   return r.json();
 }
 
+// Sprite strips come from the other name of this loopback server (127.0.0.1 <->
+// localhost): another origin has its own six HTTP/1.1 connections, so a burst of
+// strips for a new battle never queues the next view behind it. Used only once
+// the server answers that origin with CORS (probeAssetOrigin); else same origin.
+let assetBase = '';
+// The server's asset version (/api/config): converted game assets requested
+// with it are cached by the browser for good (the version changes whenever the
+// game build, mods or Vantage could change them), not re-validated daily.
+let assetVersion = '';
+export function withAssetVersion(path) {
+  return assetVersion ? `${path}${path.includes('?') ? '&' : '?'}av=${assetVersion}` : path;
+}
+export function assetUrl(path) { return assetBase + withAssetVersion(path); }
+export function pairedOrigin(loc) {
+  const alt = { '127.0.0.1': 'localhost', localhost: '127.0.0.1' }[loc.hostname];
+  return alt && loc.protocol === 'http:' ? `http://${alt}${loc.port ? `:${loc.port}` : ''}` : '';
+}
+export async function probeAssetOrigin() {
+  const alt = pairedOrigin(location);
+  if (!alt) return '';
+  try {
+    const r = await fetch(`${alt}/api/config`, { mode: 'cors', cache: 'no-store' });
+    if (r.ok) assetBase = alt;
+  } catch { /* other name unreachable or no CORS: stay on this origin */ }
+  return assetBase;
+}
+
+/**
+ * Bring S.series up to date with only the rows since the newest one held (the
+ * whole series is megabytes in a long game). A reply for an earlier session is
+ * dropped.
+ */
+export async function refreshSeries() {
+  const gen = S.session && S.session.generation;
+  const from = seriesEnd(S.series);
+  const add = await api(from < 0 ? '/api/series' : `/api/series?from=${from}`, undefined, { priority: 'low' });
+  if ((S.session && S.session.generation) !== gen) return S.series;
+  S.series = from < 0 ? add : mergeSeries(S.series, add, from);
+  S.seriesAt = S.end;
+  return S.series;
+}
+
 // Keep exact request times: keyframes need not align with whole seconds. Two
 // queries in one second can straddle a keyframe and return different views.
-const viewCache = new ViewCache((t) => api(`/api/view?t=${t}`));
+// View requests of one seek share an AbortController: the next seek cancels the
+// ones still queued (dragging the scrub bar issued a request per mouse move, and
+// each kept a connection busy long after the playhead had moved on).
+// Cancellation lags one seek behind: a seek cancels the requests of the seek
+// before the previous one, so the newest view still arriving (slower than the
+// 80 ms scrub step in a large late game) lands instead of being cancelled too.
+let viewAbort = new AbortController(), previousAbort = null;
+export function abortViews() {
+  if (previousAbort) previousAbort.abort();
+  previousAbort = viewAbort;
+  viewAbort = new AbortController();
+}
+const viewCache = new ViewCache((t) => viewJson(`/api/view?t=${t}`, viewAbort.signal));
+
+// Views are fetched and parsed in a worker (view-worker.js): at 8x that is ~14
+// documents of a few hundred KB a second kept off the main thread. Without
+// workers (or if it fails) they are fetched here as before.
+let viewWorker = null, workerTried = false, workerSeq = 0;
+const workerCalls = new Map();
+/** View request timings (ms, newest last) for the performance view, and totals. */
+export const viewTimings = [];
+export const viewStats = { issued: 0, requests: 0, ms: 0 }; // issued: including cancelled ones
+function startViewWorker() {
+  workerTried = true;
+  try {
+    viewWorker = new Worker(new URL('./view-worker.js', import.meta.url), { type: 'module' });
+    viewWorker.onmessage = (e) => {
+      const call = workerCalls.get(e.data.id);
+      if (!call) return;
+      workerCalls.delete(e.data.id);
+      if (e.data.error != null) call.reject(new Error(e.data.error)); else call.resolve(e.data.value);
+    };
+    viewWorker.onerror = () => {
+      viewWorker = null;
+      for (const call of workerCalls.values()) call.reject(new Error('view worker failed'));
+      workerCalls.clear();
+    };
+  } catch { viewWorker = null; }
+}
+function viewJson(path, signal) {
+  if (!workerTried) startViewWorker();
+  viewStats.issued++;
+  const t0 = performance.now();
+  const done = (v) => {
+    const ms = performance.now() - t0;
+    viewTimings.push(ms); if (viewTimings.length > 120) viewTimings.shift();
+    viewStats.requests++; viewStats.ms += ms;
+    return v;
+  };
+  if (!viewWorker) return api(path, undefined, { priority: 'high', signal }).then(done);
+  return new Promise((resolve, reject) => {
+    const id = ++workerSeq;
+    workerCalls.set(id, { resolve, reject });
+    viewWorker.postMessage({ id, url: new URL(path, location.href).href });
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        if (!workerCalls.delete(id)) return;
+        if (viewWorker) viewWorker.postMessage({ abort: id });
+        reject(new DOMException('view request cancelled', 'AbortError'));
+      }, { once: true });
+    }
+  }).then(done);
+}
 export function fetchView(t) { return viewCache.fetch(t); }
 export function cachedView(t) { return viewCache.peek(t); }
 export function cachedViewAt(t) { return viewCache.at(t); }
@@ -506,7 +631,7 @@ export function teamIcon(team) {
   if (!info) return '';
   if (info.pngIconName && S.skin.assets && S.skin.assets[info.pngIconName]) return S.skin.assets[info.pngIconName];
   const id = info.icon && info.icon.tag === 'unit' ? info.icon.iconId : null;
-  return id != null && id >= 0 ? `/icon/unit/${id}.png?g=${S.game}` : '';
+  return id != null && id >= 0 ? withAssetVersion(`/icon/unit/${id}.png?g=${S.game}`) : '';
 }
 
 // -- catalog helpers ----------------------------------------------------------------
@@ -514,9 +639,14 @@ export function teamIcon(team) {
 // With an owner, that player's own name and icon for the master at the time
 // being watched win (view.owner_units: the Poles' Mill is their Folwark, an
 // upgraded Archer is that player's Crossbowman).
-export function unitInfo(mid, owner) {
+export function unitInfo(mid, owner, entityId, view = S.view) {
+  const privateUnit = entityId != null && view?.entity_units?.[entityId];
+  if (privateUnit && privateUnit.owner === owner && privateUnit.master === mid) {
+    const name = S.catalog.unit_names?.[privateUnit.string_id] ?? privateUnit.name;
+    return { ...privateUnit, name };
+  }
   const u = S.catalog.units[mid] || { name: `#${mid}`, icon: -1, kind: 'other', cls: -1 };
-  const own = owner != null && S.view && S.view.owner_units && S.view.owner_units[owner];
+  const own = owner != null && view && view.owner_units && view.owner_units[owner];
   const o = own && own[mid];
   if (!o) return u;
   const name = (S.catalog.unit_names && S.catalog.unit_names[o[0]]) || u.name;
@@ -524,14 +654,36 @@ export function unitInfo(mid, owner) {
 }
 export function techInfo(tid) { return S.catalog.techs[tid] || { name: `Tech ${tid}`, icon: -1, time: 0 }; }
 
-export function unitIcon(mid, owner) {
-  const u = unitInfo(mid, owner);
+export function entityInfo(row, view = S.view) { return unitInfo(row[2], row[1], row[0], view); }
+
+export function unitIcon(mid, owner, entityId) {
+  const u = unitInfo(mid, owner, entityId);
   if (u.icon < 0) return '';
-  return `/icon/${u.kind === 'building' ? 'building' : 'unit'}/${u.icon}.png?g=${S.game}`;
+  return withAssetVersion(`/icon/${u.kind === 'building' ? 'building' : 'unit'}/${u.icon}.png?g=${S.game}`);
 }
+// A response without a validity interval (a server older than these pages) is
+// refreshed once a second; in between it stands while the clock is within one
+// refresh at ×8 of its query, so playback does not blank the panel each frame.
+const LEGACY_STATS_SLACK_MS = 10000;
+export function legacyStatsFresh(queriedAt, at) {
+  return Number.isFinite(queriedAt) && Math.abs(at - queriedAt) <= LEGACY_STATS_SLACK_MS;
+}
+
+// Effective Master numbers only: activity/combat counters retain their ordinary
+// 1Hz refresh. A future/rewound/private-reset boundary never reuses stale stats.
+export function entityStatsValid(data, id, row, at, generation, queriedAt) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  if (data.generation != null && data.generation !== generation) return false;
+  if (row && (data.owner !== row[1] || data.master !== row[2])) return false;
+  if (data.entity_stats_validity_version == null) return legacyStatsFresh(queriedAt, at);
+  return data.entity_stats_validity_version === 1 && data.generation === generation
+    && data.entity_id === id && Number.isInteger(data.valid_from_ms)
+    && Number.isInteger(data.valid_until_ms) && data.valid_from_ms <= at && at < data.valid_until_ms;
+}
+
 export function techIcon(tid) {
   const t = techInfo(tid);
-  return t.icon >= 0 ? `/icon/tech/${t.icon}.png?g=${S.game}` : '';
+  return t.icon >= 0 ? withAssetVersion(`/icon/tech/${t.icon}.png?g=${S.game}`) : '';
 }
 // -- antiquity civs (catalog civ_eras / eras: eras.json TechDisplayOverrides) ---------
 
@@ -555,7 +707,7 @@ export function techInfoFor(tid, pid) {
 }
 export function techIconFor(tid, pid) {
   const ti = techInfoFor(tid, pid);
-  return ti.icon >= 0 ? `/icon/tech/${ti.icon}.png?g=${S.game}` : '';
+  return ti.icon >= 0 ? withAssetVersion(`/icon/tech/${ti.icon}.png?g=${S.game}`) : '';
 }
 function has0(v) { return v !== undefined && v !== null && v !== ''; }
 // Age names: Archaic/Civic/Classical/Imperial for antiquity civs.
@@ -573,7 +725,7 @@ export function ageIcon(age, pid) {
   return `/ui/age-${Math.max(1, Math.min(4, age + 1))}.png`;
 }
 
-export function emblem(civ) { return civ == null ? '' : `/emblem/${civ}.png`; }
+export function emblem(civ) { return civ == null ? '' : withAssetVersion(`/emblem/${civ}.png`); }
 
 export function playerStats(pid) {
   return S.view && S.view.players ? S.view.players[pid] : null;

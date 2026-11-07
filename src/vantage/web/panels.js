@@ -12,12 +12,17 @@ import {
 } from './games.js';
 import {
   S, settings, saveSettings, SPEEDS, fmtTime, fmtNum, fmtStock, esc, players, player, playerName, playerColor,
-  teams, teamIcon, plainTeamName, layoutKind, isTwoTeamLayout, sideTeams, teamName, unitInfo, unitIcon, techInfo, techIcon, emblem, playerStats,
+  teams, teamIcon, plainTeamName, layoutKind, isTwoTeamLayout, sideTeams, teamName, unitInfo, entityStatsValid, legacyStatsFresh, unitIcon, techInfo, techIcon, emblem, playerStats,
   cyclePlayerColor, playerTextColor, AGE_NAMES, RES, tip, techInfoFor, techIconFor, ageName, ageIcon, civEra,
   skinOption, skinAsset,
+  withAssetVersion,
 } from './state.js';
-import { centerOn, currentRows, selectedRows, gatherersOf, isTreeId } from './world.js';
+import { centerOn, currentRows, selectedRows, gatherersOf, isTreeId, rowForEntityId } from './world.js';
 import { t, language } from './i18n.js';
+import { setSelectionHtml } from './selection-panel.js';
+import { patchHtml, listDelta } from './dom.js';
+import { ownerIdentity, selectionHeader, militaryCard, wireReviewControls, reviewIcon, DASH_HISTORY, DASH_SELECTIONS } from './player-review.js';
+import { resourceTotalsHtml } from './resource-review.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -40,11 +45,17 @@ function hudEl(id, cls = 'panel hidden', tag = 'div') {
 // times a second; replacing the nodes under the pointer between mousedown and
 // mouseup swallowed clicks, and rewriting identical HTML is wasted layout at 8x.
 function setHtml(el, html) {
-  if (el._html !== html) { el._html = html; el.innerHTML = html; }
+  if (el.id === 'unitpanel') {
+    const context = `${S.session?.generation}:${[...S.selection].sort((a, b) => a - b).join(',')}`;
+    setSelectionHtml(el, html, context); return;
+  }
+  if (el._html !== html) { el._html = html; patchHtml(el, html); }
 }
 
 function setText(el, text) {
-  if (el.textContent !== text) el.textContent = text;
+  if (el.textContent === text) return;
+  if (el.childNodes.length === 1 && el.firstChild.nodeType === 3) el.firstChild.nodeValue = text;
+  else el.textContent = text;
 }
 
 function delegate(el, type, selector, fn) {
@@ -252,7 +263,7 @@ function loadTree(civ) {
   if (civ == null) return Promise.resolve(null);
   const key = treeKey(civ);
   if (techTrees.has(key)) return Promise.resolve(techTrees.get(key));
-  const p = fetch(`/api/techtree/${civ}?lang=${encodeURIComponent(language || 'en')}`).then((r) => r.json()).catch(() => null).then((tree) => {
+  const p = fetch(`/api/techtree/${civ}?lang=${encodeURIComponent(language || 'en')}`, { priority: 'low' }).then((r) => r.json()).catch(() => null).then((tree) => {
     const ok = tree && tree.nodes ? tree : null;
     techTrees.set(key, ok);
     for (const b of (ok && ok.buildings) || []) if (!buildingMeta.has(b.id)) buildingMeta.set(b.id, { icon: b.icon, name: b.name });
@@ -268,7 +279,7 @@ function treeNow(civ) {
 function buildingIcon(mid) {
   if (unitInfo(mid).icon >= 0) return unitIcon(mid);
   const m = buildingMeta.get(mid);
-  return m && m.icon >= 0 ? `/icon/building/${m.icon}.png?g=${S.game}` : '';
+  return m && m.icon >= 0 ? withAssetVersion(`/icon/building/${m.icon}.png?g=${S.game}`) : '';
 }
 function buildingName(mid) {
   const u = unitInfo(mid);
@@ -303,7 +314,7 @@ function nodeCost(n) {
   return unitInfo(n.id).cost;
 }
 
-let hoverPid = null;
+let hoverPid = null, pinnedTree = false;
 // Struck (not available to this civ) vs hidden (regional content no civ marks
 // unavailable) follow the server's per-node status; older servers send only
 // `available`, which reads as struck.
@@ -358,7 +369,7 @@ export async function showTechTree(pid) {
         const cost = top ? costText(top.cost || (top.kind === 'tech' ? techInfo(top.id).cost : unitInfo(top.id).cost)) : '';
         const cells = stages.filter((st) => st.status !== 'hidden').map((st) => {
           const cls = struck(st) ? 'na' : progress(st.kind, st.id, st.age, st.trigger);
-          const src = `/icon/${st.icon_kind === 'unit' ? 'unit' : 'tech'}/${st.icon}.png?g=${S.game}`;
+          const src = withAssetVersion(`/icon/${st.icon_kind === 'unit' ? 'unit' : 'tech'}/${st.icon}.png?g=${S.game}`);
           return `<div class="tt-node ${cls}" ${tip(st.name || '', cls === 'na' ? t('not available to this civilisation') : '')}><img src="${src}" alt=""></div>`;
         }).join('');
         return cells ? `<div class="tt-line">${cells}${cost ? `<span class="tt-cost" ${tip(t('Cost of the highest tier'), top.name || '')}>${esc(cost)}</span>` : ''}</div>` : '';
@@ -384,7 +395,7 @@ export async function showTechTree(pid) {
         const cells = line.map((n) => {
           const na = baseStruck || nodeStatus(n) === 'struck';
           baseStruck = na;
-          const src = `/icon/${n.kind === 'unit' ? 'unit' : 'tech'}/${n.icon}.png?g=${S.game}`;
+          const src = withAssetVersion(`/icon/${n.kind === 'unit' ? 'unit' : 'tech'}/${n.icon}.png?g=${S.game}`);
           return `<div class="tt-node ${na ? 'na' : progress(n.kind, n.id, n.age, n.trigger_tech)}" ${tip(n.name, na ? t('not available to this civilisation') : '')}><img src="${src}" alt=""></div>`;
         }).join('');
         const top = [...line].reverse().find((n) => nodeStatus(n) === 'available') || line[line.length - 1];
@@ -397,9 +408,10 @@ export async function showTechTree(pid) {
   }
   // The civ description is long: it shows only while Shift is held.
   const desc = civDescHtml(tree.description || tree.help || '');
-  el.innerHTML = `<h3 style="color:${playerTextColor(pid)}">${esc(playerName(pid))} — ${esc(t('{civ} tech tree', { civ: tree.name }))}</h3>
-    ${desc}${uniqueUnitsHtml(tree)}${body}
-    <div class="tt-age">${esc(t('Green outline: researched or trained · dim: later age · struck: not available to this civilisation'))}${desc ? ` · ${esc(t('hold Shift for civilisation bonuses'))}` : ''}</div>`;
+  patchHtml(el, `<h3 style="color:${playerTextColor(pid)}">${esc(playerName(pid))} — ${esc(t('{civ} tech tree', { civ: tree.name }))}</h3>
+    <button class="review-tree-close" aria-label="${t('Close')}">×</button>${desc}${uniqueUnitsHtml(tree)}${body}
+    <div class="tt-age">${esc(t('Green outline: researched or trained · dim: later age · struck: not available to this civilisation'))}${desc ? ` · ${esc(t('hold Shift for civilisation bonuses'))}` : ''}</div>`);
+  el.querySelector('.review-tree-close').onclick = () => { pinnedTree = false; hideTechTree(); };
   el.classList.remove('hidden');
   placeTechTree();
 }
@@ -427,9 +439,9 @@ function setTechTreeDesc(on) {
   el.classList.toggle('show-desc', on);
   placeTechTree();
 }
-export function hideTechTree() { hoverPid = null; $('techtree').classList.add('hidden'); }
+export function hideTechTree() { pinnedTree = false; hoverPid = null; $('techtree').classList.add('hidden'); }
 window.addEventListener('mousemove', (e) => {
-  if (hoverPid != null && (!e.target.matches || !e.target.matches('#scoreboard img.emblem'))) hideTechTree();
+  if (!pinnedTree && hoverPid != null && !e.target.closest?.('#techtree, #scoreboard img.emblem')) hideTechTree();
 });
 window.addEventListener('keydown', (e) => { if (e.key === 'Shift') setTechTreeDesc(true); });
 window.addEventListener('keyup', (e) => { if (e.key === 'Shift') setTechTreeDesc(false); });
@@ -552,7 +564,7 @@ export function renderScoreboard(speedLabel) {
   });
   delegate(el, 'mouseover', 'img.emblem', (im) => {
     const host = im.closest('[data-pid]');
-    if (host && hoverPid !== +host.dataset.pid) showTechTree(+host.dataset.pid);
+    if (!pinnedTree && host && hoverPid !== +host.dataset.pid) showTechTree(+host.dataset.pid);
   });
 }
 
@@ -661,7 +673,7 @@ function renderVictory(html) {
   const el = hudEl('victory', 'panel hidden');
   const show = settings.disableScoreboard ? html : '';
   el.classList.toggle('hidden', !show);
-  if (el._html !== show) { el._html = show; el.innerHTML = show; }
+  if (el._html !== show) { el._html = show; patchHtml(el, show); }
 }
 
 // -- team overview -------------------------------------------------------------------
@@ -960,7 +972,7 @@ function renderSlideout() {
       return `<div class="so-row"><div class="so-name" style="border-color:${playerColor(p.id)}">${esc(playerName(p.id))}</div>${[...staticGroups([p.id]), ...fullTechGroups([p.id])].map((g) => `<div class="so-group">${g.map((tid) => staticTechCell(tid, p.id, done, active, true)).join('')}</div>`).join('')}</div>`;
     }).join('');
     const html = `<div class="so-head"><span class="title">${t('Technologies')}</span><span class="hint">Alt+P</span></div>${rows}`;
-    if (el._html !== html) { el._html = html; el.innerHTML = html; }
+    if (el._html !== html) { el._html = html; patchHtml(el, html); }
     return;
   }
   if (el.dataset.mode !== 'graph') {
@@ -989,7 +1001,7 @@ function graphLegend(key) {
   const legend = $('so-legend');
   if (!legend) return;
   const html = players().map((p) => { const v = lastSeries(p.id, key); return `<span style="color:${playerTextColor(p.id)}">${esc(playerName(p.id))} ${v != null ? fmtNum(+v) : '–'}</span>`; }).join(' · ');
-  if (legend._html !== html) { legend._html = html; legend.innerHTML = html; }
+  if (legend._html !== html) { legend._html = html; patchHtml(legend, html); }
 }
 
 // A compact line chart of one series per player, up to the viewed time.
@@ -1093,7 +1105,7 @@ function productionHtml(prodList, pid) {
     // included); how many buildings make it is in the tooltip.
     const count = queued > 1 ? queued : '';
     const detail = `${t('{n} queued', { n: queued })} · ${g.items.length > 1 ? t('{n} buildings', { n: g.items.length }) + ' · ' : ''}${rem.length ? `${Math.ceil(Math.min(...rem))}s · ` : ''}${t('click: go to the building')}`;
-    return `<div class="icon-count" data-where="${where}" ${tip(`${unitInfo(g.items[0].master, pid).name}: ${name}`, detail)}><img src="${icon}" alt=""><b>${count}</b><div class="prog" style="width:${Math.round(progress * 100)}%"></div></div>`;
+    return `<div class="icon-count" data-ui-key="queue-${pid}-${esc(g.key)}" data-buildings="${g.items.map((b) => b.id).join(',')}" data-where="${where}" ${tip(`${unitInfo(g.items[0].master, pid).name}: ${name}`, detail)}><img src="${icon}" alt=""><b>${count}</b><div class="prog" style="width:${Math.round(progress * 100)}%"></div></div>`;
   }).join('');
 }
 
@@ -1107,6 +1119,8 @@ export function renderProduction() {
       S._prodCycle = S._prodCycle && S._prodCycle.key === key ? { key, i: (S._prodCycle.i + 1) % spots.length } : { key, i: 0 };
       const [x, y] = spots[S._prodCycle.i];
       centerOn(x, y);
+      const bid = d.dataset.buildings?.split(',').map(Number)[S._prodCycle.i];
+      if (bid != null) S.selection = new Set([bid]);
       return;
     }
     const line = d.dataset.line;
@@ -1124,10 +1138,10 @@ export function renderProduction() {
       const s = playerStats(p.id);
       if (!s) continue;
       for (const [mid, n] of Object.entries(s.units || {})) total[mid] = (total[mid] || 0) + n;
-      rows.push(`<div class="prod-row${isDead(p.id) ? ' dead' : ''}"><span class="dot" style="background:${playerColor(p.id)}"></span>${compIcons(s.units || {}, p.id)}<span class="tech-gap"></span>${productionHtml(s.production || [], p.id)}</div>`);
+      rows.push(`<div class="prod-row${isDead(p.id) ? ' dead' : ''}" data-ui-key="player-${p.id}"><span class="dot" style="background:${playerColor(p.id)}"></span>${compIcons(s.units || {}, p.id)}<span class="tech-gap"></span>${productionHtml(s.production || [], p.id)}</div>`);
     }
     if (team.players.length > 1 && Object.keys(total).length) {
-      rows.push(`<div class="prod-row team-total"><span class="tt-label" ${tip(t('Team composition'), teamName(team))}>Σ</span>${compIcons(total, 0, String(team.key))}</div>`);
+      rows.push(`<div class="prod-row team-total" data-ui-key="team-${esc(team.key)}"><span class="tt-label" ${tip(t('Team composition'), teamName(team))}>Σ</span>${compIcons(total, 0, String(team.key))}</div>`);
     }
   }
   setHtml(el, rows.join(''));
@@ -1403,8 +1417,27 @@ export function renderDashboard() {
   if (!settings.showDashboard || !S.view) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
   const layout = dashLayout();
+  el.dataset.dashLayout = layout;
+  delegate(el, 'click', '[data-dash-page]', (d) => {
+    // Route to the layout that owns the visible tabs, including the brief
+    // interval between new match metadata arriving and the next HUD render.
+    settings.dashboardSelection[el.dataset.dashLayout] = d.dataset.dashPage; saveSettings(); renderDashboard();
+  });
+  delegate(el, 'click', '[data-dash-metric]', (d) => {
+    const pid = +d.dataset.pid, metric = d.dataset.dashMetric;
+    const acts = { wFood: [2], wWood: [3], wGold: [4], wStone: [5], build: [6, 7], idle: [0] };
+    if (['tc', 'castles', 'tcCastle'].includes(metric)) {
+      const masters = new Set([...(metric === 'castles' ? [] : TOWN_CENTERS), ...(metric === 'tc' ? [] : GOTO_BUILDINGS.gotoCastle || [])]);
+      S.selection = new Set(currentRows().filter((r) => r[1] === pid && masters.has(r[2])).map((r) => r[0]));
+    } else if (acts[metric] || ['vils', 'mil', 'milValue'].includes(metric)) {
+      S.selection = new Set(currentRows().filter((r) => r[1] === pid && (acts[metric] ? !!(r[6] & 4) && acts[metric].includes(r[9]) : metric === 'vils' ? !!(r[6] & 4) : !!(r[6] & 2))).map((r) => r[0]));
+    } else window.dispatchEvent(new CustomEvent('vantage-investigate', { detail: { pid, metric } }));
+  });
   el.classList.toggle('mini', layout === 'miniFfa');
   const pages = dashPages();
+  // Keep a compact, fixed viewport across mirrored and full-list pages.
+  // Longer tables scroll inside it without moving the tabs.
+  el.style.setProperty('--dash-rows', Math.min(4, players().length));
   const { page: base, index } = selectedPage(layout, pages);
   // Older per-page column edits still apply to built-in pages.
   const legacy = base.custom ? null : (settings.dashboardColumns || {})[base.key];
@@ -1413,6 +1446,10 @@ export function renderDashboard() {
   let cols = (legacy && legacy.length ? legacy : base.cols).filter((c) => COL[c] && (c !== 'd3Agg' || hadTruce));
   const title = base.custom ? `${t('Page')} ${base.num}` : t(base.title);
   setText($('dash-title'), `${title}${pages.length > 1 ? ` · ${index + 1}/${pages.length}` : ''}`);
+  let tabs = el.querySelector('.review-dash-tabs');
+  if (!tabs) { tabs = document.createElement('div'); tabs.className = 'review-dash-tabs'; el.querySelector('.dash-head').after(tabs); }
+  const tabsHtml = pages.map((p) => `<button data-dash-page="${p.key}" aria-pressed="${p.key === base.key}">${esc(p.custom ? `${t('Page')} ${p.num}` : t(p.title))}</button>`).join('');
+  patchHtml(tabs, tabsHtml);
   const th = (c) => {
     const m = COL[c];
     const icons = headerIcons(c);
@@ -1421,7 +1458,10 @@ export function renderDashboard() {
   const nameTd = (pid, right) => `<td class="pname${right ? ' r' : ''}" style="border-color:${playerColor(pid)}">${esc(playerName(pid))}</td>`;
   const two = isTwoTeamLayout() && teams().length === 2;
   const combine = layout === 'nonOppositional';
-  const td = (c, s, pid) => `<td>${cellHtml(c, s, pid, combine && !cols.includes(COMBINED[c]))}</td>`;
+  const td = (c, s, pid) => {
+    const value = cellHtml(c, s, pid, combine && !cols.includes(COMBINED[c]));
+    return `<td>${DASH_HISTORY[c] || DASH_SELECTIONS.has(c) ? `<button class="review-dash-value" data-dash-metric="${c}" data-pid="${pid}" ${tip(t(COL[c].h), t('Inspect'))}>${value}</button>` : value}</td>`;
+  };
   // Team games mirror by default (unless every column is a stockpile one): left
   // team, a divider, then the right team's columns reversed.
   let mirror = false;
@@ -1440,7 +1480,7 @@ export function renderDashboard() {
       const sa = pa && playerStats(pa.id), sb = pb && playerStats(pb.id);
       const left = sa ? nameTd(pa.id) + cols.map((c) => td(c, sa, pa.id)).join('') : `<td></td>${cols.map(() => '<td></td>').join('')}`;
       const right = sb ? rcols.map((c) => td(c, sb, pb.id)).join('') + nameTd(pb.id, true) : `${rcols.map(() => '<td></td>').join('')}<td></td>`;
-      body.push(`<tr>${left}<td class="dash-gap"></td>${right}</tr>`);
+      body.push(`<tr data-ui-key="pair-${pa?.id ?? 'none'}-${pb?.id ?? 'none'}">${left}<td class="dash-gap"></td>${right}</tr>`);
     }
     html = head + body.join('');
   } else {
@@ -1461,12 +1501,12 @@ export function renderDashboard() {
       const s = playerStats(pid);
       if (!s) return '';
       const cls = [isDead(pid) ? 'dead' : '', two && base.paired && i % 2 === 1 ? 'pair-end' : ''].join(' ').trim();
-      return `<tr class="${cls}">${nameTd(pid)}${cols.map((c) => td(c, s, pid)).join('')}</tr>`;
+      return `<tr data-ui-key="player-${pid}" class="${cls}">${nameTd(pid)}${cols.map((c) => td(c, s, pid)).join('')}</tr>`;
     });
     html = head + body.join('');
   }
   const table = $('dash-table');
-  if (table._html !== html) { table._html = html; table.innerHTML = html; }
+  if (table._html !== html) { table._html = html; patchHtml(table, html); }
 }
 
 // -- events ---------------------------------------------------------------------------------
@@ -1489,15 +1529,15 @@ export function eventCat(e) {
 
 export function renderEventFilters(onChange) {
   const el = $('event-filters');
-  el.innerHTML = EVENT_CATS.map(([k, icon, title]) => `<button data-cat="${k}" ${tip(t(title), t('click: show or hide'))} class="${settings.eventFilterOut.includes(k) ? '' : 'on'}">${icon}</button>`).join('');
-  el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+  patchHtml(el, EVENT_CATS.map(([k, icon, title]) => `<button data-cat="${k}" ${tip(t(title), t('click: show or hide'))} class="${settings.eventFilterOut.includes(k) ? '' : 'on'}">${icon}</button>`).join(''));
+  el.querySelectorAll('button').forEach((b) => { b.onclick = () => {
     const k = b.dataset.cat;
     const i = settings.eventFilterOut.indexOf(k);
     if (i >= 0) settings.eventFilterOut.splice(i, 1); else settings.eventFilterOut.push(k);
     saveSettings();
     renderEventFilters(onChange);
     onChange();
-  }));
+  }; });
 }
 
 function playersList(ids) { return (ids || []).map((id) => pn(id)).join(', '); }
@@ -1631,7 +1671,7 @@ function isHigh(e) {
 }
 
 function eventLi(e, i, attr = 'data-i') {
-  return `<li class="${isHigh(e) ? 'high' : ''}" ${attr}="${i}">
+  return `<li data-ui-key="${esc(JSON.stringify([e.t, e.kind, e.player, e.x, e.y, e.unit, e.killer, e.victim]))}" class="${isHigh(e) ? 'high' : ''}" ${attr}="${i}">
     <span class="et" data-t="${e.t}" ${tip(t('Jump to this moment'))}>${fmtTime(e.t)}</span>
     <span class="ec" style="background:${playerColor(e.player)}"></span><span>${eventText(e)}</span></li>`;
 }
@@ -1639,6 +1679,8 @@ function eventLi(e, i, attr = 'data-i') {
 let shownEvents = '';
 let eventsPinnedToBottom = true;
 let recentEvents = [];
+// The log's rows -> their events (rows are appended and dropped, so no indices).
+const listRowEvent = new WeakMap();
 let highEvents = [];
 
 // The last `limit` events at or before the current time that pass the filter.
@@ -1685,7 +1727,7 @@ export function renderEvents(seek) {
     }
     if (e.x != null) centerOn(e.x, e.y);
   };
-  delegate(list, 'click', 'li', (li, ev) => onRow(recentEvents)(li, ev));
+  delegate(list, 'click', 'li', (li, ev) => { const e = listRowEvent.get(li); if (e) onRow([e])({ dataset: { i: 0 } }, ev); });
   delegate(high, 'click', 'li', (li, ev) => onRow(highEvents)(li, ev));
   if (!pager._wired) {
     pager._wired = true;
@@ -1699,11 +1741,29 @@ export function renderEvents(seek) {
   }
   const recent = recentVisibleEvents(150);
   renderPinned(high, recent);
-  const key = recent.length + ':' + (recent.length ? recent[recent.length - 1].t : 0) + ':' + settings.eventFilterOut.join() + ':' + language;
-  if (key === shownEvents) return;
+  // The log is a window of the last 150 events: while playing forward it only
+  // slides, so append the new rows and drop as many from the top instead of
+  // rebuilding (and re-parsing) all 150 every time an event arrives.
+  // Anything that changes how existing rows read forces a rebuild.
+  const key = [settings.eventFilterOut.join(), language, JSON.stringify(settings.playerNames || {}),
+    JSON.stringify(settings.entityNames || {}), JSON.stringify(settings.teamCaptains || {}), settings.baseColorMode,
+    settings.skin, S.colorMode, JSON.stringify(S.colorOverride || {}), S.catalogVersion,
+    S.match && Object.values(S.match.players || {}).map((p) => p && p.name).join(',')].join('|');
+  const delta = key === shownEvents ? listDelta(recentEvents, recent) : null;
   shownEvents = key;
+  if (delta && !delta.drop && !delta.add.length) return;
   recentEvents = recent;
-  list.innerHTML = recent.map((e, i) => eventLi(e, i)).join('');
+  if (delta) {
+    for (let i = 0; i < delta.drop && list.firstElementChild; i++) list.firstElementChild.remove();
+    if (delta.add.length) {
+      list.insertAdjacentHTML('beforeend', delta.add.map((e) => eventLi(e, 0)).join(''));
+      const rows = list.children;
+      for (let i = 0; i < delta.add.length; i++) listRowEvent.set(rows[rows.length - delta.add.length + i], delta.add[i]);
+    }
+  } else {
+    list.innerHTML = recent.map((e) => eventLi(e, 0)).join('');
+    [...list.children].forEach((li, i) => listRowEvent.set(li, recent[i]));
+  }
   if (eventsPinnedToBottom) list.scrollTop = list.scrollHeight;
   pager.classList.toggle('hidden', eventsPinnedToBottom);
 }
@@ -1729,11 +1789,11 @@ function renderPinned(box, vis) {
   const key = language + live.map((e) => e.t + e.kind + (e.player ?? '') + (isHigh(e) ? playerColor(targetPlayer(e)) : '')).join('|');
   if (key !== shownPinned) {
     shownPinned = key;
-    box.innerHTML = live.map((e, i) => {
+    patchHtml(box, live.map((e, i) => {
       const high = isHigh(e);
       const tint = high ? ` style="background:${playerColor(targetPlayer(e))}33"` : '';
-      return eventLi(e, i).replace('<li class="', `<li${tint} class="`);
-    }).join('');
+      return eventLi(e, i).replace('<li ', `<li${tint} `);
+    }).join(''));
   }
   box.classList.toggle('hidden', !live.length);
   [...box.children].forEach((li, i) => {
@@ -1752,7 +1812,7 @@ export function eventsPage(dir, toEdge) {
 
 // -- unit panel ------------------------------------------------------------------------------
 
-const ACT_NAMES = ['idle', 'moving', 'gathering food', 'gathering wood', 'gathering gold', 'gathering stone', 'building', 'repairing', 'fighting', 'garrisoned', 'producing', 'researching', '', 'packing', 'unpacking'];
+const ACT_NAMES = ['idle', 'moving', 'gathering food', 'gathering wood', 'gathering gold', 'gathering stone', 'building', 'repairing', 'fighting', 'garrisoned', 'producing', 'researching', '', 'packing', 'unpacking', 'healing'];
 
 export function rememberSelection() {
   // Keep what was selected so units that die stay listed (with a skull).
@@ -1765,10 +1825,10 @@ function gaiaPanel(el) {
   const rl = (S.series && S.series['0']) || [];
   let left = rl[0];
   for (const x of rl) { if (x.t <= S.t) left = x; else break; }
-  el.innerHTML = `<div class="up-name">${esc((S.match.map_file || t('Map')).replace(/\.rms$/, ''))}</div>
+  setHtml(el, `<div class="up-name">${esc((S.match.map_file || t('Map')).replace(/\.rms$/, ''))}</div>
     <div class="hint">${fmtTime(S.t)} · ${S.match.map_size ? S.match.map_size.join('×') : ''} ${t('tiles')}</div>
     <div class="up-stats" style="margin-top:6px" ${tip(t('Market prices'), t('Base price in gold per 100: buying costs more and selling earns less, by the market commission'))}><div><span>${t('food')}</span> ${m.food ? Math.round(m.food * 100) : '–'}</div><div><span>${t('wood')}</span> ${m.wood ? Math.round(m.wood * 100) : '–'}</div><div><span>${t('stone')}</span> ${m.stone ? Math.round(m.stone * 100) : '–'}</div></div>
-    ${left ? `<div class="hint" style="margin-top:6px">${t('Left on map: {f} food · {w} wood · {g} gold · {s} stone · {r} relics', { f: fmtNum(left.food), w: fmtNum(left.wood), g: fmtNum(left.gold), s: fmtNum(left.stone), r: left.relics })}</div>` : ''}`;
+    ${left ? `<div class="hint" style="margin-top:6px">${t('Left on map: {f} food · {w} wood · {g} gold · {s} stone · {r} relics', { f: fmtNum(left.food), w: fmtNum(left.wood), g: fmtNum(left.gold), s: fmtNum(left.stone), r: left.relics })}</div>` : ''}`);
 }
 
 function deadIcon(id) {
@@ -1845,10 +1905,10 @@ function carryPairs(c) {
 // held, and who is gathering from it. Farms are left out: the stream carries
 // only a farm's small food buffer, not the food left in it.
 const FLAG_REMAINS = 256; // world.py: a row from view.remains
-function isResource(r) { return r[1] === 0 && (Array.isArray(r[10]) || !!unitInfo(r[2]).storage); }
+function isResource(r) { return r[1] === 0 && (Array.isArray(r[10]) || !!unitInfo(r[2], r[1], r[0]).storage); }
 
 function resourcePanel(el, r) {
-  const u = unitInfo(r[2], 0);
+  const u = unitInfo(r[2], 0, r[0]);
   const [res, left] = Array.isArray(r[10]) ? r[10] : [(u.storage || [])[0] || 'food', 0];
   const full = u.storage && u.storage[0] === res ? u.storage[1] : null;
   const frac = full ? left / full : 1;
@@ -1856,30 +1916,84 @@ function resourcePanel(el, r) {
   const lo = S.view && S.view.livestock_owner;
   const lastOwner = lo ? (lo[r[0]] ?? lo[String(r[0])]) : null;
   const what = isTreeId(r[0]) ? (r[11] != null ? t('Being cut') : t('Untouched')) : (r[6] & FLAG_REMAINS) ? t('Carcass') : t('Gaia');
-  setHtml(el, `<div class="up-head"><img src="${unitIcon(r[2], 0)}" alt="">
-    <div><div class="up-name">${esc(u.name)}</div>
-    <div class="up-owner">${what}${lastOwner ? ` · <span style="color:${playerTextColor(lastOwner)}">${t('last owner')}: ${esc(playerName(lastOwner))}</span>` : ''}</div></div></div>
-    <div class="up-res"><b style="color:var(--${res})">${fmtNum(Math.floor(left))}</b>${full ? ` <span class="hint">/ ${fmtNum(full)}</span>` : ''} ${esc(t(res))} ${t('left')}</div>
+  setHtml(el, `<div class="review-resource-head"><div class="up-res"><b style="color:var(--${res})">${fmtNum(Math.floor(left))}</b>${full ? ` <span class="hint">/ ${fmtNum(full)}</span>` : ''} <span style="color:var(--${res})">${esc(t(res))}</span></div><img src="${unitIcon(r[2], 0, r[0])}" alt=""></div>
+    <div class="up-name">${esc(u.name)}</div><div class="hint">${what}${lastOwner ? ` · <span style="color:${playerTextColor(lastOwner)}">${esc(playerName(lastOwner))}</span>` : ''}</div>
     ${bar(frac, `var(--${res})`, t('{r} left', { r: t(res) }))}
-    <div class="hint">${who.length ? `${t('Gathering')}: ${who.map(([o, n]) => `<b style="color:${playerTextColor(+o)}">${esc(playerName(+o))} ×${n}</b>`).join(' · ')}` : t('Nobody gathering')}</div>`);
+    <div class="review-gatherers">${who.map(([o, n]) => `<button data-gatherers="${isTreeId(r[0]) ? r[11] : r[0]}" data-owner="${o}" ${tip(t('Select gatherers'), playerName(+o))}>${reviewIcon('workers')}<b style="color:${playerTextColor(+o)}">×${n}</b></button>`).join('') || `<span class="hint">${t('Nobody gathering')}</span>`}</div>`);
+}
+
+// Use the civ's own curated lines to identify upgrades for selected units.
+function relevantUpgrades(rows) {
+  if (!rows.length) return '';
+  const pid = rows[0][1], p = player(pid);
+  if (!pid || !p) return '';
+  const tree = treeNow(p.civ);
+  if (!tree) { loadTree(p.civ); return ''; }
+  const layout = tree.layout?.rows || [];
+  const selectedLines = new Set(rows.map((r) => lineOf(r[2])));
+  const selectedIds = new Set(rows.map((r) => r[2]));
+  const matchStage = (st) => st.unit != null && (selectedIds.has(st.unit) || selectedLines.has(lineOf(st.unit)));
+  const isWorker = rows.every((r) => unitInfo(r[2], pid, r[0]).cls === 4);
+  const isTC = rows.every((r) => TOWN_CENTERS.includes(r[2]));
+  const groups = [];
+  const common = new Set(['meleeAttack', 'infantryArmor', 'squires', 'arson', 'rangedAttack', 'archerArmor', 'thumbRing', 'cavalryArmor', 'bloodlines', 'husbandry']);
+  for (const row of layout) {
+    const matching = (row.groups || []).filter((g) => g.stages?.some(matchStage));
+    if (matching.length) {
+      groups.push(...matching);
+      groups.push(...row.groups.filter((g) => common.has(g.key)));
+      // Cavalry share melee attack upgrades, including when the tree lists them in Infantry.
+      if (row.key === 'cavalry') groups.push(...layout.flatMap((r) => r.groups || []).filter((g) => g.key === 'meleeAttack'));
+    }
+    if (row.key === 'economy' && (isWorker || isTC)) {
+      const keys = new Set(isTC ? ['loom', 'wheelCart', 'townWatch'] : ['loom', 'wheelCart']);
+      for (const r of rows) { const key = ({ 3: 'lumber', 4: 'goldMining', 5: 'stoneMining' })[r[9]]; if (key) keys.add(key); }
+      groups.push(...row.groups.filter((g) => keys.has(g.key)));
+    }
+  }
+  const stats = playerStats(pid) || {}, done = new Set(stats.research_done || []);
+  const active = new Map((stats.research_active || []).map((a) => [a.tech, a]));
+  const stages = new Map();
+  for (const group of groups) for (const stage of group.stages || []) {
+    const tid = stage.tech ?? (stage.kind === 'tech' ? stage.id : null);
+    if (tid != null && tid >= 0 && nodeStatus(stage) !== 'hidden') stages.set(tid, stage);
+  }
+  return `<section class="review-upgrades"><div class="review-upgrades-head"><span>${t('Relevant upgrades')}</span><button data-full-tree="${pid}">${t('Full tree')} ↗</button></div><div class="review-upgrade-list">${[...stages.entries()].map(([tid, stage]) => {
+    const a = active.get(tid), unavailable = nodeStatus(stage) === 'struck';
+    const status = done.has(tid) ? 'done' : a ? 'doing' : unavailable ? 'unavailable' : (stage.age || 1) - 1 > (stats.age || 0) ? 'later' : 'available';
+    const info = techInfoFor(tid, pid), detail = stripMarkup(info.help || info.description || '');
+    return `<button class="review-upgrade ${status}" data-tech="${tid}" data-pid="${pid}" data-building="${a?.building || ''}" ${unavailable ? 'disabled' : ''} ${tip(info.name || stage.name, `${t(status)}${a?.remaining != null ? ' · ' + Math.ceil(a.remaining) + 's' : ''}${detail ? ' · ' + detail : ''}`)}><img src="${techIconFor(tid, pid)}" alt="${esc(info.name || stage.name)}"><small>${done.has(tid) ? '✓' : a?.remaining != null ? Math.ceil(a.remaining) + 's' : unavailable ? '×' : ''}</small></button>`;
+  }).join('')}</div></section>`;
 }
 
 function singlePanel(el, r) {
   // Renaming: leave the panel alone while its name field has the focus.
   if (el.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
   if (isResource(r)) { resourcePanel(el, r); return; }
-  const u = unitInfo(r[2], r[1]);
+  const u = unitInfo(r[2], r[1], r[0]);
   const owner = r[1];
+  const economic = u.cls === 4 || u.kind === 'building';
   const st = u.stats || {};
   const s = owner > 0 ? playerStats(owner) : null;
-  const us = unitStats(r[0]);
+  const us = unitStats(r[0], r);
+  const at = Math.round(S.view?.time ?? S.t);
+  const identity = JSON.stringify([S.session?.generation, S.seekVersion, r[0], owner, r[2], S.reviewScope, S.reviewRange]);
+  // Keep the last rendered snapshot while its replacement is being fetched.
+  // This does not extend an entity-stats validity interval or mix stale stats
+  // into a new snapshot. A changed selection/scope or rewind renders afresh.
+  const retain = !us && owner > 0 && el._readyIdentity === identity
+    && at >= el._readyAt && (S.playing || at - el._readyAt <= 5000);
+  el.setAttribute('aria-busy', String(retain));
+  if (retain) return;
+  if (us) { el._readyIdentity = identity; el._readyAt = at; }
   const sv = (k) => (us && has(us[k]) ? us[k] : st[k]);
   const prod = s ? (s.production || []).find((b) => b.id === r[0]) : null;
   let prodHtml = '';
   if (prod) {
     const c = prod.current || {};
     const name = c.tech != null ? techInfo(c.tech).name : c.unit != null ? unitInfo(c.unit).name : '';
-    prodHtml = `<div style="margin-top:6px"><span class="hint">${t('Producing')}</span> ${esc(name)} ${c.progress != null ? Math.round(c.progress * 100) + '%' : ''}
+    const remaining = has(c.remaining) ? `${Math.ceil(c.remaining)}s` : c.progress != null ? Math.round(c.progress * 100) + '%' : '–';
+    prodHtml = `<div class="review-production"><span>${esc(name)}</span> <b>${remaining}</b>
       <div class="up-multi">${(prod.queue || []).map((q) => `<div class="icon-count"><img src="${q.tech >= 0 ? techIcon(q.tech) : unitIcon(q.unit)}" alt=""><b>${q.count}</b></div>`).join('')}</div></div>`;
   }
   const mods = unitMods(r[0]) || {};
@@ -1981,16 +2095,20 @@ function singlePanel(el, r) {
   const consHtml = has(cons) && cons < 1 ? `<div class="hint">${t('Under construction')} ${Math.round(cons * 100)}%</div>${bar(cons, 'var(--accent)', t('Construction'))}` : '';
   const faithHtml = us && has(us.faith) ? `<div class="hint">${t('Faith')}</div>${bar(us.faith, '#b48cf0', t('Faith'))}` : '';
   const gateHtml = us && has(us.gate_locked) ? `<div class="hint">${us.gate_locked ? '🔒 ' + t('Gate locked') : '🔓 ' + t('Gate unlocked')}</div>` : '';
-  setHtml(el, `<div class="up-head"><img src="${unitIcon(r[2], r[1])}" alt="">
-    <div><div class="up-name" id="up-name" ${tip(t('Click to rename'))}>${esc(nick || u.name)}${nick ? ` <span class="hint">(${esc(u.name)})</span>` : ''}</div>
-    <div class="up-owner" style="color:${playerTextColor(shownOwner)}" ${tip(t('id {n}', { n: r[0] }))}>${shownOwner ? esc(playerName(shownOwner)) : t('Gaia')}${shownOwner && !owner ? ` <span class="hint">(${t('last owner')})</span>` : ''}</div></div></div>
+  const targetId = S.view?.gather_targets?.[r[0]];
+  const targetRow = targetId != null ? rowForEntityId(targetId) : null;
+  const targetHtml = u.cls === 4 ? `<div class="review-worker-task">${targetId != null ? `<button data-inspect="${targetId}" ${targetRow ? '' : 'disabled'} ${tip(targetRow ? t('Inspect target') : t('Target no longer present'))}>${reviewIcon('location')}${esc(targetRow ? unitInfo(targetRow[2], targetRow[1], targetRow[0]).name : t('Gathering target'))}</button>` : ''}<span ${tip(t('Lifetime idle'))}>${reviewIcon('idle')}${us?.activity ? fmtTime((us.activity.idle || 0) * 1000) : '–'}</span></div>` : '';
+  const workingHtml = economic ? `${targetHtml}${prodHtml || (TOWN_CENTERS.includes(r[2]) ? `<div class="hint">${t('Idle')}</div>` : '')}${carry}${marketHtml}${farmQ}` : '';
+  const numbersReady = owner <= 0 || !!us;
+  const mechanics = numbersReady ? `<div class="up-stats">${statsHtml}</div>${auraHtml}` : '';
+  setHtml(el, `${selectionHeader(r, { ...u, icon_url: unitIcon(r[2], r[1], r[0]) }, nick || u.name, shownOwner)}
     <div class="hpbar"><div style="width:${Math.round(r[5] * 100)}%"></div></div>
-    <div class="hint">${t('HP')} ${Math.round(r[5] * hpMax)} / ${baseDelta(base.hp ?? (sv('hp') || u.hp), hpMax)}${r[6] & 8 ? ` · <b style="color:var(--bad)">${t('idle')}</b>` : doing}${r[6] & 16 && !consHtml ? ` · ${t('under construction')}` : ''}</div>
+    <div class="hint">${t('HP')} ${numbersReady ? `${Math.round(r[5] * hpMax)} / ${baseDelta(base.hp ?? (sv('hp') || u.hp), hpMax)}` : '– / –'}${r[6] & 8 ? ` · <b style="color:var(--bad)">${t('idle')}</b>` : doing}${r[6] & 16 && !consHtml ? ` · ${t('under construction')}` : ''}</div>
     ${consHtml}${faithHtml}${chargeFillHtml}${gateHtml}
-    <div class="up-stats">${statsHtml}</div>${auraHtml}
-    ${carry}${combatHtml(us)}${eff}${garHtml}${marketHtml}${farmQ}
+    ${workingHtml}${economic ? `<details class="review-details" data-panel-detail="mechanics"><summary>${t('Details')}</summary>${resourceTotalsHtml(us?.resource_totals, u.cls === 4)}${mechanics}${eff}${combatHtml(us)}</details>` : `${militaryCard([r[0]])}${mechanics}`}
+    ${garHtml}${relevantUpgrades([r])}
     ${r[1] > 0 && u.cost && Object.keys(u.cost).length ? `<div class="hint" style="margin-top:4px">${t('Cost')}: ${costText(u.cost)}</div>` : ''}
-    ${prodHtml}`);
+    ${economic ? '' : `${carry}${marketHtml}${farmQ}${prodHtml}<details class="review-details" data-panel-detail="activity"><summary>${t('Details')}</summary>${eff}</details>`}`);
   const nameEl = $('up-name');
   if (nameEl) nameEl.onclick = () => {
     const inp = document.createElement('input');
@@ -2013,7 +2131,7 @@ function singlePanel(el, r) {
 // A group of selected units (one team's half in a split panel): who and what,
 // the group's health and value, what it is doing, a row per unit type with the
 // owner's upgraded numbers, and its combat record (/api/group).
-const GROUP_ACTS = { 8: '⚔', 1: '➜', 0: '💤', 2: '🍖', 3: '🪵', 4: '🪙', 5: '🪨', 6: '🔨', 7: '🔧', 10: '⚙', 11: '⚗', 13: '📦', 14: '📦' };
+const GROUP_ACTS = { 8: '⚔', 1: '➜', 0: '💤', 2: '🍖', 3: '🪵', 4: '🪙', 5: '🪨', 6: '🔨', 7: '🔧', 10: '⚙', 11: '⚗', 13: '📦', 14: '📦', 15: '✚' };
 // Activity colours for the group's time bars (server ACTIVITY_NAMES).
 const ACT_COLORS = {
   idle: 'var(--bad)', moving: '#6fb6ea', fighting: '#f0c94b', gather_food: 'var(--food)', gather_wood: 'var(--wood)',
@@ -2031,45 +2149,76 @@ function timeBar(acts, label) {
     <span class="up-tlegend">${parts.slice(0, 3).map(([k, v]) => `<b style="color:${ACT_COLORS[k] || 'inherit'}">${Math.round(100 * v / tot)}%</b> ${esc(name(k))}`).join(' · ')}</span></div>`;
 }
 
-function groupHtml(rows, deadIds) {
+// A present per-entity map is authoritative, even when this ID is missing/unknown.
+// Only an actual old-server response lacking the field may use owner/master defaults.
+function groupEntityStats(gs, r) {
+  if (!gs) return { stats: null, authoritative: true };
+  if (Object.prototype.hasOwnProperty.call(gs, 'entity_types')) {
+    const entry = gs.entity_types && gs.entity_types[String(r[0])];
+    const at = Math.round(S.view && has(S.view.time) ? S.view.time : S.t);
+    const interval = gs.entity_stats_validity_version !== 1 || (entry
+      && Number.isInteger(entry.valid_from_ms) && Number.isInteger(entry.valid_until_ms)
+      && entry.valid_from_ms <= at && at < entry.valid_until_ms);
+    const valid = interval && entry && entry.owner === r[1] && entry.master === r[2]
+      && entry.stats && typeof entry.stats === 'object' && !Array.isArray(entry.stats);
+    return { stats: valid ? entry.stats : null, authoritative: true };
+  }
+  return { stats: (gs.types && gs.types[`${r[1]}:${r[2]}`]) || null, authoritative: false };
+}
+
+function groupStatKey(stats, authoritative) {
+  const st = stats || {};
+  return JSON.stringify([authoritative, ...['hp', 'attack', 'melee_armor', 'pierce_armor',
+    'range', 'speed', 'reload'].map((key) => st[key]),
+    st.cost == null ? null : Object.entries(st.cost).sort(([a], [b]) => a.localeCompare(b))]);
+}
+
+function groupHtml(rows, deadIds, compact = false) {
   // The dead stay in the selection: their kills count, and they are its deaths.
-  const gs = groupStats([...rows.map((r) => r[0]), ...deadIds]);
-  const typeStats = (o, mid) => (gs && gs.types && gs.types[`${o}:${mid}`]) || null;
+  const gs = groupStats([...rows.map((r) => r[0]), ...deadIds], rows);
   const byOwner = new Map();
   for (const r of rows) byOwner.set(r[1], (byOwner.get(r[1]) || 0) + 1);
   // One entry per (owner, type): count, hp now / max, carried and resources left.
   const types = new Map();
-  let hp = 0, hpMax = 0;
+  let hp = 0, hpMax = 0, unknownHP = 0, unknownValue = 0;
   const value = {}, acts = new Map(), carried = {}, left = {};
   for (const r of rows) {
-    const u = unitInfo(r[2], r[1]);
+    const u = unitInfo(r[2], r[1], r[0]);
     // By name: a villager's task variants (male/female gold miners) are one row.
-    const k = `${r[1]}:${u.name}`;
-    const st = typeStats(r[1], r[2]) || {};
+    const resolved = groupEntityStats(gs, r);
+    const st = resolved.stats || {}, authoritative = resolved.authoritative;
+    const k = `${r[1]}:${u.name}:${u.icon}:${u.kind}${authoritative ? ':' + groupStatKey(resolved.stats, true) : ''}`;
     let e = types.get(k);
-    if (!e) types.set(k, (e = { o: r[1], mid: r[2], mids: new Set(), n: 0, hp: 0, max: 0, u, st }));
-    e.mids.add(r[2]);
+    if (!e) types.set(k, (e = { o: r[1], mid: r[2], mids: new Set(), ids: [], n: 0, hp: 0, max: 0, u, st, authoritative }));
+    e.mids.add(r[2]); e.ids.push(r[0]);
     const mods = unitMods(r[0]) || {};
-    const max = has(mods.hp_max) ? mods.hp_max : (st.hp || u.hp || 0);
+    const max = has(mods.hp_max) ? mods.hp_max : authoritative ? (st.hp ?? 0) : (st.hp || u.hp || 0);
+    if (r[1] > 0 && authoritative && !has(mods.hp_max) && !has(st.hp)) unknownHP++;
+    if (r[1] > 0 && authoritative && !has(st.cost)) unknownValue++;
     e.n++; e.hp += r[5] * max; e.max += max;
     if (r[1] > 0) { hp += r[5] * max; hpMax += max; }
-    if (r[1] > 0) for (const [res, n] of Object.entries(st.cost || u.cost || {})) if (n > 0) value[res] = (value[res] || 0) + n;
+    if (r[1] > 0) for (const [res, n] of Object.entries(st.cost || (authoritative ? {} : u.cost) || {})) if (n > 0) value[res] = (value[res] || 0) + n;
     if (r[1] > 0 && r[9] != null) acts.set(r[9], (acts.get(r[9]) || 0) + 1);
     for (const [res, n] of carryPairs(r[10])) (isResource(r) ? left : carried)[res] = ((isResource(r) ? left : carried)[res] || 0) + n;
   }
   const resList = (o) => Object.entries(o).map(([k, v]) => `<b style="color:var(--${k})">${fmtNum(Math.floor(v))}</b> ${esc(t(k))}`).join(' · ');
   const valueTot = Object.values(value).reduce((a, b) => a + b, 0);
-  const head = `<div class="hint">${t('{n} selected', { n: rows.length })}${deadIds.length ? ` (${t('+{n} dead', { n: deadIds.length })})` : ''} · ${[...byOwner.entries()].map(([o, n]) => `<span style="color:${playerTextColor(o)}">${esc(o ? playerName(o) : t('Gaia'))} ${n}</span>`).join(' · ')}</div>`;
+  for (const id of deadIds) {
+    const owner = S.selectionInfo.get(id)?.owner;
+    if (owner != null) byOwner.set(owner, (byOwner.get(owner) || 0) + 1);
+  }
+  const head = `<div class="review-group-count">${t('{n} selected', { n: rows.length + deadIds.length })}${deadIds.length ? ` · ☠ ${deadIds.length}` : ''}</div>${[...byOwner.entries()].map(([o, n]) => ownerIdentity(o, n)).join('')}`;
   const hpHtml = hpMax ? `<div class="up-gsum"><span>${t('HP')} <b>${fmtNum(hp)}</b> / ${fmtNum(hpMax)}</span>${valueTot ? `<span ${tip(t('Value'), resList(value).replace(/<[^>]+>/g, ''))}>${t('Value')} <b>${fmtNum(valueTot)}</b></span>` : ''}</div>${bar(hp / hpMax, 'var(--good)', t('HP'))}` : '';
+  const unknownHtml = unknownHP || unknownValue ? `<div class="hint">${unknownHP ? `${t('HP unknown')}: ${unknownHP}` : ''}${unknownHP && unknownValue ? ' · ' : ''}${unknownValue ? `${t('Value unknown')}: ${unknownValue}` : ''}</div>` : '';
   const actHtml = acts.size ? `<div class="up-acts">${[...acts.entries()].sort((a, b) => b[1] - a[1]).map(([a, n]) => `<span class="up-act${a === 0 ? ' idle' : a === 8 ? ' fight' : ''}" ${tip(t(ACT_NAMES[a] || 'other'))}>${GROUP_ACTS[a] || '·'} ${n} <small>${esc(t(ACT_NAMES[a] || 'other'))}</small></span>`).join('')}</div>` : '';
   const num = (v) => (has(v) && v !== 0 ? r2(v) : '–');
   const typeRows = [...types.values()].sort((a, b) => b.n - a.n).map((e) => {
     const st = e.st || {}, us = e.u.stats || {};
-    const g = (k) => (has(st[k]) ? st[k] : us[k]);
+    const g = (k) => (has(st[k]) ? st[k] : e.authoritative ? null : us[k]);
     const frac = e.max ? e.hp / e.max : 1;
-    return `<div class="up-trow" data-mid="${[...e.mids].join(',')}" data-owner="${e.o}" ${tip(e.u.name, t('click: select one · Shift: select type · Ctrl: remove one · Ctrl+Shift: remove type'))}>
-      <span class="up-ticon" style="outline:2px solid ${playerColor(e.o)}"><img src="${unitIcon(e.mid, e.o)}" alt=""><b>${e.n}</b></span>
-      <span class="up-tname">${esc(e.u.name)}<i class="up-thp"><i style="width:${Math.round(clamp(frac, 0, 1) * 100)}%"></i></i></span>
+    return `<div class="up-trow" data-mid="${[...e.mids].join(',')}" data-owner="${e.o}" data-ids="${e.ids.join(',')}" ${tip(e.u.name, t('click: select one · Shift: select row · Ctrl: remove one · Ctrl+Shift: remove row'))}>
+      <span class="up-ticon" style="outline:2px solid ${playerColor(e.o)}"><img src="${unitIcon(e.mid, e.o, e.ids[0])}" alt=""><b>${e.n}</b></span>
+      <span class="up-tname">${esc(e.u.name)}<i class="up-thp"><i style="width:${Math.round(clamp(e.max ? frac : 0, 0, 1) * 100)}%"></i></i></span>
       <span ${tip(t('Attack'))}>${num(g('attack'))}</span><span ${tip(t('Melee / pierce armour'))}>${num(g('melee_armor'))}/${num(g('pierce_armor'))}</span><span ${tip(t('Range'))}>${num(g('range'))}</span>
     </div>`;
   }).join('');
@@ -2084,35 +2233,77 @@ function groupHtml(rows, deadIds) {
   const timeHtml = gs ? `${timeBar(gs.activity_lm, t('Last minute'))}${timeBar(gs.activity, t('Lifetime'))}` : '';
   const carriedHtml = Object.keys(carried).length ? `<div class="hint">${t('Carrying')}: ${resList(carried)}</div>` : '';
   const leftHtml = Object.keys(left).length ? `<div class="hint">${t('Left')}: ${resList(left)}</div>` : '';
-  return `${head}${hpHtml}${actHtml}${tableHtml}${combat}${timeHtml}${carriedHtml}${leftHtml}`;
+  const detailKey = `owner-${[...byOwner.keys()].sort((a, b) => a - b).join('-')}`;
+  const record = militaryCard([...rows.map((r) => r[0]), ...deadIds]);
+  if (compact) return `${[...byOwner.entries()].map(([owner, count]) => ownerIdentity(owner, count)).join('')}${record}<details class="review-details" data-panel-detail="${detailKey}-units"><summary>${t('Units & upgrades')}</summary>${hpHtml}${unknownHtml}${actHtml}${tableHtml}${relevantUpgrades(rows)}${combat}${timeHtml}${carriedHtml}${leftHtml}</details>`;
+  return `${head}${hpHtml}${unknownHtml}${record}${actHtml}${tableHtml}<details class="review-details" data-panel-detail="${detailKey}-lifetime"><summary>${t('Lifetime details')}</summary>${combat}${timeHtml}</details>${relevantUpgrades(rows)}${carriedHtml}${leftHtml}`;
 }
 
 // Combat totals and per-type statistics of a group, refreshed once a second.
 const groupCache = new Map();
-function groupStats(ids) {
-  const key = ids.slice().sort((a, b) => a - b).join(',');
+function groupStats(ids, rows = []) {
+  const generation = S.session && S.session.generation;
+  const at = Math.round(S.view && has(S.view.time) ? S.view.time : S.t);
+  const canonical = [...new Set(ids)].sort((a, b) => a - b);
+  const wanted = canonical.filter((id) => id >= 0).slice(0, 600);
+  const key = `${generation}:${canonical.join(',')}`;
   const now = performance.now();
   let c = groupCache.get(key);
-  if (!c || now - c.at > 1000) {
-    if (!c) {
-      if (groupCache.size > 8) groupCache.delete(groupCache.keys().next().value);
-      c = { at: now, data: null };
-      groupCache.set(key, c);
-    }
-    c.at = now;
-    const wanted = ids.filter((id) => id >= 0).slice(0, 600);
-    fetch(`/api/group?ids=${wanted.join(',')}&t=${Math.round(S.t)}`).then((r) => r.json()).then((d) => { c.data = d; }).catch(() => {});
+  if (!c) {
+    if (groupCache.size > 8) groupCache.delete(groupCache.keys().next().value);
+    c = { data: null, queryAt: null, started: 0, sequence: 0, pending: false, failed: false };
+    groupCache.set(key, c);
   }
-  return c.data;
+  const bounded = c.data && c.data.entity_stats_validity_version === 1;
+  const identities = new Map(rows.map((r) => [r[0], r]));
+  const valid = bounded ? wanted.every((id) => {
+    const e = c.data.entity_types && c.data.entity_types[String(id)], r = identities.get(id);
+    return e && (!r || (e.owner === r[1] && e.master === r[2]))
+      && Number.isInteger(e.valid_from_ms) && Number.isInteger(e.valid_until_ms)
+      && e.valid_from_ms <= at && at < e.valid_until_ms;
+  }) : c.data && legacyStatsFresh(c.queryAt, at);
+  // Genuine stats/source changes may refresh immediately. Mere keyframe turnover
+  // does not invalidate a proven interval; activity/totals refresh at most1Hz wall.
+  const due = !valid || now - c.started >= 1000;
+  if (!c.pending && due && (!c.failed || now - c.started >= 1000)) {
+    c.started = now; c.pending = true; c.failed = false;
+    const sequence = ++c.sequence;
+    fetch(`/api/group?ids=${wanted.join(',')}&t=${at}`, { priority: 'low' }).then((r) => r.json()).then((d) => {
+      if (groupCache.get(key) !== c || c.sequence !== sequence
+          || (S.session && S.session.generation) !== generation) return;
+      // A bounded response must identify the server Timeline's actual generation.
+      if ((d.entity_stats_validity_version === 1 && d.generation !== generation)
+          || (d.generation != null && d.generation !== generation)) { c.failed = true; return; }
+      c.data = d; c.queryAt = at;
+    }).catch(() => { c.failed = true; }).finally(() => {
+      if (groupCache.get(key) === c && c.sequence === sequence) c.pending = false;
+    });
+  }
+  // Preserve bounded data during refresh. The renderer checks each interval and
+  // owner/MID, so expired/unknown entries cannot revive a shared/catalog fallback.
+  return bounded || valid ? c.data : null;
 }
 
 let unitRows = [];
 export function renderUnitPanel() {
   const el = $('unitpanel');
+  wireReviewControls(el);
+  delegate(el, 'click', '[data-full-tree]', (d) => { pinnedTree = true; showTechTree(+d.dataset.fullTree); });
+  delegate(el, 'click', '.review-upgrade', techClick);
+  delegate(el, 'click', '[data-inspect]', (d) => {
+    const id = +d.dataset.inspect, row = rowForEntityId(id);
+    if (row) { S.selection = new Set([row[0]]); centerOn(row[3], row[4]); }
+  });
+  delegate(el, 'click', '[data-gatherers]', (d) => {
+    const target = +d.dataset.gatherers, owner = +d.dataset.owner;
+    S.selection = new Set(currentRows().filter((row) => row[1] === owner && row[0] !== target
+      && S.view?.gather_targets?.[row[0]] === target).map((row) => row[0]));
+  });
   delegate(el, 'click', '[data-mid]', (d, ev) => {
     const mids = d.dataset.mid.split(',').map(Number), o = +d.dataset.owner;
     const rows = unitRows;
-    const match = (r) => mids.includes(r[2]) && r[1] === o;
+    const ids = d.dataset.ids == null ? null : new Set(d.dataset.ids.split(',').map(Number));
+    const match = (r) => ids ? ids.has(r[0]) : mids.includes(r[2]) && r[1] === o;
     if (ev.ctrlKey && ev.shiftKey) S.selection = new Set(rows.filter((r) => !match(r)).map((r) => r[0]));
     else if (ev.shiftKey) S.selection = new Set(rows.filter(match).map((r) => r[0]));
     else if (ev.ctrlKey) { const one = rows.find(match); if (one) S.selection.delete(one[0]); }
@@ -2130,50 +2321,57 @@ export function renderUnitPanel() {
     el.classList.add('hidden'); return;
   }
   el.classList.remove('hidden');
-  if (!live.length) {
-    // Dead units keep their record: kills and damage from /api/unit.
-    let info = '';
-    if (dead.length === 1) {
-      const d = S.selectionInfo.get(dead[0]);
-      info = `<div class="up-head" style="margin-top:4px"><img src="${unitIcon(d.mid, d.owner)}" alt="" style="filter:grayscale(1) brightness(.6)"><div><div class="up-name">☠ ${esc(settings.entityNames[dead[0]] || unitInfo(d.mid, d.owner).name)}</div><div class="up-owner" style="color:${playerTextColor(d.owner)}" ${tip(t('id {n}', { n: dead[0] }))}>${esc(d.owner ? playerName(d.owner) : t('Gaia'))}</div></div></div>${combatHtml(unitStats(dead[0]))}`;
-    }
-    el.innerHTML = `<div class="hint">${dead.length === 1 ? t('The selected unit died') : t('{n} selected units died', { n: dead.length })}</div>${info}${dead.length > 1 ? `<div class="up-multi">${dead.map(deadIcon).join('')}</div>` : ''}`;
-    return;
-  }
   if (live.length === 1 && !dead.length) { singlePanel(el, live[0]); return; }
-  // Mixed selection across teams: one half per team (two teams side by side).
+  // Keep each owner's identity and results separate, including same-team owners.
   const groups = new Map();
   for (const r of live) {
-    const p = player(r[1]);
-    const k = p ? p.team_key : `g${r[1]}`;
+    const k = r[1];
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(r);
   }
+  for (const id of dead) {
+    const owner = S.selectionInfo.get(id)?.owner;
+    if (owner != null && !groups.has(owner)) groups.set(owner, []);
+  }
   if (groups.size >= 2) {
-    const order = sideTeams().map((tm) => tm.key);
+    const order = players().map((p) => p.id);
     const keys = [...groups.keys()].sort((a, b) => ((order.indexOf(a) + 1) || 99) - ((order.indexOf(b) + 1) || 99));
-    el.classList.toggle('split', keys.length === 2);
-    el.innerHTML = `<div class="up-sides">${keys.map((k) => {
-      const tm = teams().find((x) => x.key === k);
-      const deadHere = dead.filter((id) => { const d = S.selectionInfo.get(id); const p = player(d.owner); return p && p.team_key === k; });
-      return `<div class="up-side"><div class="up-side-h">${esc(tm ? teamName(tm) : t('Gaia'))}</div>${groupHtml(groups.get(k), deadHere)}</div>`;
-    }).join('')}</div>`;
+    el.classList.remove('split');
+    setHtml(el, `<div class="up-sides">${keys.map((k) => {
+      const deadHere = dead.filter((id) => S.selectionInfo.get(id)?.owner === k);
+      return `<div class="up-side">${groupHtml(groups.get(k), deadHere, true)}</div>`;
+    }).join('')}</div>`);
     return;
   }
   setHtml(el, groupHtml(live, dead));
 }
 
-const unitStatCache = { id: null, at: 0, data: null };
-function unitStats(id) {
-  const now = performance.now();
-  if (unitStatCache.id !== id || now - unitStatCache.at > 1000) {
-    if (unitStatCache.id !== id) unitStatCache.data = null;
-    unitStatCache.id = id; unitStatCache.at = now;
-    fetch(`/api/unit/${id}?t=${Math.round(S.t)}`).then((r) => r.json()).then((d) => {
-      if (unitStatCache.id === id) unitStatCache.data = d;
-    }).catch(() => {});
+const unitStatCache = new Map();
+function unitStats(id, row) {
+  const generation = S.session && S.session.generation;
+  const at = Math.round(S.view && has(S.view.time) ? S.view.time : S.t);
+  const key = `${generation}:${id}`, now = performance.now();
+  let c = unitStatCache.get(key);
+  if (!c) {
+    if (unitStatCache.size > 8) unitStatCache.delete(unitStatCache.keys().next().value);
+    c = { data: null, queryAt: null, started: 0, sequence: 0, pending: false, failed: false };
+    unitStatCache.set(key, c);
   }
-  return unitStatCache.id === id ? unitStatCache.data : null;
+  const valid = entityStatsValid(c.data, id, row, at, generation, c.queryAt);
+  if (!c.pending && (!valid || now - c.started >= 1000) && (!c.failed || now - c.started >= 1000)) {
+    c.started = now; c.pending = true; c.failed = false;
+    const sequence = ++c.sequence;
+    fetch(`/api/unit/${id}?t=${at}`, { priority: 'low' }).then((r) => r.json()).then((d) => {
+      if (unitStatCache.get(key) !== c || c.sequence !== sequence
+          || (S.session && S.session.generation) !== generation) return;
+      if ((d.entity_stats_validity_version === 1 && d.generation !== generation)
+          || (d.generation != null && d.generation !== generation)) { c.failed = true; return; }
+      c.data = d; c.queryAt = at;
+    }).catch(() => { c.failed = true; }).finally(() => {
+      if (unitStatCache.get(key) === c && c.sequence === sequence) c.pending = false;
+    });
+  }
+  return valid ? c.data : null;
 }
 
 // -- resources left --------------------------------------------------------------------------
@@ -2186,10 +2384,10 @@ export function renderResourcesLeft(show) {
   if (!rows || !rows.length) { setHtml(el, `<span class="hint">${t('no data yet')}</span>`); return; }
   let r = rows[0];
   for (const x of rows) { if (x.t <= S.t) r = x; else break; }
-  el.innerHTML = `<div class="title">${t('Resources left on map')}</div>
+  setHtml(el, `<div class="title">${t('Resources left on map')}</div>
     <div style="color:var(--food)">${t('Food')} ${fmtNum(r.food)}</div><div style="color:var(--wood)">${t('Wood')} ${fmtNum(r.wood)}</div>
     <div style="color:var(--gold)">${t('Gold')} ${fmtNum(r.gold)}</div><div style="color:var(--stone)">${t('Stone')} ${fmtNum(r.stone)}</div>
-    <div>${t('Relics')} ${r.relics}</div>`;
+    <div>${t('Relics')} ${r.relics}</div>`);
 }
 
 // -- time controls -----------------------------------------------------------------------------

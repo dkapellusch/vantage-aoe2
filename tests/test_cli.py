@@ -293,3 +293,17 @@ def test_serve_banner_says_where_to_go_and_what_is_missing(
     (tmp_path / "AoE2DE_s.exe").write_bytes(b"")
     text = serve_banner("http://127.0.0.1:8740/", tmp_path, tmp_path, opening=True)
     assert f"Game install: {tmp_path}\n" in text
+
+
+def test_recording_only_uses_explicit_assets_and_never_discovers_a_game(monkeypatch, tmp_path):
+    import vantage.gamedata as gamedata
+    from vantage.cli import resolve_game_dir
+
+    def discovered():
+        raise AssertionError("recording-only must not discover a game")
+
+    monkeypatch.setattr(gamedata, "find_game_dir", discovered)
+    assert resolve_game_dir(tmp_path, recording_only=True) == tmp_path
+    assert resolve_game_dir(None, recording_only=True) is None
+    monkeypatch.setattr(gamedata, "find_game_dir", lambda: tmp_path)
+    assert resolve_game_dir(None, recording_only=False) == tmp_path

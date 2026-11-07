@@ -17,6 +17,7 @@ Sources a session can hold:
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import mimetypes
 import os
@@ -25,6 +26,7 @@ import sys
 import threading
 import time
 import traceback
+import weakref
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -47,8 +49,9 @@ from vantage.launcher import GameLauncher
 from vantage.live import MAX_API_VERSION, classify_stream_error, port_open
 from vantage.paths import local_data_dir
 from vantage.replay import ReplayError, load_map_names, read_replay
+from vantage.review_moments import normalize_moments
 from vantage.skins import SkinStore
-from vantage.sprites import SpriteInfo, SpriteStore, strip_options
+from vantage.sprites import RENDER_VERSION, SpriteInfo, SpriteStore, strip_options
 from vantage.timeline import Timeline, load_recording, settle_heap
 
 WEB_PACKAGE = "vantage"
@@ -61,6 +64,42 @@ NEED_CONFIRM = "FAILED_PLAYING_NEED_CONFIRM"
 WAITING_AFTER_S = 3.0
 #: Most entity ids one ``/api/group`` request reads (a box over a whole army).
 GROUP_MAX = 600
+#: Seconds before reconnecting a broken live stream.
+RECONNECT_S = 3.0
+#: Once the game is over, reconnects back off (doubling) up to this many seconds.
+RECONNECT_ENDED_MAX_S = 60.0
+
+
+#: Least time between two session pushes on ``/api/stream`` for a new timeline
+#: version alone. A loading recording bumps the version for every keyframe (dozens
+#: a second) and each push made the browser refresh what it shows.
+SESSION_PUSH_S = 0.25
+
+
+def push_wait(
+    key: tuple[Any, ...], last: tuple[Any, ...], last_push: float, now: float
+) -> float | None:
+    """Seconds to hold a session push back: None when nothing changed, 0 to send
+    now. ``key`` is (generation, version, error, connected, status, phase); a
+    change other than the version goes out at once."""
+    if key == last:
+        return None
+    if not last or key[0] != last[0] or key[2:] != last[2:]:
+        return 0.0
+    return max(0.0, last_push + SESSION_PUSH_S - now)
+
+
+def reconnect_delay(game_over: bool, idle_streams: int) -> float:
+    """Seconds to wait before reopening the live stream.
+
+    ``idle_streams`` counts the streams in a row, since the game ended, that
+    brought nothing new. An ended game answers each reconnect with the same full
+    snapshot (23 MB late in a game), so retrying every 3 s for an hour only
+    burned CPU; the game starting something new is still seen within a minute.
+    """
+    if not game_over:
+        return RECONNECT_S
+    return min(RECONNECT_ENDED_MAX_S, RECONNECT_S * 2.0 ** min(idle_streams, 16))
 
 
 class Session:
@@ -137,8 +176,7 @@ class Session:
                 for f in read_frames(p):
                     if stop.is_set():
                         return
-                    tl.feed(f)
-                    if f.is_snapshot:
+                    if tl.feed(f) and f.is_snapshot:
                         settle_heap()
                 tl.finish()
             except Exception as exc:  # surfaced to the UI; the server keeps running
@@ -235,9 +273,11 @@ class Session:
                 target=self._watch_waiting, args=(stop,), name="vantage-waiting", daemon=True
             )
             watchdog.start()
+            idle_streams = 0
             while not stop.is_set():
                 game = None
                 self._restart_stream = False
+                progressed = False
                 try:
                     if source.get("status") != "needs_certs":
                         source["status"] = "connecting"
@@ -342,8 +382,12 @@ class Session:
                                     self._close_writer()
                                     self._writer = new_writer()
                         fed = time.monotonic()
-                        timeline.feed(f)
-                        if f.is_snapshot:
+                        applied = timeline.feed(f)
+                        # A snapshot repeating the state held (the game ended or is
+                        # paused, and answered a reconnect): not fed, not recorded.
+                        repeated = f.is_snapshot and not applied and not timeline.desynced
+                        progressed = progressed or applied
+                        if applied and f.is_snapshot:
                             settle_heap()
                         done = time.monotonic()
                         span = max(1e-6, done - last_seen)
@@ -353,10 +397,11 @@ class Session:
                         if timeline.game_ended:
                             source["status"] = "ended"
                         with self._writer_lock:
-                            if self._writer is None and self._record_wanted and f.is_snapshot:
+                            opened = self._writer is None and self._record_wanted
+                            if opened and f.is_snapshot:
                                 # A recording must open with a full-state frame.
                                 self._writer = new_writer()
-                            if self._writer is not None:
+                            if self._writer is not None and (not repeated or opened):
                                 self._writer.write(f)
                                 if time.monotonic() - last_flush > 5:
                                     self._writer.flush()
@@ -374,8 +419,10 @@ class Session:
                     continue  # asked for a fresh stream (e.g. to start a recording)
                 if exit_on_end and loaded and self.error is None:
                     break  # the stream ended cleanly: done, not reconnecting
+                game_over = timeline.game_ended or source.get("status") == "ended"
+                idle_streams = idle_streams + 1 if game_over and not progressed else 0
                 if not stop.is_set():
-                    stop.wait(3)
+                    stop.wait(reconnect_delay(game_over, idle_streams))
             with self._writer_lock:
                 self._close_writer()
             timeline.finish()
@@ -718,44 +765,143 @@ def _lobby_info(info: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _json(handler: BaseHTTPRequestHandler, obj: Any, status: int = 200) -> None:
+def _json(
+    handler: BaseHTTPRequestHandler,
+    obj: Any,
+    status: int = 200,
+    headers: dict[str, str] | None = None,
+) -> None:
     body = json.dumps(obj, separators=(",", ":"), default=str).encode()
+    _json_body(handler, body, status, headers)
+
+
+def _json_body(
+    handler: BaseHTTPRequestHandler,
+    body: bytes,
+    status: int = 200,
+    headers: dict[str, str] | None = None,
+) -> None:
+    """Send JSON that is already encoded."""
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
-    handler.end_headers()
-    handler.wfile.write(body)
-
-
-def _bytes(
-    handler: BaseHTTPRequestHandler,
-    body: bytes,
-    ctype: str,
-    cache: bool = False,
-    headers: dict[str, str] | None = None,
-) -> None:
-    handler.send_response(200)
-    handler.send_header("Content-Type", ctype)
-    handler.send_header("Content-Length", str(len(body)))
-    handler.send_header("Cache-Control", "max-age=86400" if cache else "no-store")
     for k, v in (headers or {}).items():
         handler.send_header(k, v)
     handler.end_headers()
     handler.wfile.write(body)
 
 
+#: Browser caching of game assets: a day, or for good when the URL carries the
+#: current :meth:`App.asset_version` (it then changes whenever the content can).
+ASSET_MAX_AGE = "max-age=86400"
+ASSET_IMMUTABLE = "max-age=31536000, immutable"
+
+
+def asset_cache_control(query: dict[str, str], version: str) -> str:
+    """``Cache-Control`` for a converted asset: immutable only when the request
+    names the asset version in force (``av=``); an asset URL without it keeps
+    its content across a game update, a Vantage update or a mod change."""
+    return ASSET_IMMUTABLE if query.get("av") == version else ASSET_MAX_AGE
+
+
+def _bytes(
+    handler: BaseHTTPRequestHandler,
+    body: bytes,
+    ctype: str,
+    cache: bool | str = False,
+    headers: dict[str, str] | None = None,
+) -> None:
+    """Send ``body``; ``cache`` True caches it for a day, a string is the
+    ``Cache-Control`` value itself."""
+    handler.send_response(200)
+    handler.send_header("Content-Type", ctype)
+    handler.send_header("Content-Length", str(len(body)))
+    control = cache if isinstance(cache, str) else ASSET_MAX_AGE if cache else "no-store"
+    handler.send_header("Cache-Control", control)
+    for k, v in (headers or {}).items():
+        handler.send_header(k, v)
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _error(
+    handler: BaseHTTPRequestHandler,
+    status: HTTPStatus = HTTPStatus.NOT_FOUND,
+    headers: dict[str, str] | None = None,
+) -> None:
+    """A short error answer on the kept-alive connection. ``send_error`` closes it,
+    and a cold battle scene asks for many sprites the game does not have: each
+    then cost the browser a new connection out of its six."""
+    body = status.phrase.encode()
+    handler.send_response(status)
+    handler.send_header("Content-Type", "text/plain")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    for k, v in (headers or {}).items():
+        handler.send_header(k, v)
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _native_jobs(app: Any) -> Any:
+    """The App's native conversion jobs (vantage.native), or None: read with a
+    default, so code that builds an App by hand without them still works."""
+    return getattr(app, "native_jobs", None)
+
+
+def paired_origin_headers(handler: BaseHTTPRequestHandler) -> dict[str, str]:
+    """CORS headers for the browser's second loopback origin.
+
+    The page on ``127.0.0.1`` fetches sprites from ``localhost`` (and the other
+    way round) for a second pool of six connections. Only this server's own port
+    on a loopback name is allowed, never a wildcard: any web page could otherwise
+    read the game data the local server serves. ``Vary`` is sent either way, so a
+    cached copy without the header is never reused for the other origin.
+    """
+    out = {"Vary": "Origin"}
+    origin = handler.headers.get("Origin")
+    if not origin:
+        return out
+    address: Any = handler.server.server_address
+    port = address[1]
+    if origin in (
+        f"http://127.0.0.1:{port}",
+        f"http://localhost:{port}",
+        f"http://[::1]:{port}",
+    ):
+        out["Access-Control-Allow-Origin"] = origin
+        out["Access-Control-Expose-Headers"] = "X-Sprite-Meta"
+    return out
+
+
 class App:
     """Routes requests to the session. One instance per server."""
 
-    def __init__(self, session: Session, replay_dirs: list[Path], follow_live: bool = True) -> None:
+    def __init__(
+        self,
+        session: Session,
+        replay_dirs: list[Path],
+        follow_live: bool = True,
+        native_jobs: Any = None,
+        recording_only: bool = False,
+    ) -> None:
         self.session = session
+        # Local replay playback (native_session.NativeSession): its replay roots
+        # are the replay browser's folders, and there is no live game to follow.
+        native = getattr(session, "native_config", None)
+        if native is not None:
+            replay_dirs, follow_live = list(native.replay_roots), False
         #: Replay folders given at start (``--replay-dir``, or detected).
         self.replay_dirs = replay_dirs
         #: Also list the replay folders of the profile the live game reports.
         self.follow_live = follow_live
+        self.native_jobs = native_jobs
+        self.recording_only = recording_only
         self._sprites: SpriteStore | None = None
         self._sprites_key: tuple[Any, ...] = ()
+        #: ``/api/series`` as last encoded: (timeline, its version, body).
+        self._series_cache: tuple[weakref.ref[Timeline], int, bytes] | None = None
         self._audio_lib: Any = None
         self._audio_lib_dir: Path | None = None
         self.data_dir = data_dir()
@@ -787,14 +933,36 @@ class App:
         tl = s.timeline
         if path in ("/", "/index.html"):
             return self._static(h, "index.html")
+        if path == "/native":
+            return self._static(h, "native.html")
         if path.startswith("/static/"):
             return self._static(h, path[len("/static/") :])
         if path == "/api/session":
             desc = s.describe()
             if q.get("probe"):
                 # The home screen asks whether the game is running before offering it.
-                desc["game_api_open"] = s.live_connected() or port_open()
+                desc["game_api_open"] = (
+                    False
+                    if getattr(self, "recording_only", False)
+                    else s.live_connected() or port_open()
+                )
             return _json(h, desc)
+        if path == "/api/native":
+            if _native_jobs(self) is None:
+                return _json(h, {"available": False, "experimental": True})
+            try:
+                value = (
+                    _native_jobs(self).get(q["id"])
+                    if q.get("id")
+                    else _native_jobs(self).describe()
+                )
+                return _json(h, value)
+            except ValueError as exc:
+                return _json(h, {"ok": False, "error": str(exc)}, 400)
+        if getattr(self, "recording_only", False) and path == "/api/launch_game":
+            return _json(
+                h, {"ok": False, "error": "This session opens recordings without the game."}, 400
+            )
         if path == "/api/match":
             return _json(h, tl.match if tl else {})
         if path == "/api/map":
@@ -806,17 +974,28 @@ class App:
             return _json(h, cat)
         if path == "/api/view":
             t = int(q["t"]) if q.get("t") not in (None, "") else None
-            v = tl.view_at(t) if tl else None
-            return _json(h, v or {})
+            body = tl.view_json(t) if tl else None
+            return _json_body(h, body or b"{}")
         m = re.match(r"^/api/unit/(-?\d+)$", path)
         if m:
             t = int(q["t"]) if q.get("t") else None
-            return _json(h, tl.unit_stats(int(m.group(1)), t) if tl else {})
+            since = max(0, int(q["since"])) if q.get("since") else None
+            # Bind single-entity detail to the Timeline actually queried, as /api/group does.
+            with s.lock:
+                unit_timeline, generation = s.timeline, s.generation
+            result = unit_timeline.unit_stats(int(m.group(1)), t, since) if unit_timeline else {}
+            return _json(h, {**result, "generation": generation})
         if path == "/api/group":
             t = int(q["t"]) if q.get("t") else None
+            since = max(0, int(q["since"])) if q.get("since") else None
             raw = (q.get("ids") or "").split(",")[:GROUP_MAX]
             ids = [int(x) for x in raw if x.lstrip("-").isdigit()]
-            return _json(h, tl.group_stats(ids, t) if tl else {})
+            # Bind the response to the Timeline actually captured for this request.
+            # Never hold the Session lock across Timeline work or socket writes.
+            with s.lock:
+                group_timeline, generation = s.timeline, s.generation
+            result = group_timeline.group_stats(ids, t, since) if group_timeline else {}
+            return _json(h, {**result, "generation": generation})
         m = re.match(r"^/api/techtree/(\d+)$", path)
         if m:
             tree = s.data.tech_tree(int(m.group(1)), q.get("lang", "en")) or {}
@@ -845,7 +1024,13 @@ class App:
             t1 = int(q.get("to", 1 << 62))
             return _json(h, tl.events_between(t0, t1))
         if path == "/api/series":
-            return _json(h, tl.series_json() if tl else {})
+            if tl is None:
+                return _json(h, {})
+            raw_from = q.get("from") or ""
+            if raw_from.lstrip("-").isdigit():
+                # Rows the browser does not have yet (it drops its own from then on).
+                return _json(h, tl.series_json(int(raw_from)))
+            return _json_body(h, self._series_body(tl))
         if path == "/api/summary":
             t_q = int(q["t"]) if q.get("t") not in (None, "") else None
             return _json(h, tl.summary(t_q) if tl else {})
@@ -873,6 +1058,8 @@ class App:
             return _json(h, self._recordings())
         if path == "/api/replays":
             return _json(h, self._replays())
+        if path == "/api/review-moments":
+            return _json(h, self._review_moments_load())
         if path == "/api/bookmarks":
             return _json(h, self._bookmarks_load())
         if path == "/api/stream":
@@ -881,9 +1068,9 @@ class App:
         if m:
             png = s.data.icon_png(m.group(1), int(m.group(2)))
             if png is None:
-                h.send_error(HTTPStatus.NOT_FOUND)
+                _error(h)
                 return None
-            return _bytes(h, png, "image/png", cache=True)
+            return _bytes(h, png, "image/png", cache=self._asset_cache(q))
         m = re.match(r"^/sprite/(\d+)/(\d+)/(-?\d+)\.(png|json)$", path)
         if m:
             hd = q.get("hd") == "1"
@@ -894,12 +1081,21 @@ class App:
         if m:
             f = self.images_dir / m.group(1)
             if not f.is_file():
-                h.send_error(HTTPStatus.NOT_FOUND)
+                _error(h)
                 return None
             ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
             return _bytes(h, f.read_bytes(), ctype, cache=True)
         if path == "/api/config":
-            return _json(h, {**self.client_config, "version": __version__})
+            # Also the browser's probe of the second loopback origin (CORS).
+            # native_replays is the server's to say (a forced config cannot claim it).
+            config = {
+                **{k: v for k, v in self.client_config.items() if k != "native_replays"},
+                "version": __version__,
+            }
+            config["asset_version"] = self.asset_version()
+            if getattr(s, "native", None) is not None:
+                config["native_replays"] = True
+            return _json(h, config, headers=paired_origin_headers(h))
         m = re.match(r"^/audio/(event|taunt|notify)/([\w-]+)\.ogg$", path)
         if m:
             voice = q.get("lang") if m.group(1) == "taunt" else None
@@ -910,7 +1106,7 @@ class App:
         if m:
             f = self.profiles_dir / f"{m.group(1)}.json"
             if not f.is_file():
-                h.send_error(HTTPStatus.NOT_FOUND)
+                _error(h)
                 return None
             return _bytes(h, f.read_bytes(), "application/json")
         if path == "/api/particles":
@@ -918,59 +1114,90 @@ class App:
         if path in ("/particle_atlas.png", "/particle_atlas.json"):
             got_atlas = s.data.particle_atlas(q.get("path", ""))
             if got_atlas is None:
-                h.send_error(HTTPStatus.NOT_FOUND)
+                _error(h)
                 return None
             img, mime, meta = got_atlas
+            control = self._asset_cache(q)
             if path.endswith(".json"):
-                return _bytes(h, json.dumps(meta).encode(), "application/json", cache=True)
-            return _bytes(h, img, mime, cache=True)
+                return _bytes(h, json.dumps(meta).encode(), "application/json", cache=control)
+            return _bytes(h, img, mime, cache=control)
         m = re.match(r"^/terrain/([\w-]+)\.png$", path)
         if m:
             png = s.data.terrain_png(m.group(1))
             if png is None:
-                h.send_error(HTTPStatus.NOT_FOUND)
+                _error(h)
                 return None
-            return _bytes(h, png, "image/png", cache=True)
+            return _bytes(h, png, "image/png", cache=self._asset_cache(q))
         m = re.match(r"^/terrain-mask/([\w-]+)\.png$", path)
         if m:
             mask = s.data.terrain_mask_png(m.group(1))
             if mask is None:
-                h.send_error(HTTPStatus.NOT_FOUND)
+                _error(h)
                 return None
-            return _bytes(h, mask, "image/png", cache=True)
+            return _bytes(h, mask, "image/png", cache=self._asset_cache(q))
         m = re.match(r"^/ui/material/([\w-]+)\.png$", path)
         if m:
             mat = s.data.material_png(m.group(1))
             if mat is None:
-                h.send_error(HTTPStatus.NOT_FOUND)
+                _error(h)
                 return None
-            return _bytes(h, mat.read_bytes(), "image/png", cache=True)
+            return _bytes(h, mat.read_bytes(), "image/png", cache=self._asset_cache(q))
         m = re.match(r"^/ui/([\w-]+)\.png$", path)
         if m and s.data.game_dir is not None:
             # A game mode's own HUD art (Return of Rome age icons) wins.
             for root in s.data.roots():
                 f = root / "widgetui" / "textures" / "ingame" / "icons" / f"{m.group(1)}.png"
                 if f.is_file():
-                    # Not cached by the browser: the same URL differs per game.
-                    return _bytes(h, f.read_bytes(), "image/png", cache=False)
-            h.send_error(HTTPStatus.NOT_FOUND)
+                    # Not cached by the browser: the same URL differs per game,
+                    # unless it names the asset version (which includes the game).
+                    versioned = q.get("av") == self.asset_version()
+                    return _bytes(
+                        h, f.read_bytes(), "image/png", cache=versioned and ASSET_IMMUTABLE
+                    )
+            _error(h)
             return None
         m = re.match(r"^/emblem/(\d+)\.png$", path)
         if m:
             png = s.data.emblem_png(int(m.group(1)))
             if png is None:
-                h.send_error(HTTPStatus.NOT_FOUND)
+                _error(h)
                 return None
-            return _bytes(h, png, "image/png", cache=True)
-        h.send_error(HTTPStatus.NOT_FOUND)
+            return _bytes(h, png, "image/png", cache=self._asset_cache(q))
+        _error(h)
         return None
 
     def _launch_status(self) -> dict[str, Any]:
         """The launcher status with the live gRPC stream state fed in, so the game
         running as a player account / needing a newer app are reachable statuses."""
+        if getattr(self.session, "native", None) is not None:
+            return {"status": "disabled", "detail": "Local replay playback is configured."}
         stream = self.session.stream_state()
         connected = stream in ("connected", "connected-hiccup")
         return self.launcher.status(connected, stream)
+
+    def asset_version(self) -> str:
+        """What every converted asset depends on besides its URL: Vantage and its
+        sprite renderer, the installed build, the game mode and the mod folders in
+        use. Asset URLs carrying it (``av=``) are cached by the browser for good."""
+        data = self.session.data
+        mods = (data.mod_roots("graphics"), data.mod_roots("sprites"), data.mod_roots("terrain"))
+        parts = (__version__, RENDER_VERSION, data.build, data.game_dir, data.mode, mods)
+        return hashlib.sha1(repr(parts).encode()).hexdigest()[:12]
+
+    def _asset_cache(self, query: dict[str, str]) -> str:
+        return asset_cache_control(query, self.asset_version())
+
+    def _series_body(self, tl: Timeline) -> bytes:
+        """``/api/series`` encoded, kept until the timeline's next version: 4-5 MB
+        late in a game, asked for by every refresh of the statistics screens."""
+        version = tl.version
+        cached = self._series_cache
+        if cached is not None and cached[0]() is tl and cached[1] == version:
+            return cached[2]
+        body = json.dumps(tl.series_json(), separators=(",", ":"), default=str).encode()
+        # A weak reference: a replaced timeline is freed, never mistaken for the next.
+        self._series_cache = (weakref.ref(tl), version, body)
+        return body
 
     def _store(self) -> SpriteStore | None:
         """The sprite store for the current game folder and enabled mods."""
@@ -999,8 +1226,10 @@ class App:
         entry = tl.sprites.get(sid) if tl is not None else None
         data = self.session.data
         store = self._store() if entry is not None else None
+        # Errors too: a cross-origin 404 without them reads as a network failure.
+        cors = paired_origin_headers(h)
         if entry is None or store is None:
-            h.send_error(HTTPStatus.NOT_FOUND)
+            _error(h, headers=cors)
             return
         info = SpriteInfo(sid, *entry)
         rgb = data.player_colors[color % 8] if color >= 0 else None
@@ -1008,18 +1237,20 @@ class App:
         # ``&layer=``, ``&pm=``).
         got = store.strip(info, facet, rgb, str(color), hd, **strip_options(query or {}))
         if got is None:
-            h.send_error(HTTPStatus.NOT_FOUND)
+            _error(h, headers=cors)
             return
         png, meta = got
+        control = self._asset_cache(query or {})
         if kind == "json":
             body = json.dumps(meta).encode()
-            _bytes(h, body, "application/json", cache=True)
+            _bytes(h, body, "application/json", cache=control, headers=cors)
         else:
             # The strip's layout rides along: one request per strip, not two (the
             # browser keeps only 6 connections to a host; a cold battle scene
             # needs hundreds of strips).
             meta_h = json.dumps(meta, separators=(",", ":"))
-            _bytes(h, png, "image/png", cache=True, headers={"X-Sprite-Meta": meta_h})
+            headers = {"X-Sprite-Meta": meta_h, **cors}
+            _bytes(h, png, "image/png", cache=control, headers=headers)
 
     def _audio(
         self,
@@ -1048,7 +1279,7 @@ class App:
             else None
         )
         if got is None:
-            h.send_error(HTTPStatus.NOT_FOUND)
+            _error(h)
             return
         body, mime = got
         _bytes(h, body, mime, cache=True)
@@ -1056,11 +1287,11 @@ class App:
     def _static(self, h: BaseHTTPRequestHandler, name: str) -> None:
         # On Windows a drive or UNC path (C:/x, \\host\x) would escape web/.
         if ".." in name or name.startswith("/") or ":" in name or "\\" in name:
-            h.send_error(HTTPStatus.BAD_REQUEST)
+            _error(h, HTTPStatus.BAD_REQUEST)
             return
         res = resources.files(WEB_PACKAGE).joinpath("web").joinpath(name)
         if not res.is_file():
-            h.send_error(HTTPStatus.NOT_FOUND)
+            _error(h)
             return
         ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
         _bytes(h, res.read_bytes(), ctype)
@@ -1071,6 +1302,7 @@ class App:
         h.send_header("Cache-Control", "no-store")
         h.end_headers()
         last: tuple[Any, ...] = ()
+        last_push = 0.0
         skins_seen = self.skins.version()
         try:
             while True:
@@ -1084,14 +1316,32 @@ class App:
                 desc = self.session.describe()
                 # The source status too: the launch card follows connecting ->
                 # loading -> ready, and needs_certs / ended, between frames.
-                status = desc["source"].get("status")
-                key = (self.session.generation, ver, desc["error"], desc["live_connected"], status)
-                if key != last:
+                src = desc.get("source") or {}
+                key = (
+                    self.session.generation,
+                    ver,
+                    desc["error"],
+                    desc["live_connected"],
+                    src.get("status"),
+                    src.get("phase"),
+                )
+                wait = push_wait(key, last, last_push, time.monotonic())
+                if wait:
+                    # Only the timeline version moved, and too soon: look again
+                    # then, and send the state as it is by that time.
+                    time.sleep(wait)
+                    continue
+                if wait == 0:
                     h.wfile.write(f"data: {json.dumps(desc, default=str)}\n\n".encode())
                     h.wfile.flush()
                     last = key
+                    last_push = time.monotonic()
                 if tl is not None and not tl.complete:
                     tl.wait_change(ver, 1.0)
+                elif tl is not None and tl.version != ver:
+                    # It finished after this state was read: send the final
+                    # state now, not after a keep-alive (the browser may be gone).
+                    continue
                 else:
                     time.sleep(1.0)
                     h.wfile.write(b": keepalive\n\n")
@@ -1146,6 +1396,42 @@ class App:
         path = urlparse(h.path).path
         s = self.session
         try:
+            if getattr(self, "recording_only", False) and path in {
+                "/api/live",
+                "/api/play_replay",
+                "/api/launch_game",
+                "/api/record",
+                "/api/game_dir",
+            }:
+                return _json(
+                    h,
+                    {"ok": False, "error": "This session opens recordings without the game."},
+                    400,
+                )
+            if getattr(self, "recording_only", False) and path == "/api/open_url":
+                target = str(body.get("url", ""))
+                if not target.lower().endswith(".vrec") or not Path(target).expanduser().is_file():
+                    return _json(
+                        h,
+                        {"ok": False, "error": "This session opens recordings without the game."},
+                        400,
+                    )
+            if path in {"/api/native/convert", "/api/native/cancel", "/api/native/open"}:
+                if _native_jobs(self) is None:
+                    raise ValueError("No native engine has been imported for this session")
+                if path == "/api/native/convert":
+                    return _json(
+                        h,
+                        _native_jobs(self).start(
+                            str(body["path"]), experimental=body.get("experimental") is True
+                        ),
+                        202,
+                    )
+                if path == "/api/native/cancel":
+                    return _json(h, _native_jobs(self).cancel(str(body["id"])))
+                s.open_recording(str(_native_jobs(self).ready_path(str(body["id"]))))
+                s.source["native_conversion"] = str(body["id"])
+                return _json(h, {"ok": True})
             if path == "/api/open":
                 s.open_recording(str(body["path"]))
                 return _json(h, {"ok": True})
@@ -1165,7 +1451,15 @@ class App:
                 if body.get("replay") or body.get("lobby") or game is not None:
                     return _json(h, self._await_load())
                 return _json(h, {"ok": True})
+            if path == "/api/native_cancel":
+                from vantage.native_session import cancel_replay
+
+                return _json(h, cancel_replay(s, body))
             if path == "/api/play_replay":
+                if getattr(s, "native", None) is not None:
+                    from vantage.native_session import play_replay
+
+                    return _json(h, play_replay(s, body))
                 name, where = str(body["name"]), body.get("dir")
                 win = self._windows_replay_path(name, where)
                 found = next(
@@ -1188,6 +1482,10 @@ class App:
             if path == "/api/skins/remove":
                 return _json(h, self.skins.remove(str(body["name"])))
             if path == "/api/launch_game":
+                if getattr(s, "native", None) is not None:
+                    raise ValueError(
+                        "game launch is unavailable with local replay playback configured"
+                    )
                 return _json(h, self.launcher.launch(self.session.live_connected()))
             if path == "/api/record":
                 return _json(h, s.set_recording(bool(body.get("on", True))))
@@ -1222,12 +1520,27 @@ class App:
             if path == "/api/stop":
                 s.stop()
                 return _json(h, {"ok": True})
+            if path == "/api/review-moments":
+                with s.lock:
+                    if body.get("generation") != s.generation:
+                        raise ValueError("Replay changed; reload review moments")
+                    rows = normalize_moments(body.get("moments"))
+                    bookmarks_file = self._bookmarks_file()
+                    if bookmarks_file is None:
+                        raise ValueError("Record this session before saving review moments")
+                    moments_file = Path(
+                        str(bookmarks_file).removesuffix(".bookmarks.json") + ".moments.json"
+                    )
+                    temporary = moments_file.with_suffix(moments_file.suffix + ".tmp")
+                    temporary.write_text(json.dumps(rows))
+                    temporary.replace(moments_file)
+                return _json(h, {"ok": True})
             if path == "/api/bookmarks":
                 self._bookmarks_save(body.get("bookmarks", []))
                 return _json(h, {"ok": True})
         except (KeyError, ValueError, OSError) as exc:
             return _json(h, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 400)
-        h.send_error(HTTPStatus.NOT_FOUND)
+        _error(h)
         return None
 
     # -- files ----------------------------------------------------------------
@@ -1433,7 +1746,7 @@ class App:
     def _skin_file(self, h: BaseHTTPRequestHandler, name: str, rel: str) -> None:
         got = self.skins.file(name, rel)
         if got is None:
-            h.send_error(HTTPStatus.NOT_FOUND)
+            _error(h)
             return
         _bytes(h, got[0], got[1])
 
@@ -1466,6 +1779,8 @@ class App:
         if url.lower().endswith(".vrec") and Path(url).expanduser().is_file():
             self.session.open_recording(url)
             return {"ok": True, "opened": url}
+        if getattr(self, "recording_only", False):
+            return {"ok": False, "error": "This session opens recordings without the game."}
         req = live_request(url)
         if req is None:
             return {"ok": False, "error": f"not a spectate link: {url!r}"}
@@ -1476,6 +1791,16 @@ class App:
         src = self.session.source
         p = src.get("path") or src.get("recording") or src.get("recording_saved")
         return Path(str(p) + ".bookmarks.json") if p else None
+
+    def _review_moments_load(self) -> list[dict[str, Any]]:
+        target = self._bookmarks_file()
+        if target is None:
+            return []
+        target = Path(str(target).removesuffix(".bookmarks.json") + ".moments.json")
+        try:
+            return normalize_moments(json.loads(target.read_text()))
+        except (OSError, ValueError):
+            return []
 
     def _bookmarks_load(self) -> list[Any]:
         f = self._bookmarks_file()
@@ -1779,13 +2104,21 @@ def serve(
     replay_dirs: list[Path],
     client_config: dict[str, Any] | None = None,
     follow_live: bool = True,
+    native_jobs: Any = None,
+    recording_only: bool = False,
 ) -> ThreadingHTTPServer:
     # Request threads share the GIL with the thread ingesting the stream. At the
     # default 5 ms switch interval a cached sprite strip took 19 ms (p50) while a
     # recording loaded; at 0.5 ms 6 ms, /api/session 14 -> 4 ms, with the same
     # ingestion speed (24 game-s/s, 8-player recording, 2026-10-18).
     sys.setswitchinterval(SWITCH_INTERVAL_S)
-    app = App(session, replay_dirs, follow_live=follow_live)
+    app = App(
+        session,
+        replay_dirs,
+        follow_live=follow_live,
+        native_jobs=native_jobs,
+        recording_only=recording_only,
+    )
     if client_config is not None:
         app.client_config = client_config
     server = _HTTPServer((host, port), make_handler(app))

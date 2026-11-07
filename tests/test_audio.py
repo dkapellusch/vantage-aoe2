@@ -6,6 +6,8 @@ import io
 import json
 import struct
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -256,6 +258,34 @@ def test_index_cached_and_invalidated(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr(audio, "build_index", spy)
     AudioLibrary(game, cache, transcoder=_echo([])).event_media(EV_RANDOM)
     assert called
+
+
+def test_concurrent_libraries_publish_index_without_temp_file_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    game = _install(tmp_path)
+    cache = tmp_path / "cache"
+    build_barrier = threading.Barrier(2, timeout=10)
+    replace_barrier = threading.Barrier(2, timeout=10)
+    real_build, real_replace = audio.build_index, audio.os.replace
+
+    def synchronized_build(wwise: Path, files: list[Path]) -> audio._Index:
+        index = real_build(wwise, files)
+        build_barrier.wait()
+        return index
+
+    def synchronized_replace(src: str, dst: Path) -> None:
+        replace_barrier.wait()
+        real_replace(src, dst)
+
+    monkeypatch.setattr(audio, "build_index", synchronized_build)
+    monkeypatch.setattr(audio.os, "replace", synchronized_replace)
+    libraries = [AudioLibrary(game, cache, transcoder=_echo([])) for _ in range(2)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda lib: lib.event_media(EV_RANDOM), libraries))
+    assert results == [[MEDIA_A, MEDIA_B], [MEDIA_A, MEDIA_B]]
+    assert json.loads((cache / "audio/index-en.json").read_text())["version"] == audio.INDEX_VERSION
+    assert not list((cache / "audio").glob("*.tmp"))
 
 
 def test_degrades_without_game_or_vgmstream(

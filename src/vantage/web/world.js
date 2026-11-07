@@ -16,12 +16,13 @@
 // graded in its shader) and an overlay (bars, flames, range circles, particles,
 // fog). Terrain chunks are then composited by terrain-gl.js composeChunk.
 
-import { S, settings, playerColor, unitInfo, unitIcon, players, api, gameKey } from './state.js';
+import { S, settings, playerColor, unitInfo, unitIcon, entityInfo, entityStatsValid, players, api, gameKey, assetUrl, withAssetVersion } from './state.js';
 import * as TG from './terrain-gl.js';
 import * as SG from './sprite-gl.js';
-import { RowInterpolator } from './playback.js';
-import { changedTilesInRegion, terrainRegion, changedTreeTiles, groundProjection, mergeDirtyRect, OutlineCache } from './render-cache.js';
-import { ViewGraphics } from './graphics-cache.js';
+import { RowInterpolator, sortByKey } from './playback.js';
+import { followRows } from './camera-follow.js';
+import { changedTilesInRegion, terrainRegion, changedTreeTiles, groundProjection, mergeDirtyRect, treeSpriteState, OutlineCache, coalesceRects } from './render-cache.js';
+import { ViewGraphics, SpriteHistory } from './graphics-cache.js';
 
 const TW = 32, TH = 16;           // tile size on screen at zoom 1
 const TERRAIN_TW = 16, TERRAIN_TH = 8; // pre-rendered terrain resolution
@@ -58,9 +59,18 @@ function postExtra() {
 }
 
 /** Sprite-mod query part, so a different mod set never reuses cached strips. */
+// Called for every strip key, many times a frame: hash the mod folders once
+// per change of the setting, not per call.
+let modMemo = { on: null, dirs: null, value: '' };
 function modQuery() {
   if (!(settings.enableGraphicsMods || settings.enableSpriteMods)) return '';
-  const dirs = (settings.modDirectories || []).join('|');
+  const list = settings.modDirectories || [];
+  if (modMemo.on === true && modMemo.dirs === list) return modMemo.value;
+  modMemo = { on: true, dirs: list, value: hashModDirs(list) };
+  return modMemo.value;
+}
+function hashModDirs(list) {
+  const dirs = list.join('|');
   let h = 0;
   for (let i = 0; i < dirs.length; i++) h = (h * 31 + dirs.charCodeAt(i)) | 0;
   return `&mods=${(h >>> 0).toString(36)}`;
@@ -75,8 +85,11 @@ const spriteCache = new Map();
 // budget the least recently drawn strips are dropped (and refetched if needed).
 let spriteBytes = 0;
 let spriteRevision = 0;
+function spriteBudget(hd) {
+  return 1048576 * Math.max(32, Number(hd ? settings.atlasMemoryUhd : settings.atlasMemoryNormal) || 256);
+}
 function evictSprites(hd) {
-  const budget = 1048576 * Math.max(32, Number(hd ? settings.atlasMemoryUhd : settings.atlasMemoryNormal) || 256);
+  const budget = spriteBudget(hd);
   for (const [k, v] of spriteCache) {
     if (spriteBytes <= budget) break;
     if (!v.img || v.pin) continue;
@@ -92,10 +105,26 @@ let layerSplit = null;
 
 // opts.dmg: damage level 1-3 (the SLD damage mask at 25/50/75 % lost);
 // opts.layer: 'shadow' | 'main' (a single layer, for separate filtering).
+// Strip queries are built for every layer of every entity, every frame: keep
+// the few distinct ones (game, resolution, mods x damage, layer, facing, mask).
+let queryMemo = { base: '', table: new Map() };
 function stripQuery(opts) {
   const hd = settings.enhancedGraphics && S.camera.zoom >= 1.4;
   // The game is part of the key: Return of Rome reuses AoE2's sprite ids.
-  let query = `g=${S.game}${hd ? '&hd=1' : ''}${modQuery()}`;
+  const base = `g=${S.game}${hd ? '&hd=1' : ''}${modQuery()}`;
+  if (base !== queryMemo.base) queryMemo = { base, table: new Map() };
+  // Memoized only for the usual option values (whole damage levels, the two layers).
+  const usual = !opts || (Number.isInteger(opts.dmg || 0) && (!opts.layer || opts.layer === 'shadow' || opts.layer === 'main'));
+  const code = !usual ? -1 : !opts ? 0 : 1 + (opts.dmg || 0) * 16 + (opts.layer === 'shadow' ? 4 : opts.layer === 'main' ? 8 : 0)
+    + (opts.dir ? 2 : 0) + (opts.pm ? 1 : 0);
+  const known = code >= 0 ? queryMemo.table.get(code) : undefined;
+  if (known !== undefined) return known;
+  const q = buildStripQuery(base, opts);
+  if (code >= 0) queryMemo.table.set(code, q);
+  return q;
+}
+function buildStripQuery(base, opts) {
+  let query = base;
   // Damage shading, as the game's sprite shader darkens a damaged building.
   if (opts && opts.dmg) query += `&dmg=${opts.dmg}`;
   if (opts && opts.layer) query += `&layer=${opts.layer}`;
@@ -152,11 +181,11 @@ function spriteStrip(sid, facet, color, opts) {
   const [path] = key.split('?');
   // One request: the PNG, its layout in the X-Sprite-Meta header (an older server
   // without it gets the .json as before), decoded off the main thread.
-  fetch(`/sprite/${path}.png?${query}`)
+  fetch(assetUrl(`/sprite/${path}.png?${query}`))
     .then(async (r) => {
       if (!r.ok) throw new Error(String(r.status));
       const hdr = r.headers.get('X-Sprite-Meta');
-      const m = hdr ? JSON.parse(hdr) : await fetch(`/sprite/${path}.json?${query}`).then((j) => j.json());
+      const m = hdr ? JSON.parse(hdr) : await fetch(assetUrl(`/sprite/${path}.json?${query}`)).then((j) => j.json());
       // Premultiplied: the GPU batch (sprite-gl.js) uploads the pixels as they are.
       const img = await createImageBitmap(await r.blob(), { premultiplyAlpha: 'premultiply' });
       e.meta = m;
@@ -251,9 +280,22 @@ function prefetchProjectileFacings() {
 const viewGraphics = new ViewGraphics(collectViewSprites, spriteRequirementLoaded, requestSpriteRequirement);
 export function graphicsChecks() { return { builds: viewGraphics.builds, hits: viewGraphics.hits }; }
 
+// The camera enters the key coarsely: on a GRAPHICS_CELL px screen grid and in
+// 4 % zoom steps. Keyed exactly, every pan step (follow-selection, Autocast,
+// edge scrolling) rebuilt the requirements of up to 17 upcoming views (2,500
+// rows each) ten times a second. collectViewSprites prefetches (but does not
+// wait for) a margin as wide as the camera can drift inside one cell.
+const GRAPHICS_CELL = 64;
+const GRAPHICS_ZOOM_STEP = 0.04;
 function graphicsContext() {
   const c = S.camera;
-  let key = `${S.game}|${c.x}|${c.y}|${c.zoom}|${viewSize.w}|${viewSize.h}|${!!settings.enhancedGraphics}|${layerSplit}|${filt('unitShadow')}|${filt('unitColor')}|${modQuery()}|${gpuDrawing()}`;
+  const z = Math.exp(Math.round(Math.log(c.zoom) / GRAPHICS_ZOOM_STEP) * GRAPHICS_ZOOM_STEP);
+  const cx = Math.round(((c.x + c.y) * TW / 2 * z) / GRAPHICS_CELL);
+  const cy = Math.round(((c.y - c.x) * TH / 2 * z) / GRAPHICS_CELL);
+  // The zoom cut-offs that change which strips are drawn (HD from 1.4, sprites
+  // from 0.7) are exact, not stepped.
+  const hd = settings.enhancedGraphics && c.zoom >= 1.4;
+  let key = `${S.game}|${cx}|${cy}|${z.toFixed(4)}|${hd}|${spritesOn()}|${viewSize.w}|${viewSize.h}|${!!settings.enhancedGraphics}|${layerSplit}|${filt('unitShadow')}|${filt('unitColor')}|${modQuery()}|${gpuDrawing()}`;
   for (let pid = 0; pid <= 8; pid++) key += `|${colorIndex(pid)}`;
   return key;
 }
@@ -266,6 +308,9 @@ function spriteRequirementLoaded(r) {
   return !!(e && (e.img || e.failed));
 }
 function requestSpriteRequirement(r) {
+  // Margin strips (prefetch) only while the budget has room: past it each one
+  // would evict a strip that is on screen, which then has to load again.
+  if (r.core === false && spriteBytes > 0.8 * spriteBudget(settings.enhancedGraphics && S.camera.zoom >= 1.4)) return;
   spriteStrip(r.sid, r.facet, r.color, r.opts);
   // Pin the exact projectile strip, rather than a temporary facing stand-in.
   const exact = r.pin && spriteCache.get(requirementKey(r));
@@ -280,21 +325,28 @@ export function viewReady(n) {
 function collectViewSprites(n) {
   const deltas = S.catalog.sprite_deltas;
   const split = layerSplit !== false && filt('unitShadow') !== filt('unitColor');
+  // Core: 120 px around the screen, what playback waits for (graphics buffering).
+  // Extra: the camera's drift within one graphics cell (up to a cell diagonal)
+  // and a zoom step about the centre, prefetched but never waited for.
   const m = 120, m_ = 120;
+  const drift = GRAPHICS_CELL * 1.5 + GRAPHICS_ZOOM_STEP * Math.max(viewSize.w, viewSize.h) / 2;
   const requests = new Map();
   const gpu = gpuDrawing();
+  let core = true;
   const add = (sid, facet, color, opts, pin = false) => {
     const query = stripQuery(opts), key = `${sid}/${facet}/${color}?${query}`;
     const old = requests.get(key);
-    if (!old) requests.set(key, { sid, facet, color, opts, query, key, pin });
-    else if (pin) old.pin = true;
+    if (!old) requests.set(key, { sid, facet, color, opts, query, key, pin, core });
+    else { if (pin) old.pin = true; if (core) old.core = true; }
   };
+  const outside = (px, py, k, bottom) => px < -k || py < -k || px > viewSize.w + k || py > viewSize.h + bottom;
   for (const rows of [n.entities, n.remains || []]) {
     for (const r of rows) {
       if (r[0] < 0) continue;
       const [px, py] = entityScreen(r, n);
-      if (px < -m || py < -m || px > viewSize.w + m || py > viewSize.h + m * 2) continue;
-      const u = unitInfo(r[2]);
+      if (outside(px, py, m + drift, m * 2 + drift)) continue;
+      core = !outside(px, py, m, m * 2);
+      const u = entityInfo(r, n);
       let layers = r[8] && r[8].length ? r[8] : u.sprite != null && u.sprite >= 0 ? [[u.sprite, 0, 0, 0]] : [];
       if (deltas) layers = layers.flatMap((l) => (deltas[l[0]] ? deltas[l[0]].map(([ps]) => [ps]) : [l]));
       const building = r[6] & 1, foundation = r[6] & 16;
@@ -314,7 +366,8 @@ function collectViewSprites(n) {
   for (const [, rows] of n.missile_track || []) {
     for (const m of rows) {
       const [px, py] = toScreen(m[3], m[4]);
-      if (px < -m_ || py < -m_ || px > viewSize.w + m_ || py > viewSize.h + m_) continue;
+      if (outside(px, py, m_ + drift, m_ + drift)) continue;
+      core = !outside(px, py, m_, m_);
       for (const sid of layerSprites(m[7])) {
         for (const layer of split ? ['shadow', 'main'] : [null]) {
           const [color, pm] = stripColor(sid, m[1], layer, gpu);
@@ -323,7 +376,8 @@ function collectViewSprites(n) {
       }
     }
   }
-  return [...requests.values()];
+  const all = [...requests.values()];
+  return { core: all.filter((r) => r.core), extra: all.filter((r) => !r.core) };
 }
 
 // While a heading's strip loads, a loaded strip of the same sprite at the nearest
@@ -378,7 +432,7 @@ function atlas(path) {
     a.meta = meta;
     const im = new Image();
     im.onload = () => { a.k = atlasScale(meta, im); a.img = im; };
-    im.src = `/particle_atlas.png?path=${q}`;
+    im.src = withAssetVersion(`/particle_atlas.png?path=${q}`);
   }).catch(() => {});
   return a;
 }
@@ -399,6 +453,17 @@ function particleImage(a, lit) {
   if (!m) {
     const c = document.createElement('canvas');
     c.width = a.img.width; c.height = a.img.height;
+    // brightness(L) is the same per-channel multiply and clamp as the pixel loop
+    // below, done by the canvas in one draw instead of ~1M pixels per frame on
+    // the main thread. The loop stays for a canvas without filter support.
+    const fc = c.getContext('2d');
+    if (typeof fc.filter === 'string') {
+      fc.filter = `brightness(${L})`;
+      fc.drawImage(a.img, 0, 0);
+      fc.filter = 'none';
+      maps.set(L, (m = { c, done: true }));
+      return c;
+    }
     const cx = c.getContext('2d', { willReadFrequently: true });
     cx.drawImage(a.img, 0, 0);
     m = { c, cx, data: cx.getImageData(0, 0, c.width, c.height), i: 0, done: false };
@@ -447,9 +512,9 @@ function drawAtlasFrame(a, idx, px, py, s, rot, lit = false) {
   if (fr.rotated) {
     // Stored rotated 90° clockwise in the atlas.
     pctx.rotate(-Math.PI / 2);
-    pctx.drawImage(particleImage(a, lit), r.x * k, r.y * k, r.h * k, r.w * k, -oy - sss.h * s, ox, sss.h * s, sss.w * s);
+    fxDrawn = true; pctx.drawImage(particleImage(a, lit), r.x * k, r.y * k, r.h * k, r.w * k, -oy - sss.h * s, ox, sss.h * s, sss.w * s);
   } else {
-    pctx.drawImage(particleImage(a, lit), r.x * k, r.y * k, r.w * k, r.h * k, ox, oy, sss.w * s, sss.h * s);
+    fxDrawn = true; pctx.drawImage(particleImage(a, lit), r.x * k, r.y * k, r.w * k, r.h * k, ox, oy, sss.w * s, sss.h * s);
   }
   pctx.setTransform(viewSize.dpr, 0, 0, viewSize.dpr, 0, 0);
 }
@@ -565,25 +630,35 @@ function drawMissiles(track) {
 // (the effect's Rotation1..2 range is the full circle).
 const TRAIL_PUFFS = 4;
 function drawTrails(track, upto) {
-  const paths = new Map(); // id -> [[t, x, y, z], ...]
+  const paths = [], active = new Map();
   for (let k = 0; k <= upto; k++) {
-    const [t, rows] = track[k];
+    const [t, rows] = track[k], present = new Set();
     for (const m of rows) {
-      const trail = unitInfo(m[2]).trail;
-      if (!trail) continue;
-      let p = paths.get(m[0]);
-      if (!p) { p = { trail, pts: [] }; paths.set(m[0], p); }
+      present.add(m[0]);
+      // New samples own their historical effective metadata; absent trail means
+      // no trail, including an explicit ownMaster reset or missing prototype.
+      const trail = m.length > 8 ? m[8].trail : unitInfo(m[2]).trail;
+      if (!trail) { active.delete(m[0]); continue; }
+      const incarnation = m.length > 8 ? m[8].incarnation : null;
+      let p = active.get(m[0]);
+      if (!p || p.incarnation !== incarnation || p.trail.particle !== trail.particle || p.trail.spacing !== trail.spacing) {
+        p = { trail, pts: [], incarnation }; active.set(m[0], p); paths.push(p);
+      }
       p.pts.push([t, m[3], m[4], m[5]]);
     }
+    for (const id of active.keys()) if (!present.has(id)) active.delete(id);
   }
-  if (!paths.size) return;
+  if (!paths.length) return;
   // Up to where the projectile is drawn now (between the last sample and the next).
   const next = track[upto + 1];
   if (next && next[0] > track[upto][0]) {
     const f = Math.min(1, Math.max(0, (S.t - track[upto][0]) / (next[0] - track[upto][0])));
     for (const m of next[1]) {
-      const p = paths.get(m[0]);
-      if (!p) continue;
+      const p = active.get(m[0]);
+      const trail = m.length > 8 ? m[8].trail : unitInfo(m[2]).trail;
+      const incarnation = m.length > 8 ? m[8].incarnation : null;
+      if (!p || !trail || p.incarnation !== incarnation
+          || p.trail.particle !== trail.particle || p.trail.spacing !== trail.spacing) continue;
       const [, xa, ya, za] = p.pts[p.pts.length - 1];
       p.pts.push([S.t, xa + (m[3] - xa) * f, ya + (m[4] - ya) * f, za + (m[5] - za) * f]);
     }
@@ -591,7 +666,7 @@ function drawTrails(track, upto) {
   const base = (S.camera.zoom * TW) / SPRITE_TILE;
   pctx.save();
   pctx.imageSmoothingEnabled = filt('particle');
-  for (const { trail, pts } of paths.values()) {
+  for (const { trail, pts } of paths) {
     const def = particleDefByName(trail.particle);
     if (!def || pts.length < 2) continue;
     const a = atlas(def.atlas);
@@ -672,15 +747,36 @@ function drawOccludedOutlines() {
   const stillCamera = camera === outlineCamera;
   outlineCamera = camera;
   if (outlinePositions.size > 2048) outlinePositions.clear();
+  // Buildings in a screen grid, so each unit looks only at the buildings near it
+  // (every unit against every later entry was quadratic in a large battle).
+  const CELL = 128, grid = new Map();
+  for (let j = 0; j < log.length; j++) {
+    const b = log[j];
+    if (!(b.r[6] & 1)) continue;
+    for (let gy = Math.floor(b.y0 / CELL); gy <= Math.floor(b.y1 / CELL); gy++) {
+      for (let gx = Math.floor(b.x0 / CELL); gx <= Math.floor(b.x1 / CELL); gx++) {
+        const key = gx * 65536 + gy;
+        let cell = grid.get(key);
+        if (!cell) grid.set(key, (cell = []));
+        cell.push(j);
+      }
+    }
+  }
   for (let i = 0; i < log.length; i++) {
     const u = log[i];
     if (!(u.r[6] & 4) || !u.r[1]) continue; // player units
-    let occ = null;
-    for (let j = i + 1; j < log.length; j++) {
-      const b = log[j];
-      if (!(b.r[6] & 1) || b.x1 <= u.x0 || b.x0 >= u.x1 || b.y1 <= u.y0 || b.y0 >= u.y1) continue;
-      (occ ||= []).push(b);
+    let found = null;
+    for (let gy = Math.floor(u.y0 / CELL); gy <= Math.floor(u.y1 / CELL); gy++) {
+      for (let gx = Math.floor(u.x0 / CELL); gx <= Math.floor(u.x1 / CELL); gx++) {
+        for (const j of grid.get(gx * 65536 + gy) || []) {
+          const b = log[j];
+          if (j <= i || b.x1 <= u.x0 || b.x0 >= u.x1 || b.y1 <= u.y0 || b.y0 >= u.y1) continue;
+          (found ||= new Set()).add(j);
+        }
+      }
     }
+    // Drawn after the unit, in draw order (as the full scan found them).
+    const occ = found ? [...found].sort((a, b) => a - b).map((j) => log[j]) : null;
     if (!occ) continue;
     const ox = Math.floor(u.x0) - 2, oy = Math.floor(u.y0) - 2;
     const w = Math.ceil((u.x1 - ox + 2) * k), h = Math.ceil((u.y1 - oy + 2) * k);
@@ -783,7 +879,7 @@ function drawFlames(parts, r, px, py) {
       if (!e || !e.img || !e.meta) return;
       const m = e.meta, k = (S.camera.zoom * TW) / (e.tile || SPRITE_TILE);
       const f = Math.floor(t / Math.max(0.02, m.duration || 0.05) / m.step) % m.n;
-      pctx.drawImage(e.img, f * m.cw, 0, m.cw, m.ch, x - m.ax * k, y - m.ay * k, m.cw * k, m.ch * k);
+      fxDrawn = true; pctx.drawImage(e.img, f * m.cw, 0, m.cw, m.ch, x - m.ax * k, y - m.ay * k, m.cw * k, m.ch * k);
     }
   });
   pctx.restore();
@@ -807,14 +903,13 @@ function progressBar(px, py, w, frac) {
 
 // Per entity: the sprite frames drawn last (stale-while-loading), and counters
 // for the performance view.
-const lastDrawn = new Map();
+const lastDrawn = new SpriteHistory();
 /** Time per frame spent in each part of draw() (summed; the perf view averages). */
 export const drawTimes = { ground: 0, entities: 0, outlines: 0, masks: 0, readAhead: 0, missiles: 0, fxClear: 0, effects: 0, post: 0, n: 0, paints: 0, patches: 0, trees: 0, chunks: 0 };
 export const spriteStats = { stale: 0, missing: 0, standIn: 0, missingMasters: new Map() };
 let countingDraw = false; // spriteStats.standIn counts on-screen draws only, not prefetching
 export function pruneLastDrawn() {
-  if (lastDrawn.size < 4000) return;
-  for (const [id, v] of lastDrawn) if (Math.abs(S.t - v.at) > 10000) lastDrawn.delete(id);
+  lastDrawn.prune(S.t);
 }
 
 // Sprite pictures go to the GPU batch (sprite-gl.js) while one is open for the
@@ -900,7 +995,7 @@ let spriteTop = null;
 function drawSprites(r, px, py) {
   spriteTop = null;
   let layers = r[8];
-  const u = unitInfo(r[2]);
+  const u = entityInfo(r);
   if (!layers || !layers.length) {
     // No active sprite in the stream (e.g. walls): the master's standing sprite.
     if (u.sprite == null || u.sprite < 0) return false;
@@ -939,8 +1034,8 @@ function drawSprites(r, px, py) {
   const split = layerSplit !== false && filt('unitShadow') !== filt('unitColor');
   // Shading steps of a fifth of the hit points (sprites.DAMAGE_LEVELS).
   const dmg = building && !replaced && !foundation ? Math.min(5, Math.round(lost * 5)) : 0;
-  let drew = false, failed = 0;
-  const drawn = [];
+  let drew = false, failed = 0, pendingMain = false;
+  let drawn = [];
   // No save()/restore() per entity (a canvas state flush each, the costliest
   // call at 8x): only the alpha and the smoothing flag change, set directly.
   if (ghost) ctx.globalAlpha = 0.45;
@@ -953,54 +1048,38 @@ function drawSprites(r, px, py) {
     for (const [layer, filterKey] of passes) {
       const [color, pm] = stripColor(sid, r[1], layer, gpu);
       const e = spriteStrip(sid, facet, color, { dmg, layer, dir: !building, pm });
-      if (e && e.failed) { failed++; continue; }
-      if (!e || !e.img || !e.meta) continue;
+      if (e && e.failed && !e.retryAt) { if (layer !== 'shadow') failed++; continue; }
+      if (!e || !e.img || !e.meta) { if (layer !== 'shadow') pendingMain = true; continue; }
       const m = e.meta;
-      const s = (S.camera.zoom * TW) / (e.tile || SPRITE_TILE);
       const perMs = Math.max(1, (m.duration || 0.1) * 1000);
-      // Death, decay and destruction (remains, flag 256) play once and hold the
-      // last frame: wrapped, a castle's collapse ended on the standing castle.
       const fi = Math.floor((frame + elapsed / perMs) / m.step);
-      // A still picture with several frames (a cliff's 23 wall pieces) shows the
-      // piece the object's facet names; it is not an animation.
-      const f = !m.duration && m.n > 1 ? (r[7] || 0) % m.n : flags & 256 ? Math.max(0, Math.min(m.n - 1, fi)) : ((fi % m.n) + m.n) % m.n;
-      const main = layer !== 'shadow';
-      // A player-mask strip is drawn only by the GPU batch (its tint); never by 2D.
+      // Remains play once; static pieces use their facet, animations loop.
+      const f = !m.duration && m.n > 1 ? facet % m.n : flags & 256 ? Math.max(0, Math.min(m.n - 1, fi)) : ((fi % m.n) + m.n) % m.n;
       if (m.pm && !gpu) continue;
-      blit(e.img, f * m.cw, m.cw, m.ch, px + (ox - m.ax) * s, py + (oy - m.ay) * s, m.cw * s, m.ch * s, filt(filterKey), main ? role : SG.ROLE_NONE, rgb, m.pm ? tint : -1, m.pm ? m.ch : 0);
       drawn.push([e, f, ox, oy, filterKey]);
-      if (main) {
-        drew = true; spriteTop = Math.min(spriteTop ?? Infinity, py + (oy - m.ay) * s);
-        if (!gpu) logPart(r, e.img, f * m.cw, m.cw, m.ch, px + (ox - m.ax) * s, py + (oy - m.ay) * s, m.cw * s, m.ch * s);
-      }
     }
   }
-  if (drew) lastDrawn.set(r[0], { drawn, at: S.t });
-  else if (failed) {
-    // The game's graphic has no picture the server can draw (an empty "None"
-    // sprite, a facing with no pixels, a file this install lacks): draw nothing
-    // rather than a placeholder outline forever.
-    drew = true;
-  } else {
-    // A strip for a new facing or animation is still loading (or was evicted):
-    // keep showing the unit's last frame at its new position instead of
-    // flashing the icon/outline placeholder (constant at 4-8x replay).
-    const last = lastDrawn.get(r[0]);
-    if (last && Math.abs(S.t - last.at) < 5000) {
-      for (const [e, f, ox, oy, filterKey] of last.drawn) {
-        const m = e.meta, s = (S.camera.zoom * TW) / (e.tile || SPRITE_TILE);
-        if (m.pm && !gpu) continue;
-        const main = filterKey !== 'unitShadow';
-        blit(e.img, f * m.cw, m.cw, m.ch, px + (ox - m.ax) * s, py + (oy - m.ay) * s, m.cw * s, m.ch * s, filt(filterKey), main ? role : SG.ROLE_NONE, rgb, m.pm ? tint : -1, m.pm ? m.ch : 0);
-        if (main) {
-          spriteTop = Math.min(spriteTop ?? Infinity, py + (oy - m.ay) * s);
-          if (!gpu) logPart(r, e.img, f * m.cw, m.cw, m.ch, px + (ox - m.ax) * s, py + (oy - m.ay) * s, m.cw * s, m.ch * s);
-        }
-      }
-      drew = true;
-      spriteStats.stale++;
-    } else { spriteStats.missing++; spriteStats.missingMasters.set(r[2], (spriteStats.missingMasters.get(r[2]) || 0) + 1); }
+  const generation = S.session?.generation;
+  const previous = pendingMain && lastDrawn.get(r, generation, S.t);
+  if (previous) { drawn = previous; spriteStats.stale++; }
+  for (const [e, f, ox, oy, filterKey] of drawn) {
+    const m = e.meta, s = (S.camera.zoom * TW) / (e.tile || SPRITE_TILE);
+    if (m.pm && !gpu) continue;
+    const main = filterKey !== 'unitShadow';
+    blit(e.img, f * m.cw, m.cw, m.ch, px + (ox - m.ax) * s, py + (oy - m.ay) * s, m.cw * s, m.ch * s, filt(filterKey), main ? role : SG.ROLE_NONE, rgb, m.pm ? tint : -1, m.pm ? m.ch : 0);
+    if (main) {
+      drew = true; spriteTop = Math.min(spriteTop ?? Infinity, py + (oy - m.ay) * s);
+      if (!gpu) logPart(r, e.img, f * m.cw, m.cw, m.ch, px + (ox - m.ax) * s, py + (oy - m.ay) * s, m.cw * s, m.ch * s);
+    }
   }
+  // Do not replace a complete pose with a half-loaded building or animation.
+  if (drew && !pendingMain) lastDrawn.remember(r, generation, S.t, drawn);
+  if (!drew && !failed) {
+    spriteStats.missing++;
+    spriteStats.missingMasters.set(r[2], (spriteStats.missingMasters.get(r[2]) || 0) + 1);
+  }
+  // Permanently empty game graphics have no visible body or health-bar anchor.
+  if (!drew && failed && !pendingMain) drew = true;
   if (ghost) ctx.globalAlpha = 1;
   // A damage graphic's flames are the whole fire (a mill at 41 % showed six in the
   // game; the stream carried one of them): they are drawn, and the streamed fire
@@ -1034,9 +1113,14 @@ export function resize() {
   viewSize.w = window.innerWidth; viewSize.h = window.innerHeight; viewSize.dpr = dpr;
   canvas.width = Math.round(viewSize.w * dpr);
   canvas.height = Math.round(viewSize.h * dpr);
-  const mr = mini.getBoundingClientRect();
-  mini.width = Math.round(mr.width * dpr);
-  mini.height = Math.round(mr.height * dpr);
+  resizeMinimap();
+}
+
+export function resizeMinimap() {
+  const dpr = window.devicePixelRatio || 1, mr = mini.getBoundingClientRect();
+  const width = Math.round(mr.width * dpr), height = Math.round(mr.height * dpr);
+  if (mini.width !== width) mini.width = width;
+  if (mini.height !== height) mini.height = height;
 }
 
 function img(src) {
@@ -1266,7 +1350,7 @@ export async function refreshTerrain(t) {
 
 function repaintTiles(changed) {
   const hw = TERRAIN_TW / 2, hh = TERRAIN_TH / 2, oy = mapW * TERRAIN_TH / 2;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const rects = [];
   for (const i of changed) {
     const x = i % mapW, y = Math.floor(i / mapW);
     const px = (x + y + 1) * hw, py = (y - x) * hh + oy;
@@ -1274,7 +1358,7 @@ function repaintTiles(changed) {
     const x0 = Math.floor(px - hw * 2), y0 = Math.floor(py - hh * 2), x1 = Math.ceil(px + hw * 2), y1 = Math.ceil(py + hh * 2);
     rasterTerrain(x0, y0, x1, y1);
     if (viewTerrainImage) rasterTerrain(x0, y0, x1, y1, true);
-    minX = Math.min(minX, x0); minY = Math.min(minY, y0); maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1);
+    rects.push([Math.max(0, x0), Math.max(0, y0), x1, y1]);
     // A chunk blends one tile past its edge: only edge tiles touch a neighbour.
     const cx = Math.floor(x / CHUNK), cy = Math.floor(y / CHUNK), lx = x % CHUNK, ly = y % CHUNK;
     const xs = [cx, ...(lx === 0 ? [cx - 1] : lx === CHUNK - 1 ? [cx + 1] : [])];
@@ -1283,14 +1367,20 @@ function repaintTiles(changed) {
     // ground repaint) is done, so a farm appearing never stalls a frame.
     for (const ky of ys) for (const kx of xs) { const c = chunkCache.get(`${kx},${ky}`); if (c) c.stale = true; }
   }
-  minX = Math.max(0, minX); minY = Math.max(0, minY);
-  terrainCanvas.getContext('2d').putImageData(terrainImage, 0, 0, minX, minY, maxX - minX, maxY - minY);
+  // Upload the changed areas only (one bounding box of farms at opposite
+  // corners re-uploaded the whole terrain canvas).
+  const dirty = coalesceRects(rects);
+  const tctx = terrainCanvas.getContext('2d');
+  for (const [x0, y0, x1, y1] of dirty) tctx.putImageData(terrainImage, 0, 0, x0, y0, x1 - x0, y1 - y0);
   if (flatMap) {
     for (const i of changed) for (const j of [i, i - mapW, i + mapW]) if (j >= 0 && j < mapW * mapH) flatPixel(j);
     flatMap.getContext('2d').putImageData(flatMapImage, 0, 0);
     flatMap._dirty = true;
   }
-  if (viewTerrainCanvas) viewTerrainCanvas.getContext('2d').putImageData(viewTerrainImage, 0, 0, minX, minY, maxX - minX, maxY - minY);
+  if (viewTerrainCanvas) {
+    const vctx = viewTerrainCanvas.getContext('2d');
+    for (const [x0, y0, x1, y1] of dirty) vctx.putImageData(viewTerrainImage, 0, 0, x0, y0, x1 - x0, y1 - y0);
+  }
   miniDirty = true;
   if (ground.map !== S.map || !ground.key) terrainGen++;
   else for (const i of changedTilesInRegion(changed, mapW, ground.terrainRange)) dirtyGround(terrainGroundRect(i));
@@ -1344,11 +1434,18 @@ function refreshMiniTerrain() {
   buildMiniTerrain();
 }
 
+let miniTerrainRev = 0;
 function buildMiniTerrain() {
   miniBuiltAt = performance.now();
-  miniTerrain = document.createElement('canvas');
-  miniTerrain.width = terrainCanvas.width; miniTerrain.height = terrainCanvas.height;
+  // Repainted about once a second while farms and trees change: reuse the
+  // (map-sized, tens of MB) canvas rather than allocating a new one each time.
+  if (!miniTerrain) miniTerrain = document.createElement('canvas');
+  if (miniTerrain.width !== terrainCanvas.width || miniTerrain.height !== terrainCanvas.height) {
+    miniTerrain.width = terrainCanvas.width; miniTerrain.height = terrainCanvas.height;
+  }
+  miniTerrainRev++;
   const m = miniTerrain.getContext('2d');
+  m.clearRect(0, 0, miniTerrain.width, miniTerrain.height);
   m.drawImage(terrainCanvas, 0, 0);
   if (treeTiles) drawTrees(m, TERRAIN_TW, TERRAIN_TH, mapW * TERRAIN_TH / 2, 'rgba(18,52,20,0.85)');
 }
@@ -1416,14 +1513,24 @@ function fogState() {
 
 let fogBytes = null;
 function decodeFog() {
-  if (!S.view || !S.view.fog) return null;
-  if (S.view._fogDecoded) return S.view._fogDecoded;
-  try {
-    const raw = Uint8Array.from(atob(S.view.fog), (c) => c.charCodeAt(0));
-    // zlib-compressed: inflate with DecompressionStream is async; we inflate lazily.
-    S.view._fogDecoded = null;
-    inflate(raw).then((b) => { if (S.view) { S.view._fogDecoded = b; fogBytes = b; fogKey = ''; } });
-  } catch (e) { /* malformed */ }
+  const view = S.view;
+  if (!view || !view.fog) return null;
+  if (view._fogDecoded) {
+    // A view decoded earlier (look-ahead, or seen before) becomes current.
+    if (fogBytes !== view._fogDecoded) { fogBytes = view._fogDecoded; fogKey = ''; }
+    return fogBytes;
+  }
+  // Inflating is async: start it once per view (not once per frame until it
+  // lands) and attach the bytes to that view, whichever view is current then.
+  if (!view._fogPromise) {
+    try {
+      const raw = Uint8Array.from(atob(view.fog), (c) => c.charCodeAt(0));
+      view._fogPromise = inflate(raw).then((b) => {
+        view._fogDecoded = b;
+        if (S.view === view) { fogBytes = b; fogKey = ''; }
+      }, () => {});
+    } catch (e) { view._fogPromise = Promise.resolve(); /* malformed */ }
+  }
   return fogBytes;
 }
 
@@ -1440,35 +1547,71 @@ export function isVisible(x, y) {
   return (fogBytes[i] & perspectiveMask()) !== 0;
 }
 
+// The fog of the current view as a map-sized alpha image (fogSmall, one pixel
+// per tile: the WebGL ground and the minimap draw it with a transform). The
+// isometric full-terrain-size projection (fogCanvas, ~30 MB on a large map) is
+// only needed without WebGL and is built on demand (fogIso). Both canvases are
+// reused: a new pair per keyframe was ~400 MB/s of canvas churn at 8x.
+let fogImage = null, fogIsoKey = -1, fogRev = 0;
 function buildFog() {
   const mask = perspectiveMask();
   const state = fogState();
   const key = `${state}|${mask}|${S.view ? S.view.time : 0}|${fogBytes ? fogBytes.length : 0}`;
   if (key === fogKey) return;
   fogKey = key;
-  if (state === 'off' || mask === 0 || !terrainCanvas) { fogCanvas = null; fogSmall = null; return; }
+  if (state === 'off' || mask === 0 || !terrainCanvas || !fogBytes) { fogSmall = null; fogCanvas = null; return; }
   const w = mapW, h = mapH;
-  const small = document.createElement('canvas');
-  small.width = w; small.height = h;
-  const sc = small.getContext('2d');
-  const id = sc.createImageData(w, h);
+  if (!fogSmallCanvas) fogSmallCanvas = document.createElement('canvas');
+  if (fogSmallCanvas.width !== w || fogSmallCanvas.height !== h) { fogSmallCanvas.width = w; fogSmallCanvas.height = h; fogImage = null; }
+  const sc = fogSmallCanvas.getContext('2d');
+  if (!fogImage) fogImage = sc.createImageData(w, h);
+  const d = fogImage.data;
   for (let i = 0; i < w * h; i++) {
     const vis = fogBytes[2 * i] & mask, exp = fogBytes[2 * i + 1] & mask;
-    const k = i * 4;
-    id.data[k + 3] = vis ? 0 : exp ? 120 : 235;
+    d[i * 4 + 3] = vis ? 0 : exp ? 120 : 235;
   }
-  sc.putImageData(id, 0, 0);
-  fogSmall = small; // map space: drawn over the height-mapped ground (terrain-gl)
-  // Project the square fog texture into the iso layer.
-  fogCanvas = document.createElement('canvas');
-  fogCanvas.width = terrainCanvas.width; fogCanvas.height = terrainCanvas.height;
-  const fc = fogCanvas.getContext('2d');
+  sc.putImageData(fogImage, 0, 0);
+  // The canvas is reused: tell terrain-gl's texture cache (keyed by the source
+  // canvas) that its pixels changed.
+  fogSmallCanvas._dirty = true;
+  fogRev++;
+  fogSmall = fogSmallCanvas; // map space: drawn over the height-mapped ground (terrain-gl)
+  fogCanvas = fogSmall; // "there is fog"; fogIso() projects it when a 2D path needs it
+}
+let fogSmallCanvas = null, fogIsoCanvas = null, fogPadCanvas = null, fogPadRev = -1;
+// fogSmall with a one-pixel border repeating its edge pixels (for the minimap).
+function paddedFog() {
+  if (fogPadRev === fogRev && fogPadCanvas) return fogPadCanvas;
+  fogPadRev = fogRev;
+  const w = fogSmall.width, h = fogSmall.height;
+  if (!fogPadCanvas) fogPadCanvas = document.createElement('canvas');
+  if (fogPadCanvas.width !== w + 2 || fogPadCanvas.height !== h + 2) { fogPadCanvas.width = w + 2; fogPadCanvas.height = h + 2; }
+  const c = fogPadCanvas.getContext('2d');
+  c.clearRect(0, 0, w + 2, h + 2);
+  c.drawImage(fogSmall, 1, 1);
+  c.drawImage(fogSmall, 0, 0, w, 1, 1, 0, w, 1); // top row
+  c.drawImage(fogSmall, 0, h - 1, w, 1, 1, h + 1, w, 1); // bottom row
+  c.drawImage(fogPadCanvas, 1, 0, 1, h + 2, 0, 0, 1, h + 2); // left column (corners too)
+  c.drawImage(fogPadCanvas, w, 0, 1, h + 2, w + 1, 0, 1, h + 2); // right column
+  return fogPadCanvas;
+}
+function fogIso() {
+  if (!fogSmall || !terrainCanvas) return null;
+  if (fogIsoKey === fogRev && fogIsoCanvas) return fogIsoCanvas;
+  fogIsoKey = fogRev;
+  if (!fogIsoCanvas) fogIsoCanvas = document.createElement('canvas');
+  if (fogIsoCanvas.width !== terrainCanvas.width || fogIsoCanvas.height !== terrainCanvas.height) {
+    fogIsoCanvas.width = terrainCanvas.width; fogIsoCanvas.height = terrainCanvas.height;
+  }
+  const fc = fogIsoCanvas.getContext('2d');
+  fc.setTransform(1, 0, 0, 1, 0, 0);
+  fc.clearRect(0, 0, fogIsoCanvas.width, fogIsoCanvas.height);
   fc.imageSmoothingEnabled = true;
   const oy = mapW * TERRAIN_TH / 2;
   // tile (x,y) -> (x+y)*TW/2, (y-x)*TH/2 + oy  ==  affine transform of the square
   fc.setTransform(TERRAIN_TW / 2, -TERRAIN_TH / 2, TERRAIN_TW / 2, TERRAIN_TH / 2, 0, oy);
-  // ImageData index i = y*w + x -> canvas pixel (x, y): map so that canvas x = tile x, canvas y = tile y
-  fc.drawImage(small, 0, 0);
+  fc.drawImage(fogSmall, 0, 0);
+  return fogIsoCanvas;
 }
 
 // -- textured terrain ---------------------------------------------------------------
@@ -1489,7 +1632,7 @@ function terrainPattern(i) {
     textureAvg.set(i, meanColor(im));
     terrainPatterns.set(i, p);
   };
-  im.src = `/terrain/${tex[0]}.png`;
+  im.src = withAssetVersion(`/terrain/${tex[0]}.png`);
   return null;
 }
 
@@ -1747,7 +1890,7 @@ function drawTreeSprites() {
       if (!treeTiles[y * mapW + x]) continue;
       const e = treeSprite(x, y);
       const [px, py] = groundScreen(x + 0.5, y + 0.5);
-      if (!e) { groundIncomplete = true; fallback.push([px, py]); continue; }
+      if (!e) { if (e !== false) groundIncomplete = true; fallback.push([px, py]); continue; }
       const m = e.meta;
       const s = (S.camera.zoom * TW) / (e.tile || SPRITE_TILE) * treeScale;
       ctx.drawImage(e.img, 0, 0, m.cw, m.ch, px - m.ax * s, py - m.ay * s, m.cw * s, m.ch * s);
@@ -1798,7 +1941,7 @@ function sceneBegin() {
       for (const r of v.entities) {
         const before = lastHp.get(r[0]);
         if (before == null || r[5] >= before - 0.001 || (r[6] & 16)) continue;
-        if (r[1] === 0 && !ANIMAL_CLASSES.has(unitInfo(r[2]).cls)) continue; // mines, bushes
+        if (r[1] === 0 && !ANIMAL_CLASSES.has(entityInfo(r).cls)) continue; // mines, bushes
         scene.hits.push([r[2], r[3], r[4]]);
       }
     }
@@ -1936,6 +2079,7 @@ function patchGround(key) {
     ctx = mainCtx; S.camera = camera; viewSize.w = w; viewSize.h = h; groundClip = null; g.restore();
   }
   ground.dirty = null;
+  ground.rev = (ground.rev || 0) + 1;
   if (groundIncomplete) {
     ground.key = ''; ground.partialKey = key; ground.retryAt = performance.now() + 250;
   }
@@ -2034,6 +2178,7 @@ function drawGround(scale) {
     ground.x = S.camera.x; ground.y = S.camera.y; ground.zoom = S.camera.zoom;
     ground.width = w; ground.height = h;
     ground.dirty = null;
+    ground.rev = (ground.rev || 0) + 1;
     projection = groundProjection(ground, S.camera, w, h, TW, TH);
     ground.key = groundIncomplete ? '' : key;
     ground.partialKey = groundIncomplete ? key : '';
@@ -2044,19 +2189,65 @@ function drawGround(scale) {
   ctx.globalAlpha = 1;
   ctx.imageSmoothingEnabled = true;
   const { x, y, scale: zoom } = projection;
-  if (zoom === 1) ctx.drawImage(ground.canvas, x * viewSize.dpr, y * viewSize.dpr);
+  const grade = bakeGradeThisFrame && zoom === 1 && projection.covered ? gradeParams() : null;
+  groundGraded = !!grade;
+  if (grade) ctx.drawImage(gradedGround(grade), x * viewSize.dpr, y * viewSize.dpr);
+  else if (zoom === 1) ctx.drawImage(ground.canvas, x * viewSize.dpr, y * viewSize.dpr);
   else ctx.drawImage(ground.canvas, x * viewSize.dpr, y * viewSize.dpr, ground.canvas.width * zoom, ground.canvas.height * zoom);
   ctx.restore();
 }
 
-export function draw() {
+// The colour grade baked into a copy of the cached ground (with the background
+// under it), redone only when the ground repaints or the grade changes: the
+// per-frame pass is three full-screen composites over the world canvas, one of
+// them the non-separable 'saturation' blend. Used only when nothing else is on
+// the world canvas before the grade (see bakeGradeAllowed), so the picture is
+// the same as grading it every frame.
+let bakeGradeThisFrame = false, groundGraded = false;
+/** Was the grade baked into the ground in the last frame (performance view, checks). */
+export function gradeBaked() { return groundGraded; }
+const graded = { canvas: null, key: '' };
+function gradedGround(g) {
+  const w = ground.canvas.width, h = ground.canvas.height;
+  const key = `${ground.rev}|${w}x${h}|${g.s}|${g.A}|${g.O.join(',')}`;
+  if (graded.key === key && graded.canvas) return graded.canvas;
+  graded.key = key;
+  if (!graded.canvas) graded.canvas = document.createElement('canvas');
+  if (graded.canvas.width !== w || graded.canvas.height !== h) { graded.canvas.width = w; graded.canvas.height = h; }
+  const c = graded.canvas.getContext('2d');
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.globalCompositeOperation = 'source-over';
+  c.globalAlpha = 1;
+  c.fillStyle = WORLD_BACKGROUND;
+  c.fillRect(0, 0, w, h);
+  c.drawImage(ground.canvas, 0, 0);
+  applyGrade(c, w, h, g);
+  return graded.canvas;
+}
+// Baking is exact when the world canvas holds only the background and the ground
+// at grade time: GPU sprites (drawn and graded on their own layer), no distance
+// haze (screen-space, applied before the grade), nothing selected (rings) and
+// no spy fog (drawn on the world canvas).
+function bakeGradeAllowed(useSprites, fog) {
+  return useSprites && gpuLayers() && SG.available() && !!gradeParams() && !hazeActive()
+    && S.selection.size === 0 && fog !== 'spy';
+}
+
+const WORLD_BACKGROUND = '#07080a';
+let frameSerial = 0, fogRenderedFor = -1;
+export function draw(dt = 1 / 60) {
+  frameSerial++;
+  groundGraded = false; bakeGradeThisFrame = false;
   const dpr = viewSize.dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
-  ctx.fillStyle = '#07080a';
+  ctx.fillStyle = WORLD_BACKGROUND;
   ctx.fillRect(0, 0, viewSize.w, viewSize.h);
   stepCamera(performance.now());
+  // Follow the same interpolated positions that this frame will draw.
+  entityRows = interpolatedRows();
+  followSelection(dt);
   pruneLastDrawn();
   if (!terrainCanvas) { layersOff(); fxaaPass(); return; }
   buildViewTerrain(); // once its textures are in (a no-op after that)
@@ -2066,10 +2257,10 @@ export function draw() {
   const [ox, oy] = toScreen(0, 0);
   const scale = (TW / TERRAIN_TW) * z;
   const tA = performance.now();
+  bakeGradeThisFrame = bakeGradeAllowed(spritesOn(), fogState());
   drawGround(scale);
   const tB = performance.now();
 
-  entityRows = interpolatedRows();
   countingDraw = true;
   fireOwnedTiles.clear();
   sceneBegin();
@@ -2083,13 +2274,18 @@ export function draw() {
     c.save();
     c.globalCompositeOperation = op;
     if (fogSmall && TG.available()) {
-      // Over the ground surface, so fog follows the hills.
-      TG.begin(viewSize.w, viewSize.h, viewSize.dpr);
-      TG.drawMapTexture('fog', fogSmall, S.camera, { w: viewSize.w, h: viewSize.h, tw: TW, th: TH }, visibleTileRange(), { linear: true, fog: true });
+      // Over the ground surface, so fog follows the hills. Rendered once a frame:
+      // the particle layer reuses the same picture.
+      if (fogRenderedFor !== frameSerial) {
+        fogRenderedFor = frameSerial;
+        TG.begin(viewSize.w, viewSize.h, viewSize.dpr);
+        TG.drawMapTexture('fog', fogSmall, S.camera, { w: viewSize.w, h: viewSize.h, tw: TW, th: TH }, visibleTileRange(), { linear: true, fog: true });
+      }
       c.setTransform(1, 0, 0, 1, 0, 0);
       c.drawImage(TG.output(), 0, 0);
     } else {
-      c.drawImage(fogCanvas, ox, oy - mapW * TERRAIN_TH / 2 * scale, fogCanvas.width * scale, fogCanvas.height * scale);
+      const iso = fogIso();
+      if (iso) c.drawImage(iso, ox, oy - mapW * TERRAIN_TH / 2 * scale, iso.width * scale, iso.height * scale);
     }
     c.restore();
   };
@@ -2097,11 +2293,13 @@ export function draw() {
   if (fog === 'spy') drawFog();
   // Buildings first, then units (rough painter's order by screen y).
   const useSprites = spritesOn();
-  gpuTarget = useSprites && gpuLayers() && SG.begin(viewSize.w, viewSize.h, viewSize.dpr) ? ctx : null;
+  // The GPU atlas may grow to the same budget as the decoded strips it copies from.
+  if (useSprites) SG.setAtlasBudget(Number(settings.enhancedGraphics ? settings.atlasMemoryUhd : settings.atlasMemoryNormal) || 768);
+  gpuTarget = useSprites && gpuLayers() && SG.begin(viewSize.w, viewSize.h, viewSize.dpr, spriteLook()) ? ctx : null;
   layered = false;
   const sorted = useSprites
-    ? entityRows.slice().sort((a, b) => depth(a) - depth(b))
-    : entityRows.slice().sort((a, b) => ((a[6] & 1) - (b[6] & 1)) * -1e6 + (depth(a) - depth(b)));
+    ? sortByKey(entityRows, depth)
+    : sortByKey(entityRows, (r) => depth(r) - (r[6] & 1) * 1e6);
   const hidden = (r, px, py, u) => {
     const [, owner, , x, y, , flags] = r;
     const margin = flags & 1 ? Math.max(60, (u.size || 1) * TW * z * 1.4) : 60;
@@ -2117,10 +2315,10 @@ export function draw() {
   // What the dead leave (death animations, corpses, rubble) lies on the ground
   // under everything standing (view.remains: not units, never selected or counted).
   if (useSprites && S.view && S.view.remains) {
-    const remains = S.view.remains.slice().sort((a, b) => depth(a) - depth(b));
+    const remains = sortByKey(S.view.remains, depth);
     for (const r of remains) {
       const [px, py] = entityScreen(r);
-      if (hidden(r, px, py, unitInfo(r[2]))) continue;
+      if (hidden(r, px, py, entityInfo(r))) continue;
       if (sel.has(r[0])) drawSelection(r, px, py);
       drawSprites(r, px, py); // still loading: nothing, not a placeholder
     }
@@ -2142,10 +2340,10 @@ export function draw() {
     // the same shift from its draw list): drawn at their own spot they sat 24/48 px
     // low and exposed the black inside the Khmer centre's walls.
     const py = py0 - (TC_ANNEX_LIFT[mid] || 0) * TH / 2 * S.camera.zoom;
-    const u = unitInfo(mid);
+    const u = entityInfo(r);
     if (hidden(r, px, py, u)) continue;
     if (px >= 0 && px <= viewSize.w && py >= 0 && py <= viewSize.h) sceneAdd(r, u, px);
-    const color = owner === 0 ? gaiaColor(mid) : playerColor(owner);
+    const color = owner === 0 ? gaiaColor(mid, u) : playerColor(owner);
     if (sel.has(id)) drawSelection(r, px, py);
     if (useSprites && drawSprites(r, px, py)) {
       // Bars sit just above the picture, as in the game (none over an invisible object).
@@ -2204,7 +2402,7 @@ export function draw() {
   flameQueue.length = 0;
   drawRangeCircles();
   if (useSprites && S.view && S.view.particles) drawParticles();
-  if (fog === 'standard') { drawFog(); if (pctx !== mainCtx) drawFog(pctx, 'source-atop'); }
+  if (fog === 'standard') { drawFog(); if (pctx !== mainCtx && fxDrawn) drawFog(pctx, 'source-atop'); }
   const tE = performance.now();
   drawTimes.ground += tB - tA; drawTimes.entities += tC - tB; drawTimes.outlines += tD - tC; drawTimes.effects += tE - tD; drawTimes.n++;
   // The passes below grade the world canvas (with layers: the ground; the sprite
@@ -2324,16 +2522,23 @@ export function activeGrade() {
 // mangonel's trail shows brighter than any graded colour can reach): they go to
 // their own layer, which takes the fog like the world and is laid over it after
 // the grade.
+// fxDrawn: something was drawn on the particle layer this frame. A frame with
+// no particles, flames or projectile trails skips the full-screen clear (when
+// the layer is already empty), the fog over it and the composite.
+let fxDrawn = false, fxDirty = false;
 function fxBegin() {
   if (!fxLayer) fxLayer = document.createElement('canvas');
-  if (fxLayer.width !== canvas.width || fxLayer.height !== canvas.height) { fxLayer.width = canvas.width; fxLayer.height = canvas.height; }
+  if (fxLayer.width !== canvas.width || fxLayer.height !== canvas.height) { fxLayer.width = canvas.width; fxLayer.height = canvas.height; fxDirty = false; }
   pctx = fxLayer.getContext('2d');
   pctx.setTransform(1, 0, 0, 1, 0, 0);
-  pctx.clearRect(0, 0, fxLayer.width, fxLayer.height);
+  if (fxDirty) pctx.clearRect(0, 0, fxLayer.width, fxLayer.height);
+  fxDirty = false; fxDrawn = false;
   pctx.setTransform(viewSize.dpr, 0, 0, viewSize.dpr, 0, 0);
 }
 function fxComposite(target = mainCtx) {
   if (pctx === mainCtx) return;
+  if (!fxDrawn) { pctx = mainCtx; return; }
+  fxDirty = true;
   target.save();
   target.setTransform(1, 0, 0, 1, 0, 0);
   target.drawImage(fxLayer, 0, 0);
@@ -2357,8 +2562,10 @@ function gradeParams() {
 }
 function gradePass() {
   const g = gradeParams();
-  if (!g) return;
-  const w = canvas.width, h = canvas.height;
+  if (!g || groundGraded) return; // baked into the ground this frame
+  applyGrade(ctx, canvas.width, canvas.height, g);
+}
+function applyGrade(ctx, w, h, g) {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (g.s < 1) {
@@ -2384,6 +2591,11 @@ function gradePass() {
 // Distance haze (the shader's distance fog): the preset's colour times its visible
 // intensity, added most at the top of the view and fading to nothing at the
 // bottom ((1 - v) of the screen). Applied before the grade, as the game does.
+function hazeActive() {
+  const p = activeGrade();
+  if (!p || settings.distanceHaze === false) return false;
+  return Array.isArray(p.distance_fog_color) && num(p.distance_fog_visible_intensity, 0) > 0;
+}
 function hazePass() {
   const p = activeGrade();
   if (!p || settings.distanceHaze === false) return;
@@ -2516,8 +2728,7 @@ function treeSprite(x, y) {
   // The facet is the variant the game draws for this tree (see tree_tiles).
   const facet = treeFacets ? treeFacets[y * mapW + x] : 0;
   const e = spriteStrip(u.sprite, facet, -1);
-  if (!e || !e.img || !e.meta) return null;
-  return e;
+  return treeSpriteState(e);
 }
 
 function drawTreesWorld() {
@@ -2544,8 +2755,8 @@ function drawTreesWorld() {
 
 const GAIA_COLORS = { 32: '#f2c94c', 8: '#b9bcc0', 7: '#e26ec2', 33: '#6fc6e8', 5: '#6fc6e8', 31: '#6fc6e8', 9: '#d6b37a', 10: '#a85a3a', 1: '#ffffff', 42: '#ffffff', 29: '#e8e1d0', 48: '#f2c94c' };
 const GAIA_STRUCTURE = '#b49a6c'; // bridges and other Gaia buildings
-function gaiaColor(mid) {
-  const u = unitInfo(mid);
+function gaiaColor(mid, info) {
+  const u = info || unitInfo(mid);
   if (u.kind === 'building') return GAIA_STRUCTURE;
   return GAIA_COLORS[u.cls] || '#bbb';
 }
@@ -2557,7 +2768,7 @@ function diamond(px, py, hw, hh) {
 }
 
 function drawBuilding(r, px, py, color, showIcons) {
-  const u = unitInfo(r[2]);
+  const u = entityInfo(r);
   const size = Math.max(1, u.size || 1);
   const z = S.camera.zoom;
   const hw = size * TW / 2 * z, hh = size * TH / 2 * z;
@@ -2586,7 +2797,7 @@ function drawBuilding(r, px, py, color, showIcons) {
   ctx.stroke();
   ctx.setLineDash([]);
   if (showIcons) {
-    const im = img(unitIcon(r[2], r[1]));
+    const im = img(unitIcon(r[2], r[1], r[0]));
     if (im) {
       const s = Math.min(hw * 0.75, 14 + 14 * z);
       if (foundation && pct <= 0.001) ctx.globalAlpha = 0.5;
@@ -2609,7 +2820,7 @@ function drawUnit(r, px, py, color, showIcons, gaia) {
   const flags = r[6];
   const rad = Math.max(2, (gaia ? 0.32 : 0.3) * TW / 2 * z * (flags & 2 ? 1.15 : 1));
   if (showIcons && !gaia) {
-    const im = img(unitIcon(r[2], r[1]));
+    const im = img(unitIcon(r[2], r[1], r[0]));
     const s = rad * 2.4;
     ctx.save();
     ctx.beginPath(); ctx.arc(px, py, s / 2, 0, Math.PI * 2); ctx.closePath();
@@ -2643,7 +2854,7 @@ function hpBar(px, py, w, frac) {
 }
 
 function drawSelection(r, px, py) {
-  const u = unitInfo(r[2]);
+  const u = entityInfo(r);
   const z = S.camera.zoom;
   const size = (r[6] & 1) ? Math.max(1, u.size || 1) : 0.8;
   ctx.lineWidth = 1.5;
@@ -2687,20 +2898,35 @@ const unitDetails = new Map();
 let detailRequests = 0;
 
 function unitDetail(r) {
-  const key = `${r[1]}:${r[2]}`;
-  if (unitDetails.has(key)) return unitDetails.get(key);
-  if (detailRequests > 3) return null;
-  unitDetails.set(key, null);
-  detailRequests++;
-  api(`/api/unit/${r[0]}?t=${Math.round(S.t)}`)
-    .then((d) => {
-      const out = {};
-      for (const k of RANGE_KEYS) if (d && typeof d[k] === 'number') out[k] = d[k];
-      unitDetails.set(key, out);
-    })
-    .catch(() => {})
-    .finally(() => { detailRequests--; });
-  return null;
+  const generation = S.session && S.session.generation;
+  const at = Math.round(S.view && Number.isFinite(S.view.time) ? S.view.time : S.t);
+  const key = `${generation}:${r[0]}`, now = performance.now();
+  let c = unitDetails.get(key);
+  if (!c) {
+    if (unitDetails.size > 128) unitDetails.delete(unitDetails.keys().next().value);
+    c = { data: null, queryAt: null, started: 0, sequence: 0, pending: false, failed: false };
+    unitDetails.set(key, c);
+  }
+  const valid = entityStatsValid(c.data, r[0], r, at, generation, c.queryAt);
+  if (!c.pending && detailRequests < 4 && (!valid || now - c.started >= 1000)
+      && (!c.failed || now - c.started >= 1000)) {
+    c.started = now; c.pending = true; c.failed = false; detailRequests++;
+    const sequence = ++c.sequence;
+    api(`/api/unit/${r[0]}?t=${at}`).then((d) => {
+      if (unitDetails.get(key) !== c || c.sequence !== sequence
+          || (S.session && S.session.generation) !== generation) return;
+      if ((d.entity_stats_validity_version === 1 && d.generation !== generation)
+          || (d.generation != null && d.generation !== generation)) { c.failed = true; return; }
+      c.data = d; c.queryAt = at;
+    }).catch(() => { c.failed = true; }).finally(() => {
+      detailRequests--;
+      if (unitDetails.get(key) === c && c.sequence === sequence) c.pending = false;
+    });
+  }
+  if (!valid) return null;
+  const out = {};
+  for (const k of RANGE_KEYS) if (typeof c.data[k] === 'number') out[k] = c.data[k];
+  return out;
 }
 
 function rangeEllipse(px, py, tiles) {
@@ -2728,7 +2954,7 @@ function drawRangeCircles() {
     if ((r[6] & 16) || TOWN_CENTER_PARTS.has(r[2])) continue; // foundations do not act yet
     const show = building ? bMode === 'always' || (bMode === 'selected' && selected) : selected && sMode !== 'none';
     if (!show) continue;
-    const u = unitInfo(r[2]);
+    const u = entityInfo(r);
     const st = { ...(u.stats || {}), ...(selected ? unitDetail(r) || {} : {}) };
     const half = building ? Math.max(1, u.size || 1) / 2 : 0;
     const square = squareArea(r, half);
@@ -2793,53 +3019,135 @@ function updateMiniView(W, H) {
   miniView.cy = Math.max(hh, Math.min(H - hh, cy));
 }
 
+// The minimap in layers, each kept in a canvas of the minimap's own size: the
+// ground (redrawn when the terrain, the size or the minimap zoom changes), the
+// fog (when it or the zoom changes) and the entities (at most MINI_ENTITY_HZ).
+// Only the camera frame is drawn every frame. Redrawn whole, the minimap scaled
+// two map-sized canvases down and drew ~2,500 entities one by one per frame.
+const MINI_ENTITY_HZ = 15;
+const miniLayers = { bg: null, bgKey: '', fog: null, fogKey: '', ents: null, entsKey: '', entsAt: 0 };
+function miniLayer(c) {
+  if (!c) c = document.createElement('canvas');
+  if (c.width !== mini.width || c.height !== mini.height) { c.width = mini.width; c.height = mini.height; }
+  return c;
+}
+// Minimap space (CSS px of the base minimap) -> the layer's device pixels.
+function miniTransform(c, W, H) {
+  const dpr = viewSize.dpr, z = miniView.zoom;
+  c.setTransform(dpr * z, 0, 0, dpr * z, dpr * (W / 2 - miniView.cx * z), dpr * (H / 2 - miniView.cy * z));
+}
+
 export function drawMinimap() {
   refreshMiniTerrain();
   const dpr = viewSize.dpr;
   const W = mini.width / dpr, H = mini.height / dpr;
-  mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  mctx.clearRect(0, 0, W, H);
+  mctx.setTransform(1, 0, 0, 1, 0, 0);
+  mctx.clearRect(0, 0, mini.width, mini.height);
   if (!miniTerrain) return;
   updateMiniView(W, H);
   const z = miniView.zoom;
-  mctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (W / 2 - miniView.cx * z), dpr * (H / 2 - miniView.cy * z));
-  mctx.imageSmoothingEnabled = true;
-  mctx.drawImage(miniTerrain, 0, 0, W, H);
-  const k = 1 / Math.sqrt(z); // icons grow gently when zoomed in
+  const frame = `${W}|${H}|${dpr}|${z}|${miniView.cx}|${miniView.cy}`;
   const mode = S.minimapMode;
   const mask = perspectiveMask();
   const fog = fogState();
-  const drawFog = () => {
-    if (!fogCanvas) return;
-    mctx.globalAlpha = 0.85;
-    mctx.drawImage(fogCanvas, 0, 0, W, H);
-    mctx.globalAlpha = 1;
+  // Ground: the costly layer (a map-sized canvas scaled down), so it holds no entities.
+  const bgKey = `${frame}|${miniTerrainRev}`;
+  if (bgKey !== miniLayers.bgKey) {
+    miniLayers.bgKey = bgKey;
+    const c = (miniLayers.bg = miniLayer(miniLayers.bg)).getContext('2d');
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, mini.width, mini.height);
+    miniTransform(c, W, H);
+    c.imageSmoothingEnabled = true;
+    c.drawImage(miniTerrain, 0, 0, W, H);
+  }
+  mctx.drawImage(miniLayers.bg, 0, 0);
+  // Fog, scaled down from the map-sized canvas once per change.
+  const fogLayer = () => {
+    if (!fogCanvas) return null;
+    const key = `${frame}|${fogRev}`;
+    if (key !== miniLayers.fogKey) {
+      miniLayers.fogKey = key;
+      const c = (miniLayers.fog = miniLayer(miniLayers.fog)).getContext('2d');
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.clearRect(0, 0, mini.width, mini.height);
+      miniTransform(c, W, H);
+      // Clip to the map's diamond, then draw the map-space fog with its edge
+      // pixels repeated one tile out: sampled at the very edge it went
+      // half-transparent and left a dotted outline around the map.
+      const corners = [[0, 0], [mapW, 0], [mapW, mapH], [0, mapH]].map(([a, b]) => miniBase(a, b));
+      c.beginPath();
+      corners.forEach(([px, py], i) => (i ? c.lineTo(px, py) : c.moveTo(px, py)));
+      c.closePath();
+      c.clip();
+      // Tile (x, y) of the map-space fog -> miniBase(x, y): an affine map.
+      const sxy = mapW + mapH;
+      c.transform(W / sxy, -H / sxy, W / sxy, H / sxy, 0, mapW * H / sxy);
+      c.imageSmoothingEnabled = true;
+      c.globalAlpha = 0.85;
+      c.drawImage(paddedFog(), -1, -1);
+    }
+    return miniLayers.fog;
   };
-  if (fog === 'spy') drawFog();
-  const sx = W / (mapW + mapH);
-  // Gaia structures (bridges) first, as footprints under the icons.
+  if (fog === 'spy') { const f = fogLayer(); if (f) mctx.drawImage(f, 0, 0); }
+  // Entities: at most MINI_ENTITY_HZ, sooner when the minimap itself changed.
+  const now = performance.now();
+  const entsKey = `${frame}|${mode}|${fog}|${mask}|${S.perspective}|${S.combinedFog}`;
+  if (entsKey !== miniLayers.entsKey || now - miniLayers.entsAt >= 1000 / MINI_ENTITY_HZ) {
+    miniLayers.entsKey = entsKey;
+    miniLayers.entsAt = now;
+    const c = (miniLayers.ents = miniLayer(miniLayers.ents)).getContext('2d');
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, mini.width, mini.height);
+    miniTransform(c, W, H);
+    // Gaia structures (bridges) first, as footprints under the icons.
+    if (mode !== 'military') drawMiniGaiaStructures(c, z);
+    drawMiniEntities(c, z, mode, fog, mask);
+  }
+  mctx.drawImage(miniLayers.ents, 0, 0);
+  if (fog === 'standard') { const f = fogLayer(); if (f) mctx.drawImage(f, 0, 0); }
+  // camera viewport
+  miniTransform(mctx, W, H);
+  const corners = [toWorld(0, 0), toWorld(viewSize.w, 0), toWorld(viewSize.w, viewSize.h), toWorld(0, viewSize.h)];
+  mctx.strokeStyle = 'rgba(255,255,255,.9)';
+  mctx.lineWidth = 1 / z;
+  mctx.beginPath();
+  corners.forEach(([x, y], i) => { const [px, py] = miniBase(x, y); if (i) mctx.lineTo(px, py); else mctx.moveTo(px, py); });
+  mctx.closePath();
+  mctx.stroke();
+}
+
+function drawMiniGaiaStructures(c, z) {
   for (const r of entityRows) {
-    if (r[1] !== 0 || mode === 'military') continue;
-    const u = unitInfo(r[2]);
+    if (r[1] !== 0) continue;
+    const u = entityInfo(r);
     if (u.kind !== 'building') continue;
     const h = Math.max(1, u.size || 1) / 2;
     const pts = [[r[3] - h, r[4] - h], [r[3] + h, r[4] - h], [r[3] + h, r[4] + h], [r[3] - h, r[4] + h]].map(([a, b]) => miniBase(a, b));
-    mctx.beginPath();
-    pts.forEach(([px, py], i) => (i ? mctx.lineTo(px, py) : mctx.moveTo(px, py)));
-    mctx.closePath();
-    mctx.fillStyle = GAIA_STRUCTURE; mctx.fill();
-    mctx.lineWidth = 0.6 / z; mctx.strokeStyle = 'rgba(40,28,14,.8)'; mctx.stroke();
+    c.beginPath();
+    pts.forEach(([px, py], i) => (i ? c.lineTo(px, py) : c.moveTo(px, py)));
+    c.closePath();
+    c.fillStyle = GAIA_STRUCTURE; c.fill();
+    c.lineWidth = 0.6 / z; c.strokeStyle = 'rgba(40,28,14,.8)'; c.stroke();
   }
-  mctx.lineWidth = 0.7 * k;
+}
+
+// Entity marks, in the order the minimap always drew them (each mark's fill then
+// its outline, so a later mark covers an earlier one's outline). Into the cached
+// entity layer, at most MINI_ENTITY_HZ: the saving is the rate, not the order.
+function drawMiniEntities(c, z, mode, fog, mask) {
+  const k = 1 / Math.sqrt(z); // icons grow gently when zoomed in
+  const sx = (miniView.W || 1) / (mapW + mapH);
+  c.lineWidth = 0.7 * k;
   for (const r of entityRows) {
     const [, owner, mid, x, y, , flags] = r;
     if (owner === 0) {
       if (mode === 'military' || (flags & 512)) continue; // scenery (cliffs) is not marked
-      const u = unitInfo(mid);
+      const u = entityInfo(r);
       if (u.cls === 15 || u.kind === 'building') continue;
-      mctx.fillStyle = gaiaColor(mid);
+      c.fillStyle = gaiaColor(mid, u);
       const [px, py] = miniBase(x, y);
-      mctx.fillRect(px - k, py - k, 2 * k, 2 * k);
+      c.fillRect(px - k, py - k, 2 * k, 2 * k);
       continue;
     }
     if (mode === 'military' && !(flags & 2) && !(flags & 1)) continue;
@@ -2851,34 +3159,24 @@ export function drawMinimap() {
     const [px, py] = miniBase(x, y);
     const color = playerColor(owner, 'minimap');
     if (flags & 1) {
-      const u = unitInfo(mid);
+      const u = entityInfo(r);
       const s = Math.max(3.2 * k, Math.max(1, u.size || 1) * sx * 1.1);
       if (flags & 16) {
         // Foundation: an outlined box filling up (bottom to top) as it is built.
         const pct = constructionPct(r);
-        mctx.fillStyle = 'rgba(0,0,0,.55)'; mctx.fillRect(px - s / 2, py - s / 2, s, s);
-        mctx.fillStyle = color; mctx.fillRect(px - s / 2, py + s / 2 - s * pct, s, s * pct);
-        mctx.strokeStyle = color; mctx.strokeRect(px - s / 2, py - s / 2, s, s);
+        c.fillStyle = 'rgba(0,0,0,.55)'; c.fillRect(px - s / 2, py - s / 2, s, s);
+        c.fillStyle = color; c.fillRect(px - s / 2, py + s / 2 - s * pct, s, s * pct);
+        c.strokeStyle = color; c.strokeRect(px - s / 2, py - s / 2, s, s);
       } else {
-        mctx.fillStyle = color; mctx.fillRect(px - s / 2, py - s / 2, s, s);
-        mctx.strokeStyle = 'rgba(0,0,0,.9)'; mctx.strokeRect(px - s / 2, py - s / 2, s, s);
+        c.fillStyle = color; c.fillRect(px - s / 2, py - s / 2, s, s);
+        c.strokeStyle = 'rgba(0,0,0,.9)'; c.strokeRect(px - s / 2, py - s / 2, s, s);
       }
     } else {
       const s = (flags & 2 ? 2.6 : 2.1) * k;
-      mctx.fillStyle = color; mctx.fillRect(px - s / 2, py - s / 2, s, s);
-      mctx.strokeStyle = 'rgba(0,0,0,.85)'; mctx.strokeRect(px - s / 2, py - s / 2, s, s);
+      c.fillStyle = color; c.fillRect(px - s / 2, py - s / 2, s, s);
+      c.strokeStyle = 'rgba(0,0,0,.85)'; c.strokeRect(px - s / 2, py - s / 2, s, s);
     }
   }
-  if (fog === 'standard') drawFog();
-  // camera viewport
-  const corners = [toWorld(0, 0), toWorld(viewSize.w, 0), toWorld(viewSize.w, viewSize.h), toWorld(0, viewSize.h)];
-  mctx.strokeStyle = 'rgba(255,255,255,.9)';
-  mctx.lineWidth = 1 / z;
-  mctx.beginPath();
-  corners.forEach(([x, y], i) => { const [px, py] = miniBase(x, y); if (i) mctx.lineTo(px, py); else mctx.moveTo(px, py); });
-  mctx.closePath();
-  mctx.stroke();
-
 }
 
 function minimapToWorld(ev) {
@@ -2962,6 +3260,17 @@ export function setZoom(z, anchorPx, anchorPy) {
   applyZoom(z, anchorPx, anchorPy);
 }
 
+/** Smooth zoom only: preserve a pending pan and its remaining duration. */
+export function zoomTo(z) {
+  if (!z) return;
+  const target = clampZoom(z);
+  if (!Number.isFinite(target)) return;
+  const dur = smoothMs();
+  if (camAnim) camAnim.z1 = null; // this zoom takes over, without replacing the pan
+  if (!dur) { setZoom(target); return; }
+  zoomAnim = { z0: S.camera.zoom, z1: target, ax: null, ay: null, t0: performance.now(), dur };
+}
+
 function wheelZoom(e) {
   const f = Math.exp(-e.deltaY * 0.0015 * (settings.zoomSpeed || 1));
   const dur = smoothMs();
@@ -2984,20 +3293,23 @@ export function pick(px, py) {
   let best = null, bestD = 1e9;
   for (const r of entityRows) {
     const [sx, sy] = entityScreen(r);
-    const u = unitInfo(r[2]);
+    const u = entityInfo(r);
     // Buildings and Gaia resources by footprint; a unit by its body, which
     // stands above the foot point the row gives.
     const z = S.camera.zoom, wide = (r[6] & 1) || (r[6] & 32);
     const reach = wide ? Math.max(1, u.size || 1) * TW / 2 * z * 0.8 : Math.max(12, 14 * z);
     const d = Math.hypot(sx - px, (wide ? sy : sy - 12 * z) - py);
-    if (d < reach && d < bestD && !(r[6] & 512) && (r[1] !== 0 || u.cls !== 15)) { best = r; bestD = d; }
+    if (d < reach && d < bestD && !(r[6] & 512) && (r[1] !== 0 || u.cls !== 15 || S.view?.entity_units?.[r[0]])) { best = r; bestD = d; }
   }
-  if (best) return best;
-  // Nothing standing there: a carcass that still holds food, then a tree.
+  // Compare food-bearing carcasses with standing objects, rather than letting
+  // a nearby villager or a town centre's footprint always swallow the click.
+  // Their bodies lie at ground level; standing units use their raised body
+  // centre above. Clicking either body therefore selects the intended object.
+  const remainsReach = Math.max(12, 16 * S.camera.zoom);
   for (const r of resourceRemains()) {
     const [sx, sy] = entityScreen(r);
     const d = Math.hypot(sx - px, sy - py);
-    if (d < 16 && d < bestD) { best = r; bestD = d; }
+    if (d < remainsReach && d <= bestD) { best = r; bestD = d; }
   }
   return best || pickTree(px, py);
 }
@@ -3082,7 +3394,7 @@ export function boxSelect(x0, y0, x1, y1) {
     if (r[1] === 0) continue;
     // Only what the game lets a player select: a unit or a building with an icon,
     // not the hidden helper objects a building is made of (TC annexes, fences).
-    const u = unitInfo(r[2]);
+    const u = entityInfo(r);
     if ((u.kind !== 'unit' && u.kind !== 'building') || u.icon < 0 || TOWN_CENTER_PARTS.has(r[2])) continue;
     const [sx, sy] = entityScreen(r);
     if (sx >= ax && sx <= bx && sy >= ay && sy <= by) out.push(r);
@@ -3101,13 +3413,19 @@ export function rowsOnScreenOfType(mid, owner) {
   });
 }
 
+/** Resolve a real entity ID, including resource remains and felled tree tiles. */
+export function rowForEntityId(id) {
+  const row = entityRows.find((r) => r[0] === id) || resourceRemains().find((r) => r[0] === id);
+  if (row) return row;
+  const cut = S.view?.trees_left?.find((r) => r[3] === id);
+  return cut ? treeRow(Math.floor(cut[1]) * mapW + Math.floor(cut[0])) : null;
+}
+
 export function currentRows() { return entityRows; }
 
-export function followSelection() {
-  if (!S.followSelection || !S.selection.size) return;
-  let sx = 0, sy = 0, n = 0;
-  for (const r of entityRows) if (S.selection.has(r[0])) { sx += r[3]; sy += r[4]; n++; }
-  if (n) { S.camera.x += (sx / n - S.camera.x) * 0.2; S.camera.y += (sy / n - S.camera.y) * 0.2; }
+export function followSelection(dt = 1 / 60) {
+  if (!S.followSelection) return;
+  followRows(S.camera, S.selection, entityRows, dt);
 }
 
 // -- cursor lock (keeps the pointer in the window for edge scrolling) -------------------

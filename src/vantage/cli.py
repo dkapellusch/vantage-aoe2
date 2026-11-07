@@ -50,6 +50,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--recording", "--start-file", type=Path, dest="recording", help="open a .vrec recording"
     )
     src.add_argument("--live", action="store_true", help="connect to the running game")
+    # Local replay playback (experimental, from the development copy): a replay is
+    # converted on this machine with a pinned profile, without the running game.
+    src.add_argument(
+        "--native-replay", type=Path, help="convert and watch a local replay (experimental)"
+    )
+    s.add_argument("--native-profile", type=Path, help="local conversion profile")
+    s.add_argument("--native-profile-sha256", help="expected SHA256 of the conversion profile")
+    s.add_argument("--native-cache-dir", type=Path, help="local conversion cache folder")
+    s.add_argument(
+        "--native-replay-root",
+        type=Path,
+        action="append",
+        help="replay folder for local playback (repeatable)",
+    )
+    s.add_argument(
+        "--native-timeout",
+        type=float,
+        help="local conversion limit per phase in seconds (default: 900)",
+    )
     s.add_argument(
         "start_file",
         nargs="?",
@@ -91,6 +110,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="browsers ignore their saved settings this session",
     )
     s.add_argument("--minimize-game", action="store_true", help="with --live: minimise the game")
+    s.add_argument(
+        "--recording-only",
+        action="store_true",
+        help="open recordings without launching or discovering the game or using its API; "
+        "--game-dir still supplies graphics from an explicit local directory",
+    )
+    s.add_argument("--native-worker", type=Path, help="imported native engine client descriptor")
+    s.add_argument("--native-worker-sha256", help="expected native engine descriptor SHA256")
+    s.add_argument(
+        "--experimental-native",
+        action="store_true",
+        help="enable experimental native replay conversion",
+    )
 
     o = ss.add_parser(
         "open-url",
@@ -319,71 +351,159 @@ def replay_game(path: str) -> int | None:
 
 
 def _serve(args: argparse.Namespace) -> int:
-    from vantage.gamedata import GameData, find_game_dir
-    from vantage.server import GAME_AOE2, GAME_ROR, Session, default_replay_dirs, serve
+    from vantage.gamedata import GameData
+    from vantage.native_jobs import NativeConfig
+    from vantage.native_session import NativeSession as Session
+    from vantage.server import GAME_AOE2, GAME_ROR, default_replay_dirs, serve
 
     recording = args.recording
+    native_replay = getattr(args, "native_replay", None)
     if args.start_file is not None:
-        if recording is not None or args.live:
-            print("give one source: a FILE, --recording or --live", file=sys.stderr)
+        if recording is not None or args.live or native_replay is not None:
+            print(
+                "give one source: a FILE, --recording, --native-replay or --live", file=sys.stderr
+            )
             return 2
         recording = args.start_file
-    game_dir = args.game_dir or find_game_dir()
+    recording_only = bool(getattr(args, "recording_only", False))
+    if recording_only and (args.live or args.replay or args.lobby):
+        print("--recording-only cannot open a live game", file=sys.stderr)
+        return 2
+    native_jobs = None
+    native_descriptor = getattr(args, "native_worker", None)
+    if native_descriptor is not None:
+        if not getattr(args, "experimental_native", False) or not getattr(
+            args, "native_worker_sha256", None
+        ):
+            print(
+                "native conversion needs --experimental-native and --native-worker-sha256",
+                file=sys.stderr,
+            )
+            return 2
+        from vantage.native import NativeJobs, NativeWorker
+
+        try:
+            worker = NativeWorker(native_descriptor.expanduser(), args.native_worker_sha256)
+            native_jobs = NativeJobs(worker, args.recordings_dir.expanduser() / "native-cache")
+        except (ValueError, OSError) as exc:
+            print(f"Cannot import native engine: {exc}", file=sys.stderr)
+            return 2
+    game_dir = resolve_game_dir(args.game_dir, recording_only=recording_only)
     data = GameData(game_dir)
     rec_dir = args.recordings_dir.expanduser()
     rec_dir.mkdir(parents=True, exist_ok=True)
     session = Session(data, rec_dir)
-    if recording:
-        session.open_recording(str(recording))
-    elif args.live:
-        session.open_live(
-            replay=args.replay,
-            lobby=args.lobby,
-            record=not args.no_record,
-            minimize=args.minimize_game,
-            exit_on_end=args.exit_on_stream_end,
-            # Ask first: when the game would leave a game
-            # in progress, the browser shows "Continue with request?".
-            confirm=False,
-            game={"aoe2": GAME_AOE2, "ror": GAME_ROR}.get(args.game or ""),
-            cloud=args.cloud,
-            lobby_source=args.lobby_source,
-        )
-    config = {
-        "patch": json.loads(args.patch_config) if args.patch_config else {},
-        "force_default": bool(args.force_default_config),
-        # The browser reports the end of a recording so the server can exit.
-        "exit_on_stream_end": bool(args.exit_on_stream_end),
-    }
-    override = [d.expanduser() for d in args.replay_dir or ()]
-    dirs = override or default_replay_dirs()
-    server = serve(args.host, args.port, session, dirs, config, follow_live=not override)
-    if args.exit_on_stream_end:
-
-        def stop_server() -> None:
-            threading.Thread(target=server.shutdown, daemon=True).start()
-
-        if args.live:
-
-            def watch() -> None:
-                session.ended.wait()
-                server.shutdown()
-
-            threading.Thread(target=watch, daemon=True).start()
-        else:
-            # A recording ends when the browser reaches its end.
-            server.app.on_playback_ended = stop_server  # type: ignore[attr-defined]  # set by serve()
-    url = f"http://{args.host}:{args.port}/"
-    print(serve_banner(url, game_dir, rec_dir, opening=args.open), flush=True)
-    if args.open:
-        threading.Timer(0.5, webbrowser.open, (url,)).start()
+    server = browser_timer = None
+    # Every exit below closes what was opened, in this order: a failure before
+    # the server is bound submits no conversion and leaves no socket behind.
     try:
+        native_options = (
+            getattr(args, "native_profile", None),
+            getattr(args, "native_profile_sha256", None),
+            getattr(args, "native_cache_dir", None),
+        )
+        native_roots = tuple(getattr(args, "native_replay_root", None) or ())
+        native_timeout = getattr(args, "native_timeout", None)
+        if (
+            any(value is not None for value in native_options)
+            or native_replay is not None
+            or native_roots
+            or native_timeout is not None
+        ):
+            if not all(value is not None for value in native_options):
+                raise ValueError(
+                    "local replay playback needs --native-profile, "
+                    "--native-profile-sha256 and --native-cache-dir"
+                )
+            profile, profile_sha256, cache_dir = native_options
+            assert profile is not None and profile_sha256 is not None and cache_dir is not None
+            session.configure_native(
+                NativeConfig(
+                    profile,
+                    profile_sha256,
+                    cache_dir,
+                    native_roots,
+                    900 if native_timeout is None else native_timeout,
+                )
+            )
+        config = {
+            "patch": json.loads(args.patch_config) if args.patch_config else {},
+            "force_default": bool(args.force_default_config),
+            # The browser reports the end of a recording so the server can exit.
+            "exit_on_stream_end": bool(args.exit_on_stream_end),
+        }
+        override = [d.expanduser() for d in args.replay_dir or ()]
+        native_config = getattr(session, "native_config", None)
+        dirs = (
+            list(native_config.replay_roots)
+            if getattr(session, "native", None) is not None and native_config is not None
+            else (override or default_replay_dirs())
+        )
+        server = serve(
+            args.host,
+            args.port,
+            session,
+            dirs,
+            config,
+            follow_live=not override and not recording_only,
+            native_jobs=native_jobs,
+            recording_only=recording_only,
+        )
+        if recording:
+            session.open_recording(str(recording))
+        elif native_replay is not None:
+            # The conversion starts once the server is bound.
+            session.open_native_replay(native_replay)
+        elif args.live:
+            session.open_live(
+                replay=args.replay,
+                lobby=args.lobby,
+                record=not args.no_record,
+                minimize=args.minimize_game,
+                exit_on_end=args.exit_on_stream_end,
+                # Ask first: when the game would leave a game
+                # in progress, the browser shows "Continue with request?".
+                confirm=False,
+                game={"aoe2": GAME_AOE2, "ror": GAME_ROR}.get(args.game or ""),
+                cloud=args.cloud,
+                lobby_source=args.lobby_source,
+            )
+        if args.exit_on_stream_end:
+            bound = server
+
+            def stop_server() -> None:
+                threading.Thread(target=bound.shutdown, daemon=True).start()
+
+            if args.live:
+
+                def watch() -> None:
+                    session.ended.wait()
+                    bound.shutdown()
+
+                threading.Thread(target=watch, daemon=True).start()
+            else:
+                # A recording ends when the browser reaches its end.
+                server.app.on_playback_ended = stop_server  # type: ignore[attr-defined]  # set by serve()
+        url = f"http://{args.host}:{args.port}/"
+        print(serve_banner(url, game_dir, rec_dir, opening=args.open), flush=True)
+        if args.open:
+            browser_timer = threading.Timer(0.5, webbrowser.open, (url,))
+            browser_timer.start()
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    except (ValueError, OSError, RuntimeError) as error:
+        print(f"{type(error).__name__}: {error}", file=sys.stderr)
+        return 2
     finally:
+        if browser_timer is not None:
+            browser_timer.cancel()
+        if native_jobs is not None:
+            native_jobs.close()
+        session.close_native()
         session.stop()
-        server.server_close()
+        if server is not None:
+            server.server_close()
     return 0
 
 
@@ -401,6 +521,15 @@ def _doctor(args: argparse.Namespace) -> int:
     text, code = report(checks)
     print(f"Vantage {__version__}\n\n{text}", flush=True)
     return code
+
+
+def resolve_game_dir(explicit: Path | None, *, recording_only: bool) -> Path | None:
+    """Choose presentation assets: recording-only reads an explicit pack, never discovers one."""
+    from vantage.gamedata import find_game_dir
+
+    if explicit is not None:
+        return explicit
+    return None if recording_only else find_game_dir()
 
 
 def serve_banner(url: str, game_dir: Path | None, rec_dir: Path, opening: bool) -> str:

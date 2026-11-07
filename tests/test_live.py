@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent import futures
 from pathlib import Path
 from typing import Any
@@ -13,8 +13,8 @@ import pytest
 grpc = pytest.importorskip("grpc")
 pytest.importorskip("google.protobuf")
 
-from tests.helpers import game_frames  # noqa: E402
-from vantage.frames import read_header  # noqa: E402
+from tests.helpers import fid, game_frames, snapshot_builder  # noqa: E402
+from vantage.frames import Frame, read_frames, read_header  # noqa: E402
 from vantage.gamedata import GameData  # noqa: E402
 from vantage.live import LiveGame  # noqa: E402
 from vantage.rpc import cade_pb2 as pb  # noqa: E402
@@ -27,6 +27,8 @@ class FakeGame:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
         self.selected_game = 2  # AoE2; 1 = Return of Rome
+        #: The frames each Frames stream sends.
+        self.stream: Callable[[], list[Frame]] = lambda: game_frames(6)
 
     def _info(self, request: Any) -> Any:
         mode = "modes\\Pompeii\\" if self.selected_game == 1 else ""
@@ -55,7 +57,7 @@ class FakeGame:
 
         def frames(request: Any, context: Any) -> Iterator[Any]:
             self.calls.append(("Frames", request))
-            for f in game_frames(6):
+            for f in self.stream():
                 seq = pb.FrameSequence(sendingworldtime=f.time)
                 fr = seq.frame.add(time=f.time, patch=f.patch)
                 for ev in f.events:
@@ -380,3 +382,41 @@ def test_port_open_is_a_plain_tcp_probe() -> None:
         port = listener.getsockname()[1]
         assert port_open("127.0.0.1", port)
     assert not port_open("127.0.0.1", port)
+
+
+def test_an_ended_game_is_neither_reapplied_nor_rerecorded_on_reconnect(
+    fake: tuple[FakeGame, int], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After the game ends every reconnect opens with the same snapshot: it is not
+    fed again or written again, and reconnecting backs off."""
+    import vantage.server as S
+
+    game, port = fake
+    snap = snapshot_builder(2000).push(fid("Root", "world"))
+    snap.assign(fid("World", "gameEnded"), "Boolean", 1).pop()
+    ended = Frame(time=2000, patch=snap.forward())
+    game.stream = lambda: [ended]
+    delays: list[tuple[bool, int]] = []
+
+    def delay(game_over: bool, idle: int) -> float:
+        delays.append((game_over, idle))
+        return 0.02
+
+    monkeypatch.setattr(S, "reconnect_delay", delay)
+    session = Session(GameData(None), tmp_path)
+    session.open_live(port=port, record=True)
+    assert _wait(lambda: len(delays) >= 4)
+    session.stop()
+    tl = session.timeline
+    assert tl is not None and tl.game_ended and tl.frames == 1 and tl.repeated_snapshots >= 3
+    assert delays[:4] == [(True, 0), (True, 1), (True, 2), (True, 3)]
+    (rec,) = tmp_path.glob("live-*.vrec")
+    assert [f.time for f in read_frames(rec)] == [2000]  # one snapshot, not one per stream
+
+
+def test_reconnect_backs_off_only_once_the_game_is_over() -> None:
+    from vantage.server import RECONNECT_ENDED_MAX_S, RECONNECT_S, reconnect_delay
+
+    assert reconnect_delay(False, 5) == RECONNECT_S
+    assert [reconnect_delay(True, n) for n in range(3)] == [3.0, 6.0, 12.0]
+    assert reconnect_delay(True, 50) == RECONNECT_ENDED_MAX_S == 60.0

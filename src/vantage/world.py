@@ -153,6 +153,7 @@ AV_AMOUNT = _fid("AttributeValue", "amount")
 
 T_NAME = _fid("Technology", "name")
 T_STRING = _fid("Technology", "stringId")
+T_HELP = _fid("Technology", "stringId2")
 T_ICON = _fid("Technology", "icon")
 T_TIME = _fid("Technology", "timeToResearch")
 T_COST = _fid("Technology", "cost")
@@ -222,6 +223,7 @@ PGO_AI_NAME = _fid("PlayerGameOptions", "aiPlayerName")
 PGO_ELO_RM = _fid("PlayerGameOptions", "playerRmElo")
 PGO_ELO_DM = _fid("PlayerGameOptions", "playerDmElo")
 PGO_INDEX = _fid("PlayerGameOptions", "worldPlayerIndexIncludingGaia")
+PGO_HANDICAP = _fid("PlayerGameOptions", "handicap")
 
 _ATTR = {s.name: s.fid for s in SCHEMA.fields(SCHEMA.model_id("PlayerAttributes")).values()}
 
@@ -398,6 +400,7 @@ ACT_RESEARCHING = 11
 ACT_OTHER = 12
 ACT_PACKING = 13  # trebuchets and other packed siege (PackAction)
 ACT_UNPACKING = 14  # (UnpackAction)
+ACT_HEALING = 15
 ACTIVITY_NAMES = (
     "idle",
     "moving",
@@ -414,13 +417,14 @@ ACTIVITY_NAMES = (
     "other",
     "packing",
     "unpacking",
+    "healing",
 )
 _PACK_MODEL = SCHEMA.model_id("PackAction")
 _UNPACK_MODEL = SCHEMA.model_id("UnpackAction")
 #: Action types (``Action.type``) by meaning; observed in captured games.
 _MOVE_ACTIONS = frozenset({1, 3, 4, 12, 13, 14})
 _GATHER_ACTIONS = frozenset({5, 110, 111, 6})
-_ATTACK_ACTIONS = frozenset({7, 9, 104, 105})
+_ATTACK_ACTIONS = frozenset({7, 9, 104})
 _BUILD_ACTION = 101
 _REPAIR_ACTION = 106
 #: Gather/hunt action state while actually working (other states are walking
@@ -439,6 +443,8 @@ def unit_activity(e: Node, task: str | None, garrisoned: bool) -> int:
     if act.model == _UNPACK_MODEL:
         return ACT_UNPACKING
     atype = int(act.fields.get(A_TYPE, 0) or 0)
+    if atype == 105:
+        return ACT_HEALING if act.fields.get(A_STATE) == _WORKING_STATE else ACT_MOVING
     if atype == _BUILD_ACTION:
         return ACT_BUILDING
     if atype == _REPAIR_ACTION:
@@ -1303,8 +1309,10 @@ class Catalog:
             self.version += 1
         return sid, icon
 
-    def master(self, mid: int, node: Node | None) -> MasterInfo | None:
-        info = self.masters.get(mid)
+    def master(
+        self, mid: int, node: Node | None, *, private: bool = False, owner: int | None = None
+    ) -> MasterInfo | None:
+        info = None if private else self.masters.get(mid)
         if info is not None or node is None:
             return info
         f = node.fields
@@ -1332,14 +1340,67 @@ class Catalog:
             garrison_capacity=int(f.get(M_CAPACITY, 0) or 0),
             train_locations=train_locations(f),
             aura_ids=master_rules(f).aura_ids,
-            trail=self._trail(node),
+            trail=self._trail(node, owner=owner) if private else self._trail(node),
             storage=master_storage(f),
         )
-        self.masters[mid] = info
-        self.version += 1
+        if not private:
+            self.masters[mid] = info
+            self.version += 1
         return info
 
-    def _trail(self, node: Node | None) -> dict[str, Any] | None:
+    def entity_master(self, entity: Node, players: dict[int, Node]) -> MasterInfo | None:
+        """A private node is complete and never seeds or reads the shared catalog cache."""
+        raw_mid = entity.fields.get(E_MASTER)
+        mid = int(raw_mid) if raw_mid is not None else -1
+        if not isinstance(entity.fields.get(E_OWN_MASTER), Node):
+            # Both lookups below answer from the shared cache once it holds the
+            # master: skip finding the Player's node twice (every tree, every pass).
+            known = self.masters.get(mid)
+            if known is not None:
+                return known
+        # Populate shared names/icons from the real Player table even if the first
+        # observed entity of this master has a private shadow.
+        self.master(mid, player_master_node(entity, players))
+        return self.master(
+            mid,
+            master_node(entity, players),
+            private=isinstance(entity.fields.get(E_OWN_MASTER), Node),
+            owner=int(entity.fields.get(E_OWNER, 0) or 0),
+        )
+
+    def private_presentation(self, info: MasterInfo, owner: int, mid: int) -> dict[str, Any]:
+        """Complete private values already derived by the normal reader; no shared merge.
+
+        String IDs are registered for the existing localized catalog channel.
+        The renderer's active Entity layers still take precedence over sprite.
+        """
+        if info.string_id not in self.owner_names:
+            self.owner_names.add(info.string_id)
+            self.version += 1
+        return {
+            "owner": owner,
+            "master": mid,
+            "name": info.name,
+            "string_id": info.string_id,
+            "icon": info.icon,
+            "cls": info.cls,
+            "type": info.type,
+            "kind": info.kind,
+            "hp": info.hp,
+            "cost": info.cost,
+            "train_time": info.train_time,
+            "stats": info.stats,
+            "size": info.size,
+            "sprite": info.sprite,
+            "sounds": info.sounds,
+            "damage_sprites": info.damage_sprites,
+            "trail": info.trail,
+            "storage": info.storage,
+            "garrison_capacity": info.garrison_capacity,
+            "train_locations": info.train_locations,
+        }
+
+    def _trail(self, node: Node | None, *, owner: int | None = None) -> dict[str, Any] | None:
         if node is None or node.model != MODEL_MASTER_MISSILE:
             return None
         f = node.fields
@@ -1347,7 +1408,12 @@ class Catalog:
         spacing = float(f.get(MM_TRAIL_SPACING, 0.0) or 0.0)
         if tid < 0 or spacing <= 0:
             return None
-        for p in self.world_players.values():
+        candidates = (
+            (self.world_players.get(owner),) if owner is not None else self.world_players.values()
+        )
+        for p in candidates:
+            if not isinstance(p, Node):
+                continue
             ms = p.fields.get(P_MASTERS)
             tn = ms.get(tid) if isinstance(ms, dict) else None
             if not isinstance(tn, Node):
@@ -1378,6 +1444,7 @@ class Catalog:
                 "id": tid,
                 "name": self.data.string(f.get(T_STRING), "") or str(f.get(T_NAME, tid)),
                 "string_id": int(f.get(T_STRING, -1)),
+                "help_id": int(f.get(T_HELP, -1)),
                 # Zero-valued fields are absent from the stream: no icon field means icon 0.
                 "icon": int(f.get(T_ICON, 0)),
                 "time": float(f.get(T_TIME, 0) or 0),
@@ -1438,7 +1505,11 @@ class Catalog:
                 str(sid): name(sid, self.data.string(sid, "")) for sid in self.owner_names
             },
             "techs": {
-                str(k): {**v, "name": name(int(v.get("string_id", -1)), v["name"])}
+                str(k): {
+                    **v,
+                    "name": name(int(v.get("string_id", -1)), v["name"]),
+                    "help": table.get(int(v.get("help_id", -1)), ""),
+                }
                 for k, v in self.techs.items()
             },
             "civs": self._civ_names(strings),
@@ -1526,17 +1597,21 @@ def folwark(player: Node) -> dict[str, Any]:
     }
 
 
+def player_master_node(entity: Node, players: dict[int, Node]) -> Node | None:
+    """The shared Player table only; never an entity's private shadow."""
+    owner = players.get(int(entity.fields.get(E_OWNER, 0) or 0))
+    masters = owner.fields.get(P_MASTERS) if owner is not None else None
+    raw_mid = entity.fields.get(E_MASTER)
+    mid = int(raw_mid) if raw_mid is not None else -1
+    node = masters.get(mid) if isinstance(masters, dict) else None
+    return node if isinstance(node, Node) else None
+
+
 def master_node(entity: Node, players: dict[int, Node]) -> Node | None:
     own = entity.fields.get(E_OWN_MASTER)
     if isinstance(own, Node):
         return own
-    owner = players.get(int(entity.fields.get(E_OWNER, 0) or 0))
-    if owner is None:
-        return None
-    masters = owner.fields.get(P_MASTERS)
-    if not isinstance(masters, dict):
-        return None
-    return masters.get(int(entity.fields.get(E_MASTER, -1) or -1))
+    return player_master_node(entity, players)
 
 
 def live_entities(world: Node) -> Iterator[Node]:
@@ -1562,7 +1637,7 @@ def live_entities(world: Node) -> Iterator[Node]:
 MODEL_MISSILE = SCHEMA.model_id("MissileEntity")
 
 
-def missile_rows(world: Node) -> list[list[Any]]:
+def missile_rows(world: Node, cat: Catalog | None = None) -> list[list[Any]]:
     """Projectiles in flight: ``[id, owner, master, x, y, z, facet, layers]`` (z in
     elevation levels, absolute). They live a second or two, so the timeline keeps
     them per stream frame rather than per keyframe. Projectiles have negative ids."""
@@ -1588,6 +1663,12 @@ def missile_rows(world: Node) -> list[list[Any]]:
                 layers,
             ]
         )
+        if cat is not None:
+            # Snapshot derived trail data now: never consult a later private shadow.
+            players = players_of(world)
+            out[-1].append(
+                {"trail": cat._trail(master_node(e, players), owner=int(f.get(E_OWNER, 0) or 0))}
+            )
     return out
 
 
@@ -1750,6 +1831,21 @@ def lobby_elos(root: Node) -> dict[int, dict[str, int | None]]:
     return out
 
 
+def lobby_handicaps(root: Node) -> dict[int, int]:
+    """Recorded lobby percentages; never infer handicap from a yield multiplier."""
+    opts = root.fields.get(ROOT_OPTIONS)
+    out: dict[int, int] = {}
+    if isinstance(opts, Node):
+        for info in opts.fields.get(GO_PLAYERS) or ():
+            if not isinstance(info, Node):
+                continue
+            owner = info.fields.get(PGO_INDEX)
+            percent = info.fields.get(PGO_HANDICAP)
+            if isinstance(owner, int) and owner > 0 and isinstance(percent, int) and percent > 0:
+                out[owner] = percent
+    return out
+
+
 def pop_limit(root: Node) -> int | None:
     opts = root.fields.get(ROOT_OPTIONS)
     if not isinstance(opts, Node):
@@ -1767,6 +1863,11 @@ def map_layer(world: Node, data: GameData) -> dict[str, Any]:
     pal = data.interface_palette
     colors = []
     textures: list[list[Any]] = []
+    if not ttypes:
+        # Native recordings carry terrain IDs but no table; the game's data file has it.
+        for row in data.terrain_types:
+            textures.append([row.pict, row.rows, row.mask.removesuffix(".png")])
+            colors.append("#{:02x}{:02x}{:02x}".format(*pal[row.color % len(pal)]))
     for tt in ttypes:
         if isinstance(tt, Node):
             mask = str(tt.fields.get(TT_MASK, "") or "")
@@ -1841,8 +1942,10 @@ class PlayerTally:
 class ViewExtras:
     """What :func:`view` saw besides the JSON view, for the timeline's logs."""
 
-    #: (owner, master id) -> the owner's master node, for every live entity
+    #: (owner, master id) -> shared Player master only, for every live entity
     master_nodes: dict[tuple[int, int], Node] = field(default_factory=dict)
+    #: entity id -> (owner, master id, private shadow or None, shared source present).
+    entity_masters: dict[int, tuple[int, int, Node | None, bool]] = field(default_factory=dict)
     #: entity id -> (owner, master id), garrisoned units included
     entities: dict[int, tuple[int, int]] = field(default_factory=dict)
 
@@ -1891,7 +1994,14 @@ def _production(
             uid = int(af.get(MO_OBJ, -1))
             done = float(af.get(MO_WORK, 0.0) or 0.0)
             info = cat.master(uid, masters.get(uid))
-            total = info.train_time if info is not None else 0.0
+            master = masters.get(uid)
+            total = (
+                float(master.fields.get(M_BUILD_TIME, 0) or 0)
+                if isinstance(master, Node)
+                else info.train_time
+                if info is not None
+                else 0.0
+            )
             current = {
                 "unit": uid,
                 "progress": min(1.0, done / total) if total else 0.0,
@@ -1992,14 +2102,21 @@ class Scene:
     #: player -> master id -> [string id, icon] where the player's own master
     #: differs from the catalog's (names via the catalog's ``unit_names``)
     owner_units: dict[str, dict[str, list[int]]] = field(default_factory=dict)
+    #: Entity-keyed complete private presentation, never an owner/master override.
+    entity_units: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: ``[x, y, wood, id]`` per tree that is no longer full (felled or being cut);
     #: trees are a tile layer, not rows, and an untouched one holds its master's storage
     trees_left: list[list[float]] = field(default_factory=list)
     #: resource object id -> ``{player: villagers gathering from it}``
     gatherers: dict[str, dict[str, int]] = field(default_factory=dict)
+    gather_targets: dict[str, int] = field(default_factory=dict)
     #: :func:`remains_rows` and :func:`air_heights`, gathered in the same walk
     remains: list[list[Any]] = field(default_factory=list)
     air: dict[str, float] = field(default_factory=dict)
+
+
+#: A dictionary miss, told apart from a stored None in one lookup.
+_MISSING: Any = object()
 
 
 def tally(
@@ -2028,13 +2145,13 @@ def tally(
     """
     players = players_of(world)
     ctx = ModContext(entities_of(world), players, kill_groups)
-    rules_cache: dict[tuple[int, int], MasterRules] = {}
+    rules_cache: dict[tuple[int, int, int], MasterRules] = {}
     done_cache: dict[int, set[int]] = {}
 
     def rules_of(owner: int, mid: int, node: Node | None) -> MasterRules:
-        got = rules_cache.get((owner, mid))
+        got = rules_cache.get((owner, mid, id(node)))
         if got is None:
-            got = rules_cache[(owner, mid)] = master_rules(node.fields if node else {})
+            got = rules_cache[(owner, mid, id(node))] = master_rules(node.fields if node else {})
         return got
 
     def carried_of(f: dict[int, Any], rules: MasterRules | None, owner: int) -> list[Any] | int:
@@ -2059,10 +2176,10 @@ def tally(
     rows: list[list[Any]] = []
     sc = scene if scene is not None else Scene()
     #: (owner, master) -> (total cost, gold cost, max hp, build points) this pass
-    numbers: dict[tuple[int, int], tuple[float, float, int, float]] = {}
+    numbers: dict[tuple[int, int, int], tuple[float, float, int, float]] = {}
 
     def owner_numbers(owner: int, mid: int, node: Node | None) -> tuple[float, float, int, float]:
-        key = (owner, mid)
+        key = (owner, mid, id(node))
         got = numbers.get(key)
         if got is None:
             nf = node.fields if node is not None else {}
@@ -2090,7 +2207,7 @@ def tally(
     charges: dict[int, dict[str, Any]] = {}
     owns: dict[tuple[int, int, int], tuple[int, int] | None] = {}
     tables: dict[int, dict[int, Node]] = {}
-    entity_ids = extras.entities if extras is not None else None
+    shared_nodes: dict[tuple[int, int], Node | None] = {}
     map_w = int(world.fields.get(W_MAP_W, 0) or 0)
     tiles = world.fields.get(W_TILES) or []
     # live_entities, inlined: this loop visits every object on the map (trees
@@ -2110,39 +2227,61 @@ def tally(
             continue
         raw_mid = fget(E_MASTER)
         mid = int(raw_mid) if raw_mid is not None else -1
-        if owner == 0 and gaia_skip.get(mid):
-            if entity_ids is not None:
-                entity_ids[int(fget(E_ID, 0))] = (0, mid)
+        source_key = (owner, mid)
+        shared = shared_nodes.get(source_key, _MISSING)
+        if shared is _MISSING:
+            shared = shared_nodes[source_key] = player_master_node(e, players)
+        raw_private = fget(E_OWN_MASTER)
+        private = raw_private if isinstance(raw_private, Node) else None
+        eid = int(fget(E_ID, 0))
+        # Identity/source history is independent of drawable/catalog eligibility.
+        # Record every live source entity before Gaia or absent-info shortcuts.
+        if extras is not None:
+            extras.entities[eid] = source_key
+            extras.entity_masters[eid] = (owner, mid, private, shared is not None)
+            if shared is not None and owner > 0:
+                extras.master_nodes.setdefault(source_key, shared)
+        if owner == 0 and private is None and gaia_skip.get(mid):
             full = tree_full.get(mid)
             if full is not None:
-                _note_cut_tree(f, full, cut_trees)
+                # _note_cut_tree's test inline: most of the map is full trees.
+                amount = float(fget(E_HELD_AMT, 0.0) or 0.0)
+                if st == ENTITY_RESOURCE or amount < full - 0.05:
+                    _note_cut_tree(f, full, cut_trees)
             continue
-        mnode = master_node(e, players)
-        info = cat.master(mid, mnode)
+        mnode = private if private is not None else shared
+        if private is None:
+            # Both catalog lookups answer from the shared cache once it holds the
+            # master (as Catalog.entity_master).
+            info = cat.masters.get(mid)
+            if info is None:
+                cat.master(mid, shared)
+                info = cat.master(mid, mnode, private=False, owner=owner)
+        else:
+            cat.master(mid, shared)  # seed only the actual shared Player prototype
+            info = cat.master(mid, mnode, private=True, owner=owner)
         if info is None:
             continue
-        if owner == 0 and mid not in gaia_skip:
+        if private is not None:
+            sc.entity_units[str(eid)] = cat.private_presentation(info, owner, mid)
+        if owner == 0 and private is None and mid not in gaia_skip:
             gaia_skip[mid] = (
                 info.type != TYPE_BUILDING
                 and info.cls not in _GAIA_ROW_CLASSES
                 and info.cls not in LIVESTOCK_CLASSES
-                and not isinstance(f.get(E_OWN_MASTER), Node)
             )
             if gaia_skip[mid]:
-                if extras is not None:
-                    extras.entities[int(f.get(E_ID, 0))] = (0, mid)
                 if info.cls == CLASS_TREE:
                     tree_full[mid] = (info.storage or [None, 0.0])[1]
                     _note_cut_tree(f, tree_full[mid], cut_trees)
                 continue
-        okey = (owner, mid, id(mnode))
+        okey = (owner, mid, id(shared))
         if okey in owns:
             own = owns[okey]
         else:
-            own = owns[okey] = cat.own_master(owner, mid, mnode)
+            own = owns[okey] = cat.own_master(owner, mid, shared)
         if own is not None and scene is not None:
             scene.owner_units.setdefault(str(owner), {})[str(mid)] = list(own)
-        eid = int(f.get(E_ID, 0))
         value = gold = build_pts = 0.0
         own_hp = 0
         if owner > 0:
@@ -2177,10 +2316,6 @@ def tally(
                     hpmax += int(hpmax_bonus)
         flags = 0
         x, y = f.get(E_X, 0.0) or 0.0, f.get(E_Y, 0.0) or 0.0
-        if extras is not None:
-            extras.entities[eid] = (owner, mid)
-            if mnode is not None and owner > 0:
-                extras.master_nodes.setdefault((owner, mid), mnode)
         charge = f.get(E_CHARGE)
         if charge:
             sc.charge[str(eid)] = round(float(charge), 2)
@@ -2195,7 +2330,7 @@ def tally(
                 sc.livestock_owner[str(eid)] = cat.last_owner[eid]
         if owner == 0:
             bridge = info.type == TYPE_BUILDING and is_bridge(mid, info.name)
-            if info.cls in _GAIA_ROW_CLASSES or bridge:
+            if info.cls in _GAIA_ROW_CLASSES or bridge or private is not None:
                 flags |= (1 | 64) if bridge else 32
                 if info.cls == CLASS_CLIFF:
                     flags |= FLAG_SCENERY
@@ -2217,8 +2352,8 @@ def tally(
         t = out.get(owner)
         if t is None:
             continue
-        if mnode is not None:
-            t.master_nodes.setdefault(mid, mnode)
+        if shared is not None:
+            t.master_nodes.setdefault(mid, shared)
         activity = ACT_OTHER
         carry: list[Any] | int | None = None  # a villager's, already worked out
         if garrisoned:
@@ -2295,10 +2430,15 @@ def tally(
                 t.tasks[task] += 1
                 activity = unit_activity(e, task, garrisoned)
                 t.activity[activity] += 1
-                if act is not None and int(act.fields.get(A_TYPE, 0) or 0) in _GATHER_ACTIONS:
+                if (
+                    not garrisoned
+                    and act is not None
+                    and int(act.fields.get(A_TYPE, 0) or 0) in _GATHER_ACTIONS
+                ):
                     tid = act.fields.get(A_TARGET)
                     if tid is not None and tid >= 0:
                         gathering.setdefault(int(tid), Counter())[owner] += 1
+                        sc.gather_targets[str(eid)] = int(tid)
                 if task == "food":
                     t.food_tasks[sub or "other"] += 1
                 carried = carry = carried_of(f, rules, owner)
@@ -2729,12 +2869,14 @@ def view(
         "kings": scene.kings,
         "construction": scene.construction,
         "owner_units": scene.owner_units,
+        "entity_units": scene.entity_units,
         "gates_locked": scene.gates_locked,
         "charge": scene.charge,
         "unit_mods": scene.unit_mods,
         "livestock_owner": scene.livestock_owner,
         "trees_left": scene.trees_left,
         "gatherers": scene.gatherers,
+        "gather_targets": scene.gather_targets,
         # The timeline adds the hold timer (``held_ms``/``required_ms``).
         "koth": {**scene.monument} if scene.monument is not None else None,
         "treaty": treaty(world),
@@ -2815,22 +2957,33 @@ def tree_tiles(world: Node, cat: Catalog) -> tuple[bytes, list[int]]:
     out = bytearray(w * h)
     facets = bytearray(w * h)
     kinds: list[int] = []
+    #: kind -> its index in ``kinds``
+    kind_index: dict[int, int] = {}
     players = players_of(world)
+    # Gaia's shared master (no private shadow: skipped) depends on the master id
+    # alone: whether it is a tree is looked up once per id, not per tree.
+    is_tree: dict[Any, bool] = {}
     for e in live_entities(world):
         f = e.fields
-        if (f.get(E_OWNER) or 0) != 0:
+        if (f.get(E_OWNER) or 0) != 0 or isinstance(f.get(E_OWN_MASTER), Node):
             continue
-        mid = int(f.get(E_MASTER, -1) or -1)
-        info = cat.master(mid, master_node(e, players))
-        if info is None or info.cls != CLASS_TREE:
+        raw_mid = f.get(E_MASTER)
+        tree = is_tree.get(raw_mid)
+        if tree is None:
+            info = cat.entity_master(e, players)
+            tree = is_tree[raw_mid] = info is not None and info.cls == CLASS_TREE
+        if not tree:
             continue
+        mid = int(raw_mid or -1)
         x, y = int(f.get(E_X, 0.0) or 0.0), int(f.get(E_Y, 0.0) or 0.0)
         if 0 <= x < w and 0 <= y < h:
-            if mid not in kinds:
+            k = kind_index.get(mid)
+            if k is None:
                 if len(kinds) >= 254:
                     continue
+                k = kind_index[mid] = len(kinds)
                 kinds.append(mid)
-            out[y * w + x] = 1 + kinds.index(mid)
+            out[y * w + x] = 1 + k
             facets[y * w + x] = int(f.get(E_FACET, 0) or 0) & 0xFF
     return bytes(out + facets), kinds
 
@@ -2839,11 +2992,20 @@ def resources_left(world: Node, cat: Catalog) -> dict[str, float]:
     """Natural resources remaining on the map (Gaia entities), by kind."""
     out = {"food": 0.0, "wood": 0.0, "gold": 0.0, "stone": 0.0, "relics": 0}
     players = players_of(world)
+    # As in tree_tiles: a shared Gaia master is looked up once per id.
+    shared: dict[Any, MasterInfo | None] = {}
     for e in live_entities(world):
         f = e.fields
         if int(f.get(E_OWNER, 0) or 0) != 0:
             continue
-        info = cat.master(int(f.get(E_MASTER, -1) or -1), master_node(e, players))
+        if isinstance(f.get(E_OWN_MASTER), Node):
+            info = cat.entity_master(e, players)
+        else:
+            raw_mid = f.get(E_MASTER)
+            if raw_mid in shared:
+                info = shared[raw_mid]
+            else:
+                info = shared[raw_mid] = cat.entity_master(e, players)
         if info is None:
             continue
         if info.cls in RELIC_CLASSES:

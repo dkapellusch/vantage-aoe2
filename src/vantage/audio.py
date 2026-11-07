@@ -21,6 +21,7 @@ Layouts verified against the DE install (AKPK v1, BKHD bank version 172).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -567,11 +568,16 @@ class AudioLibrary:
                 pass
             self._index = build_index(self.wwise, files)
             self.cache.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(
-                json.dumps(_dump(self._index, fp), separators=(",", ":")), encoding="utf-8"
-            )
-            tmp.replace(path)
+            # Multiple libraries or server processes can build the same cache
+            # at once. Give each writer its own file before the atomic replace.
+            fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=self.cache)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    json.dump(_dump(self._index, fp), stream, separators=(",", ":"))
+                os.replace(tmp_name, path)
+            finally:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(tmp_name)
             return self._index
 
     def event_media(self, event_id: int) -> list[int]:

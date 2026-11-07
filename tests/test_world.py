@@ -685,6 +685,7 @@ def test_resources_report_what_is_left_and_who_gathers(data: GameData) -> None:
     assert 11 not in by_id and 12 not in by_id  # trees are the forest layer
     assert scene.trees_left == [[3.5, 3.5, 61.5, 12]]  # the full tree is not listed
     assert scene.gatherers == {"10": {"1": 2}, "12": {"1": 1}}
+    assert scene.gather_targets == {"20": 10, "21": 10, "22": 12}
     units = cat.to_json()["units"]
     assert units["66"]["storage"] == ["gold", 800.0] and units["411"]["storage"] == ["wood", 100.0]
     assert "storage" not in units["579"]

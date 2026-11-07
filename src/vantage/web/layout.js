@@ -7,6 +7,7 @@
 
 import { settings, saveSettings, esc, tip } from './state.js';
 import { t } from './i18n.js';
+import { applyPanelSizes, resetPanelSizes } from './panel-resize.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -76,6 +77,7 @@ export function applyPanels() {
     el.classList.toggle('panel-off', !isVisible(p.id));
     el.classList.toggle('collapsed', !!p.collapse && isCollapsed(p.id));
   }
+  applyPanelSizes();
 }
 
 // -- hover toolbar -------------------------------------------------------------------------
@@ -141,7 +143,7 @@ function renderMenu() {
   const el = $('panels-menu');
   el.innerHTML = `<div class="omni-title">${t('Panels')}</div>
     ${PANELS.map((p) => `<div class="pm-row"><label><input type="checkbox" data-pm-show="${p.id}" ${isVisible(p.id) ? 'checked' : ''}> ${esc(t(p.label))}</label>${p.collapse ? `<button data-pm-collapse="${p.id}" class="${isCollapsed(p.id) ? 'on' : ''}" ${tip(t('Collapse to its top strip'))}>${isCollapsed(p.id) ? '▾' : '▴'}</button>` : ''}</div>`).join('')}
-    <div class="pm-presets"><button data-pm-preset="clean" ${tip(t('Clean'), t('Scoreboard, selection, time controls and minimap'))}>${t('Clean')}</button><button data-pm-preset="all" ${tip(t('Everything'), t('Every panel, none collapsed'))}>${t('Everything')}</button></div>`;
+    <div class="pm-presets"><button data-pm-preset="clean" ${tip(t('Clean'), t('Scoreboard, selection, time controls and minimap'))}>${t('Clean')}</button><button data-pm-preset="all" ${tip(t('Everything'), t('Every panel, none collapsed'))}>${t('Everything')}</button><button data-pm-reset-sizes>${t('Reset sizes')}</button></div>`;
 }
 
 export function togglePanelsMenu(anchor) {
@@ -163,6 +165,7 @@ export function installPanelsMenu(onChange) {
     onChange();
   });
   el.addEventListener('click', (e) => {
+    if (e.target.closest('[data-pm-reset-sizes]')) { resetPanelSizes(); onChange(); return; }
     const c = e.target.closest('[data-pm-collapse]');
     const pr = e.target.closest('[data-pm-preset]');
     if (c) setCollapsed(c.dataset.pmCollapse, !isCollapsed(c.dataset.pmCollapse));

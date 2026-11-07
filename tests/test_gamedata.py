@@ -760,3 +760,93 @@ def test_native_windows_install_profiles_and_paths(
 def test_registry_is_not_read_off_windows() -> None:
     assert G.registry_value("HKCU", r"Software\Valve\Steam", "SteamPath") is None
     assert G.steam_roots() == list(G.STEAM_ROOTS)
+
+
+def test_concurrent_icon_requests_convert_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    import time
+
+    from vantage import gamedata as G
+
+    data = GameData(_fake_install(tmp_path), cache_dir=tmp_path / "cache")
+    real = G.dds_to_png
+    calls: list[int] = []
+
+    def slow(raw: bytes, mip: int = 0) -> bytes:
+        calls.append(mip)
+        time.sleep(0.2)  # every request arrives while the first converts
+        return real(raw, mip=mip)
+
+    monkeypatch.setattr(G, "dds_to_png", slow)
+    got: list[bytes | None] = []
+    threads = [
+        threading.Thread(target=lambda: got.append(data.icon_png("unit", 15))) for _ in range(4)
+    ]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(5)
+    assert calls == [0] and len(got) == 4 and got[0] and all(g == got[0] for g in got)
+    assert [p.name for p in (tmp_path / "cache" / "icons").iterdir()] == ["unit-15.png"]
+
+
+def test_mod_folders_are_scanned_once_per_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vantage import gamedata as G
+
+    profile = tmp_path / "123"
+    gfx = Path("resources/_common/drs/graphics")
+    (profile / "mods" / "local" / "A" / gfx).mkdir(parents=True)
+    scans: list[int] = []
+    real = G._profile_mods
+
+    def counted(profiles: list[Path]) -> list[Path]:
+        scans.append(1)
+        return real(profiles)
+
+    monkeypatch.setattr(G, "_profile_mods", counted)
+    data = GameData(None, cache_dir=tmp_path / "c", mods=G.ModConfig(profiles=[profile]))
+    data.mods.enabled["graphics"] = True
+    first = data.mod_roots("graphics")
+    assert first == [profile / "mods" / "local" / "A" / gfx]
+    for _ in range(5):
+        assert data.mod_roots("graphics") == first and data.mods.mod_folders()
+    assert len(scans) == 1  # per request it was a mod-status read and a folder listing
+    extra = tmp_path / "more"
+    (extra / "B" / gfx).mkdir(parents=True)
+    data.mods.extra = [extra]  # new settings: seen at once
+    assert data.mod_roots("graphics")[-1] == extra / "B" / gfx and len(scans) == 2
+    monkeypatch.setattr(G, "MOD_RESCAN_S", 0.0)  # and a mod added in the game, later
+    (profile / "mods" / "local" / "C" / gfx).mkdir(parents=True)
+    assert profile / "mods" / "local" / "C" / gfx in data.mod_roots("graphics")
+
+
+def _terrain_row(name: bytes, pict: bytes, mask: bytes, color: int, rows: int) -> bytes:
+    text = lambda value: b"\x60\x0a" + len(value).to_bytes(2, "little") + value  # noqa: E731
+    tail = bytearray(200)
+    tail[1] = color
+    tail[146:148] = rows.to_bytes(2, "little")
+    return text(name) + text(pict) + bytes(28) + text(mask) + bytes(tail)
+
+
+def test_terrain_table_is_read_from_the_data_file_and_a_changed_layout_is_rejected() -> None:
+    from vantage.gamedata import _TERRAIN_COUNT, parse_terrain_types
+
+    rows = [_terrain_row(b"Grass", b"g_grs", b"grass.png", 7, 10)]
+    rows += [_terrain_row(b"Other", b"g_oth", b"", i, 6) for i in range(_TERRAIN_COUNT - 1)]
+    table = parse_terrain_types(b"head" + b"".join(rows))
+    assert len(table) == _TERRAIN_COUNT
+    assert (table[0].pict, table[0].rows, table[0].mask, table[0].color) == (
+        "g_grs",
+        10,
+        "grass.png",
+        7,
+    )
+    assert (table[1].pict, table[1].rows, table[1].mask) == ("g_oth", 6, "")
+    with pytest.raises(ValueError):
+        parse_terrain_types(b"no table here")
+    with pytest.raises(ValueError):
+        parse_terrain_types(rows[0][:50] + b"".join(rows[1:]))

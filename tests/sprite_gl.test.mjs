@@ -39,3 +39,28 @@ test('without WebGL2 the batch reports unavailable and draws nothing', () => {
     assert.equal(draw({ width: 1 }, 0, 1, 1, 0, 0, 1, 1), false);
   } finally { console.warn = warn; }
 });
+
+test('a full atlas grows (doubling, up to its budget) before it evicts anything', () => {
+  const a = new ShelfAtlas(1, 100, 4);
+  assert.deepEqual(a.place(100, 100, 1), [0, 0, 0]);
+  // Layer 0 is full and in use this frame: the atlas doubles instead of evicting.
+  assert.deepEqual(a.place(100, 100, 1), [1, 0, 0]);
+  assert.equal(a.layers.length, 2);
+  assert.deepEqual(a.place(100, 100, 2), [2, 0, 0]);
+  assert.equal(a.layers.length, 4); // doubled again, to the budget
+  assert.deepEqual(a.place(100, 100, 2), [3, 0, 0]);
+  assert.equal(a.evictions, 0);
+  assert.equal(a.grows, 2);
+  // At the budget: the least recently used layer (0, frame 1) is emptied as before.
+  assert.deepEqual(a.place(100, 100, 3), [0, 0, 0]);
+  assert.equal(a.evictions, 1);
+  assert.equal(a.layers.length, 4);
+});
+
+test('an atlas without a larger budget keeps its size', () => {
+  const a = new ShelfAtlas(1, 100);
+  a.place(100, 100, 1);
+  assert.deepEqual(a.place(100, 100, 2), [0, 0, 0]);
+  assert.equal(a.layers.length, 1);
+  assert.equal(a.evictions, 1);
+});

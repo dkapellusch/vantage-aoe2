@@ -13,3 +13,7 @@ node_modules/
 *.pem
 *.key
 certs/
+
+# Research artifacts the native-replay tests read (a link to the development
+# copy's artifacts/ folder on a machine that has them; never committed).
+/artifacts

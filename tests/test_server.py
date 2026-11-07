@@ -89,11 +89,9 @@ def test_idle_then_open_recording(server: tuple[str, Session, Path]) -> None:
     group = _get(base + "/api/group?ids=104,x,-5")  # junk ids are ignored
     assert group["totals"]["kills"] == 1.0 and len(group["types"]) == 1
     assert _get(base + "/api/techtree/1") == {}  # no game install in tests
-    assert _get(base + "/api/config") == {
-        "patch": {},
-        "force_default": False,
-        "version": vantage.__version__,
-    }
+    config = _get(base + "/api/config")
+    assert config.pop("asset_version")
+    assert config == {"patch": {}, "force_default": False, "version": vantage.__version__}
     assert _get(base + "/api/catalog?lang=de")["units"]["83"]["name"]
     assert _get(base + "/api/recordings")[0]["name"] == "game.vrec"
     assert _get(base + "/api/replays")[0]["name"] == "a.aoe2record"
@@ -743,3 +741,211 @@ def test_session_stream_announces_status_changes(server: tuple[str, Session, Pat
         # A live source moving on (e.g. to needs_certs) between frames is news.
         session.source["status"] = "needs_certs"
         assert next_event()["source"]["status"] == "needs_certs"
+
+
+def test_review_moments_persist_separately_and_reject_stale_game(server):
+    base, session, path = server
+    _post(base + "/api/open", {"path": str(path)})
+    session._thread.join(5)
+    generation = _get(base + "/api/session")["generation"]
+    _post(base + "/api/bookmarks", {"bookmarks": [1000, 2000]})
+    moment = dict(
+        id="raid",
+        name="Raid",
+        note="Watch workers",
+        time=2000,
+        player=1,
+        fog="standard",
+        camera=dict(x=20, y=30, zoom=1),
+        selection=[101, 102],
+        range={"from": 1000, "to": 3000},
+    )
+    body = {"generation": generation, "moments": [moment]}
+    assert _post(base + "/api/review-moments", body) == {"ok": True}
+    assert _get(base + "/api/review-moments") == [moment]
+    assert _get(base + "/api/bookmarks") == [1000, 2000]
+    assert Path(str(path) + ".moments.json").is_file()
+    with pytest.raises(urllib.error.HTTPError):
+        _post(base + "/api/review-moments", {"generation": generation - 1, "moments": []})
+    assert _get(base + "/api/review-moments") == [moment]
+    _post(base + "/api/open", {"path": str(path)})
+    session._thread.join(5)
+    assert _get(base + "/api/review-moments") == [moment]
+
+
+def test_group_review_interval_api(server):
+    base, session, path = server
+    _post(base + "/api/open", {"path": str(path)})
+    session._thread.join(5)
+    result = _get(base + "/api/group?ids=101,102,101&t=5000&since=4000")
+    assert result["since_ms"] == 4000 and result["as_of_ms"] == 5000
+    assert "resources_destroyed" in result and result["forced_idle_estimated"] is True
+    assert result["generation"] == session.generation
+
+
+def _raw(url: str, headers: dict[str, str] | None = None) -> tuple[int, Any, bytes]:
+    """Status, headers and body, error statuses included."""
+    req = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, r.headers, r.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers, exc.read()
+
+
+def test_view_is_spliced_json_and_the_newest_is_not_final(
+    server: tuple[str, Session, Path],
+) -> None:
+    base, session, path = server
+    assert _post(base + "/api/open", {"path": str(path)}) == {"ok": True}
+    session._thread.join(5)  # type: ignore[union-attr]
+    tl = session.timeline
+    assert tl is not None and tl.complete
+    for t in ("2500", "0", "6000", ""):
+        status, headers, body = _raw(base + f"/api/view?t={t}")
+        expected = tl.view_at(int(t) if t else None)
+        assert status == 200 and headers["Cache-Control"] == "no-store"
+        assert body == json.dumps(expected, separators=(",", ":")).encode()
+        assert "final" not in json.loads(body)  # a loaded recording is final throughout
+    live = Timeline(GameData(None))
+    for f in game_frames(3):
+        live.feed(f)
+    session.timeline = live  # a live game: its newest keyframe is still filling
+    assert _get(base + "/api/view?t=99000")["final"] is False
+    assert "final" not in _get(base + "/api/view?t=1000")
+
+
+def test_series_since_a_time(server: tuple[str, Session, Path]) -> None:
+    base, session, path = server
+    assert _get(base + "/api/series?from=0") == {}
+    assert _post(base + "/api/open", {"path": str(path)}) == {"ok": True}
+    session._thread.join(5)  # type: ignore[union-attr]
+    tl = session.timeline
+    assert tl is not None
+    full = _get(base + "/api/series")
+    assert full == json.loads(json.dumps(tl.series_json()))
+    since = _get(base + "/api/series?from=5000")
+    assert set(since) == set(full)
+    assert all(rows == [r for r in full[pid] if r["t"] >= 5000] for pid, rows in since.items())
+    assert _get(base + "/api/series?from=junk") == full
+
+
+def test_session_pushes_are_coalesced_to_a_few_per_second(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+    import time
+
+    monkeypatch.setenv("VANTAGE_DATA_DIR", str(tmp_path / "data"))
+    session = Session(GameData(None), tmp_path)
+    tl = session.timeline = Timeline(GameData(None))
+    app = App(session, [])
+
+    class Closed(io.BytesIO):
+        """The browser goes away at the first keep-alive (the timeline is done)."""
+
+        def write(self, b: Any) -> int:
+            if b.startswith(b": keepalive"):
+                raise BrokenPipeError
+            return super().write(b)
+
+    class Handler:
+        wfile = Closed()
+
+        def send_response(self, code: int) -> None: ...
+        def send_header(self, k: str, v: str) -> None: ...
+        def end_headers(self) -> None: ...
+
+    def ingest() -> None:
+        # A recording loading: a new version every few milliseconds for a second.
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            tl.add_event({"t": 0, "cat": "status", "kind": "waiting", "players": []})
+            time.sleep(0.002)
+        tl.finish()
+
+    feeder = threading.Thread(target=ingest)
+    feeder.start()
+    app._stream(Handler())  # type: ignore[arg-type]
+    feeder.join()
+    pushes = [
+        json.loads(line[6:])
+        for line in Handler.wfile.getvalue().decode().splitlines()
+        if line.startswith("data: ")
+    ]
+    assert 2 <= len(pushes) <= 7  # about 4 a second, not one per version (hundreds)
+    assert pushes[-1]["timeline"]["version"] == tl.version  # the latest state arrives
+    assert pushes[-1]["timeline"]["complete"] is True
+
+
+def test_session_push_waits_only_for_a_version_change() -> None:
+    from vantage.server import SESSION_PUSH_S, push_wait
+
+    key = (1, 10, None, False, "playing", None)
+    assert push_wait(key, key, 100.0, 100.0) is None  # nothing new
+    assert push_wait((1, 11, None, False, "playing", None), key, 100.0, 100.1) == pytest.approx(
+        SESSION_PUSH_S - 0.1
+    )
+    assert push_wait((1, 11, None, False, "playing", None), key, 100.0, 100.0 + SESSION_PUSH_S) == 0
+    urgent = (
+        (2, 11, None, False, "playing", None),  # a new game
+        (1, 11, "boom", False, "playing", None),
+        (1, 11, None, True, "playing", None),
+        (1, 11, None, False, "ended", None),
+    )
+    for changed in urgent:
+        assert push_wait(changed, key, 100.0, 100.01) == 0
+
+
+def test_missing_assets_keep_the_connection_open(server: tuple[str, Session, Path]) -> None:
+    base, _, _ = server
+    conn = http.client.HTTPConnection(base.removeprefix("http://"), timeout=5)
+    try:
+        conn.request("GET", "/icon/unit/1.png")
+        miss = conn.getresponse()
+        assert miss.status == 404 and miss.getheader("Connection") != "close"
+        miss.read()
+        sock = conn.sock
+        conn.request("GET", "/static/../x")
+        bad = conn.getresponse()
+        assert bad.status == 400
+        bad.read()
+        conn.request("GET", "/api/config")
+        ok = conn.getresponse()
+        assert ok.status == 200 and json.loads(ok.read())["patch"] == {}
+        assert conn.sock is sock  # the same connection served all three
+    finally:
+        conn.close()
+
+
+def test_sprites_and_config_allow_the_paired_loopback_origin(
+    server: tuple[str, Session, Path],
+) -> None:
+    base, _, _ = server
+    port = base.rsplit(":", 1)[1]
+    for origin in (f"http://localhost:{port}", f"http://127.0.0.1:{port}", f"http://[::1]:{port}"):
+        for path in ("/api/config", "/sprite/1/0/0.png", "/sprite/1/0/0.json"):
+            _, headers, _ = _raw(base + path, {"Origin": origin})
+            assert headers["Access-Control-Allow-Origin"] == origin, (origin, path)
+            assert headers["Access-Control-Expose-Headers"] == "X-Sprite-Meta"
+            assert "Origin" in headers["Vary"]
+    for origin in ("http://evil.example", f"http://localhost:{int(port) + 1}", "null"):
+        _, headers, _ = _raw(base + "/api/config", {"Origin": origin})
+        assert "Access-Control-Allow-Origin" not in headers
+    _, headers, _ = _raw(base + "/api/session", {"Origin": f"http://localhost:{port}"})
+    assert "Access-Control-Allow-Origin" not in headers  # only sprites and the probe
+    # The other loopback name reaches the same server: no Host check turns it away.
+    status, _, body = _raw(base + "/api/config", {"Host": f"localhost:{port}"})
+    assert status == 200 and json.loads(body)["version"] == vantage.__version__
+
+
+def test_versioned_asset_urls_are_cached_for_good(server: tuple[str, Session, Path]) -> None:
+    from vantage.server import asset_cache_control
+
+    base, _, _ = server
+    version = _get(base + "/api/config")["asset_version"]
+    assert version and isinstance(version, str)
+    assert asset_cache_control({"av": version}, version) == "max-age=31536000, immutable"
+    # Without the version, or with another one, a URL may yet change content.
+    assert asset_cache_control({}, version) == "max-age=86400"
+    assert asset_cache_control({"av": "old"}, version) == "max-age=86400"

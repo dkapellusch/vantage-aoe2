@@ -2,9 +2,12 @@
 // be checked with synthetic snapshots as well as real recordings.
 
 export class ViewCache {
-  constructor(load, limit = 40) {
+  /** `provisionalMs`: how long a view marked `final: false` (the newest keyframe,
+   * its movement track still filling) is reused before it is fetched again. */
+  constructor(load, limit = 40, provisionalMs = 1000) {
     this.load = load;
     this.limit = limit;
+    this.provisionalMs = provisionalMs;
     this.entries = new Map();
   }
 
@@ -29,6 +32,9 @@ export class ViewCache {
       // Failed requests may be retried; an old request must not remove a new
       // session's entry after clear().
       if (!value && this.entries.get(key) === entry) this.entries.delete(key);
+      if (value && value.final === false) {
+        setTimeout(() => { if (this.entries.get(key) === entry) this.entries.delete(key); }, this.provisionalMs);
+      }
       return value;
     });
     this.entries.set(key, entry);
@@ -163,4 +169,50 @@ export function shuttleSpeed(speed, playing, dir) {
   const steps = [2, 4, 8];
   const cur = playing && Math.sign(speed) === dir ? Math.abs(speed) : 0;
   return dir * (steps.find((v) => v > cur) || steps[0]);
+}
+
+/**
+ * Time series fetched incrementally (/api/series?from=): the rows from `from` on
+ * replace the ones held, per player. Returns a new object (screens compare
+ * S.series by identity to know it changed); the old one is left as it was.
+ */
+export function mergeSeries(old, add, from) {
+  const out = { ...(old || {}) };
+  for (const [pid, rows] of Object.entries(add || {})) {
+    const kept = (out[pid] || []).filter((r) => r.t < from);
+    out[pid] = kept.concat(rows.filter((r) => r.t >= from));
+  }
+  return out;
+}
+
+/** The time of the newest sample in a series (-1 when there is none). */
+export function seriesEnd(series) {
+  let end = -1;
+  for (const rows of Object.values(series || {})) if (rows.length) end = Math.max(end, rows[rows.length - 1].t);
+  return end;
+}
+
+// Scratch buffers for sortByKey, grown as needed and reused every frame.
+let sortKeys = new Float64Array(1024), sortIdx = new Uint32Array(1024);
+/**
+ * `rows` ordered by `key(row)` ascending, ties in input order (as a stable
+ * Array#sort). Each key is computed once: the world's painter's-order sort ran
+ * its depth function twice per comparison, ~50k times a frame in a large game.
+ */
+export function sortByKey(rows, key) {
+  const n = rows.length;
+  if (sortKeys.length < n) { sortKeys = new Float64Array(n * 2); sortIdx = new Uint32Array(n * 2); }
+  const keys = sortKeys, idx = sortIdx.subarray(0, n);
+  for (let i = 0; i < n; i++) { keys[i] = key(rows[i]); idx[i] = i; }
+  idx.sort((a, b) => keys[a] - keys[b] || a - b);
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = rows[idx[i]];
+  return out;
+}
+
+/** Index of the first event with t > `time` in a list sorted by time. */
+export function eventIndexAfter(events, time) {
+  let lo = 0, hi = events.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (events[m].t <= time) lo = m + 1; else hi = m; }
+  return lo;
 }

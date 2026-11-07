@@ -47,11 +47,16 @@ let targets = null;
  * packed in it. Pure bookkeeping (no WebGL), so it is tested on its own.
  */
 export class ShelfAtlas {
-  constructor(layers, size) {
+  /** `maxLayers`: the budget it may grow to (doubling) before it evicts. */
+  constructor(layers, size, maxLayers = layers) {
     this.size = size;
-    this.layers = Array.from({ length: layers }, () => ({ shelves: [], used: -1, gen: 0, top: 0 }));
+    this.maxLayers = Math.max(layers, maxLayers);
+    this.layers = Array.from({ length: layers }, () => ShelfAtlas.empty());
     this.evictions = 0;
+    this.grows = 0;
   }
+
+  static empty() { return { shelves: [], used: -1, gen: 0, top: 0 }; }
 
   /** A w x h rectangle for a frame drawn in frame `frame`: [layer, x, y] or null. */
   place(w, h, frame) {
@@ -69,7 +74,16 @@ export class ShelfAtlas {
           return [i, 0, y];
         }
       }
-      // Full: empty the least recently used layer not needed in this frame.
+      // Full: grow while the budget allows (the caller copies the texture over),
+      // which keeps everything packed so far; only then evict.
+      if (this.layers.length < this.maxLayers) {
+        const n = Math.min(this.maxLayers, this.layers.length * 2) - this.layers.length;
+        for (let i = 0; i < n; i++) this.layers.push(ShelfAtlas.empty());
+        this.grows++;
+        pass--;
+        continue;
+      }
+      // At the budget: empty the least recently used layer not needed in this frame.
       let lru = -1;
       for (let i = 0; i < this.layers.length; i++) {
         if (this.layers[i].used < frame && (lru < 0 || this.layers[i].used < this.layers[lru].used)) lru = i;
@@ -88,15 +102,80 @@ export class ShelfAtlas {
 }
 
 let atlasSlots = null;
+// Texels uploaded into the atlas this frame, and the most a frame uploads before
+// strips fall back on frames they already have (8 M texels, 32 MB).
+let uploadedPx = 0, uploadBudgetPx = 8 * 1048576;
+/** Per-frame upload budget in texels (tests). */
+export function setUploadBudget(px) { uploadBudgetPx = px; }
+// One 2048² RGBA layer is 16 MB. The atlas starts at START_LAYERS and doubles up
+// to the budget (setAtlasBudget, the "Sprite memory" setting). A fixed 16-layer
+// atlas thrashed in late eight-player games at 8x: ~3,000 re-uploads and ~200
+// whole-layer evictions per 15 s, and the playback clock waited on graphics.
+const LAYER_MB = (ATLAS * ATLAS * 4) / 1048576;
+const START_LAYERS = 8;
+let budgetMb = 768, glMaxLayers = 0;
+// The atlas never exceeds GPU_CAP_MB whatever the sprite memory setting (up to
+// 8 GB): growing needs the old and the new texture at once. A lost context
+// (often how a browser reports running out of video memory) halves the cap
+// for the rest of the session, so the rebuilt atlas does not grow into it again.
+const GPU_CAP_MB = 1024;
+let lostCapMb = Infinity;
+function budgetLayers() {
+  const mb = Math.min(budgetMb, GPU_CAP_MB, lostCapMb);
+  const want = Math.max(START_LAYERS, Math.floor(mb / LAYER_MB));
+  return glMaxLayers ? Math.min(want, glMaxLayers) : want;
+}
+
+/** The GPU atlas may grow to `mb` megabytes (it never shrinks while in use). */
+export function setAtlasBudget(mb) {
+  if (!(mb > 0) || mb === budgetMb) return;
+  budgetMb = mb;
+  if (atlasSlots) atlasSlots.maxLayers = Math.max(atlasSlots.layers.length, budgetLayers());
+}
+
+// The bookkeeping grew: reallocate the texture array at the new size and copy
+// the packed layers across on the GPU (slots keep their layer and position).
+function growTexture() {
+  const n = atlasSlots.layers.length;
+  const next = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D_ARRAY, next);
+  gl.getError(); // clear: the next read must be this allocation's
+  gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, ATLAS, ATLAS, n);
+  const err = gl.getError();
+  if (err && err !== gl.NO_ERROR) {
+    // Out of video memory: stay at the current size from now on.
+    gl.deleteTexture(next);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+    atlasSlots.layers.length = layers;
+    atlasSlots.maxLayers = layers;
+    return false;
+  }
+  const fb = gl.createFramebuffer();
+  const prevRead = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fb);
+  for (let i = 0; i < layers; i++) {
+    gl.framebufferTextureLayer(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, tex, 0, i);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, i, 0, 0, ATLAS, ATLAS);
+  }
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, prevRead);
+  gl.deleteFramebuffer(fb);
+  gl.deleteTexture(tex);
+  tex = next;
+  layers = n;
+  stats.grows++;
+  return true;
+}
 let frameNo = 0;
 // ImageBitmap -> Map(sx [| rows] -> slot { layer, gen, x, y, w, h })
 let slots = new WeakMap();
 
 let inst = new Float32Array(FLOATS * 1024);
 let count = 0, group = 0, outlined = 0, occluders = 0;
+let instCapacity = 0; // bytes allocated for instBuf on the GPU
 let view = { w: 1, h: 1, dpr: 1 };
+let frameLook = {}, cleared = false;
 /** Counters for the performance view. */
-export const stats = { draws: 0, uploads: 0, evictions: 0, tooLarge: 0, instances: 0, glMs: 0, outlinePasses: 0 };
+export const stats = { draws: 0, uploads: 0, deferred: 0, evictions: 0, grows: 0, tooLarge: 0, full: 0, flushes: 0, instances: 0, glMs: 0, outlinePasses: 0 };
 
 function compile(type, src) {
   const s = gl.createShader(type);
@@ -240,7 +319,10 @@ function init() {
     }
     gl.bindVertexArray(null);
     emptyVao = gl.createVertexArray();
-    layers = 16; // 256 MB of 2048² RGBA layers
+    // Start small (128 MB) and grow towards the sprite memory budget as a game
+    // needs it: a 1v1 never pays for an eight-player late game's atlas.
+    glMaxLayers = gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS) || 256; // WebGL2's guaranteed minimum
+    layers = Math.min(START_LAYERS, glMaxLayers);
     tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
     gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, ATLAS, ATLAS, layers);
@@ -252,7 +334,7 @@ function init() {
       gl.samplerParameteri(s, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.samplerParameteri(s, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     }
-    atlasSlots = new ShelfAtlas(layers, ATLAS);
+    atlasSlots = new ShelfAtlas(layers, ATLAS, budgetLayers());
     canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost(); });
     return true;
   } catch (err) {
@@ -266,8 +348,9 @@ function init() {
 // A lost context starts over with a new canvas; the old one (its last picture)
 // leaves the page.
 function lost() {
+  lostCapMb = Math.max(START_LAYERS * LAYER_MB, (layers * LAYER_MB) / 2);
   if (canvas && canvas.parentNode) canvas.remove();
-  gl = null; unavailable = false; slots = new WeakMap(); count = 0; targets = null;
+  gl = null; unavailable = false; slots = new WeakMap(); count = 0; targets = null; instCapacity = 0;
 }
 
 /** Can sprites be drawn on the GPU here (WebGL2)? */
@@ -281,12 +364,14 @@ export function canvasAfter(el) {
 }
 
 /** Start a frame of w x h CSS pixels at pixel density dpr. */
-export function begin(w, h, dpr) {
+export function begin(w, h, dpr, look = {}) {
   if (!init()) return false;
   view = { w, h, dpr };
   const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
   if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph; }
   count = 0; group = 0; outlined = 0; occluders = 0;
+  frameLook = look; cleared = false;
+  uploadedPx = 0;
   frameNo++;
   return true;
 }
@@ -307,10 +392,20 @@ function slotFor(img, sx, sw, sh, rows = sh) {
   if (s && s.gen === atlasSlots.gen(s.layer)) { atlasSlots.touch(s.layer, frameNo); return s; }
   const w = Math.ceil(sw), h = Math.ceil(rows);
   if (w + PAD * 2 > ATLAS || h + PAD * 2 > ATLAS) { stats.tooLarge++; return null; }
+  // Past this frame's upload budget (a seek into a big battle brings hundreds of
+  // new animation frames at once), a strip shows a frame of its own that is
+  // already in the atlas for this one picture; its new frame uploads next frame.
+  // A strip with nothing uploaded yet always uploads.
+  if (uploadedPx >= uploadBudgetPx) {
+    for (const alt of m.values()) {
+      if (alt.h === h && alt.w === w && alt.gen === atlasSlots.gen(alt.layer)) { atlasSlots.touch(alt.layer, frameNo); stats.deferred++; return alt; }
+    }
+  }
   const before = atlasSlots.evictions;
   const at = atlasSlots.place(w + PAD * 2, h + PAD * 2, frameNo);
   stats.evictions += atlasSlots.evictions - before;
   if (!at) return null;
+  if (atlasSlots.layers.length !== layers && !growTexture()) return null;
   const [layer, x, y] = at;
   gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
   // The frame is a sub-rectangle of the strip: the unpack skips select it.
@@ -321,6 +416,7 @@ function slotFor(img, sx, sw, sh, rows = sh) {
   gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
   gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
   stats.uploads++;
+  uploadedPx += w * h;
   s = { layer, gen: atlasSlots.gen(layer), x: x + PAD, y: y + PAD, w, h };
   m.set(key, s);
   return s;
@@ -334,8 +430,17 @@ function slotFor(img, sx, sw, sh, rows = sh) {
  */
 export function draw(img, sx, sw, sh, dx, dy, dw, dh, alpha = 1, smooth = false, role = ROLE_NONE, rgb = 0, tint = -1, maskRows = 0) {
   if (!gl) return false;
-  const s = slotFor(img, sx, sw, sh, maskRows ? sh + maskRows : sh);
-  if (!s) return false;
+  const rows = maskRows ? sh + maskRows : sh;
+  let s = slotFor(img, sx, sw, sh, rows);
+  if (!s && count && sw + PAD * 2 <= ATLAS && rows + PAD * 2 <= ATLAS) {
+    // Everything in the atlas is referenced by the pending batch. Draw it
+    // before reusing its layers; otherwise player-mask sprites simply vanish.
+    present(frameLook, false);
+    frameNo++;
+    stats.flushes++;
+    s = slotFor(img, sx, sw, sh, rows);
+  }
+  if (!s) { stats.full++; return false; }
   if ((count + 1) * FLOATS > inst.length) {
     const grown = new Float32Array(inst.length * 2);
     grown.set(inst);
@@ -390,21 +495,32 @@ function setLook(l, look) {
  * (0-1, at the top of the view) | null, grade: { s, A, O: [bytes] } | null,
  * outline: ring width in device px (0: none) }.
  */
-export function present(look = {}) {
+export function present(look = {}, final = true) {
   if (!gl) return;
   const t0 = performance.now();
   const { w, h } = view;
   const W = canvas.width, H = canvas.height;
   gl.viewport(0, 0, W, H);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
+  const first = !cleared;
+  if (first) {
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+  cleared = true;
   canvas.classList.add('on');
-  if (!count) return;
+  if (!count) { if (final) presentOutlines(look); return; }
   gl.useProgram(prog);
   gl.bindVertexArray(vao);
   gl.bindBuffer(gl.ARRAY_BUFFER, instBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, inst.subarray(0, count * FLOATS), gl.STREAM_DRAW);
+  // Reallocate the instance buffer only when it must grow; otherwise overwrite
+  // the part this batch uses (bufferData every frame reallocated it).
+  const bytes = count * FLOATS * 4;
+  if (bytes > instCapacity) {
+    instCapacity = Math.max(bytes, instCapacity * 2, FLOATS * 4 * 1024);
+    gl.bufferData(gl.ARRAY_BUFFER, instCapacity, gl.STREAM_DRAW);
+  }
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, inst.subarray(0, count * FLOATS));
   gl.uniform2f(loc.size, w, h);
   gl.uniform1f(loc.atlas, ATLAS);
   setLook(loc, look);
@@ -416,18 +532,20 @@ export function present(look = {}) {
   gl.bindSampler(1, linear);
   gl.uniform1i(loc.texN, 0);
   gl.uniform1i(loc.texL, 1);
-  const rings = look.outline > 0 && outlined && occluders;
+  const rings = look.outline > 0;
   if (rings) {
     // Silhouettes, in draw order (the last drawn keeps the pixel), no blending.
     const t = target(W, H);
     gl.disable(gl.BLEND);
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb[0]);
-    gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]);
-    gl.clearBufferfv(gl.COLOR, 1, [0, 0, 0, 0]);
+    if (first) {
+      gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]);
+      gl.clearBufferfv(gl.COLOR, 1, [0, 0, 0, 0]);
+    }
     gl.uniform1i(loc.pass, ROLE_OUTLINED);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb[1]);
-    gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]);
+    if (first) gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]);
     gl.uniform1i(loc.pass, ROLE_OCCLUDER);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -436,7 +554,16 @@ export function present(look = {}) {
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   gl.uniform1i(loc.pass, 0);
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
-  if (rings) {
+  if (final) presentOutlines(look);
+  gl.bindVertexArray(null);
+  stats.draws++;
+  stats.instances += count;
+  count = 0;
+  stats.glMs += performance.now() - t0;
+}
+
+function presentOutlines(look) {
+  if (look.outline > 0 && outlined && occluders && targets) {
     const t = targets;
     gl.useProgram(ringProg);
     gl.bindVertexArray(emptyVao);
@@ -451,11 +578,6 @@ export function present(look = {}) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     stats.outlinePasses++;
   }
-  gl.bindVertexArray(null);
-  stats.draws++;
-  stats.instances += count;
-  count = 0;
-  stats.glMs += performance.now() - t0;
 }
 
 /** GPU memory held by the atlas, for the performance view. */

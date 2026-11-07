@@ -102,7 +102,7 @@ The dashboard picks a list of pages by game type. For **1v1**, **Team games** an
 | Wait for graphics: hold playback until new units' graphics are loaded | `waitForGraphics` | on |
 | GPU rendering: sprites, outlines and terrain with WebGL2; off uses Canvas 2D | `gpuSprites` | on |
 | Limit to 60 FPS | `limitToSixtyFps` | off |
-| Sprite memory (MB) | `atlasMemoryNormal` | 768 |
+| Sprite memory (MB) | `atlasMemoryNormal` | 1536 |
 | Sprite memory, UHD graphics (MB) | `atlasMemoryUhd` | 1536 |
 
 ### Texture filtering

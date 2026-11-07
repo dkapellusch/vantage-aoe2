@@ -32,23 +32,32 @@ from __future__ import annotations
 
 import base64
 import gc
+import hashlib
 import json
 import threading
 import time as _time
 import zlib
 from array import array
-from bisect import bisect_right
-from collections import defaultdict, deque
-from collections.abc import Iterable
+from bisect import bisect_left, bisect_right
+from collections import OrderedDict, defaultdict, deque
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from vantage import world as W
+from vantage.combat_review import PressureTracker, PressureWorker, military_review
 from vantage.frames import Frame
 from vantage.gamedata import GameData
+from vantage.healing_review import HealingHistory
 from vantage.patch import Node, Patcher, PatchError
+from vantage.resource_review import ResourceHistory
 
 KEYFRAME_MS = 1000
+#: Encoded ``/api/view`` responses kept per timeline (:meth:`Timeline.view_json`):
+#: about 300 KB each late in an 8-player game.
+VIEW_CACHE_SIZE = 64
+#: Decoded keyframes kept for the unit and group panels (:meth:`Timeline.keyframe_at`).
+DECODED_CACHE_SIZE = 4
 #: How often (game ms) the forest layer is compared and stored when changed: a
 #: felled tree stays drawn at most this long.
 TREES_MS = 3_000
@@ -272,6 +281,11 @@ class Timeline:
     master_log: dict[tuple[int, int], list[tuple[int, dict[str, Any]]]] = field(
         default_factory=dict
     )
+    #: Per-entity (time, owner, master id, source private/player/missing, private detail).
+    #: Removed entities retain their last known stats; reuse/reset appends its current source.
+    entity_master_log: dict[int, list[tuple[int, int, int, str, dict[str, Any] | None]]] = field(
+        default_factory=dict
+    )
     #: Last known (owner, master id) of every entity seen, dead ones included.
     entity_meta: dict[int, tuple[int, int]] = field(default_factory=dict)
     #: Stream discontinuities: ``[from_ms, to_ms]`` where the game skipped timesteps.
@@ -287,6 +301,8 @@ class Timeline:
 
     def __post_init__(self) -> None:
         self.catalog = W.Catalog(self.data)
+        self.resource_history = ResourceHistory(self.data)
+        self.healing_history = HealingHistory(self._kill_groups_of)
         self._lock = threading.RLock()
         self._next_key = 0
         #: Game ms between keyframes. A live session widens it while it cannot keep
@@ -310,7 +326,7 @@ class Timeline:
         self._track_buf: list[Any] = []
         self._track_kf = -1
         self._next_track = 0
-        self._track_pos: dict[int, tuple[float, float]] = {}
+        self._track_pos: dict[int, tuple[float, float, int]] = {}
         self._apm: dict[int, deque[tuple[int, bool, bool]]] = defaultdict(deque)
         self._apm_total: dict[int, int] = defaultdict(int)
         self._eapm_total: dict[int, int] = defaultdict(int)
@@ -377,23 +393,63 @@ class Timeline:
         self._first_key_t = -1
         #: (player, resource, kind) -> the last market row, for the 2 s merge
         self._market_last: dict[tuple[Any, str, str], dict[str, Any]] = {}
+        self._pressure = PressureTracker()
         self.changed = threading.Condition(self._lock)
         self.desynced = False
         #: keyframes since the last settle_heap (SETTLE_KEYFRAMES)
         self._unsettled = 0
         #: the tile terrain, kept up to date from the tiles patches reach
         self._terrain_tiles = W.TerrainTiles()
+        #: Digest of the last snapshot applied, while no patch has changed the tree
+        #: since (see :meth:`repeats_state`).
+        self._snapshot_digest: bytes | None = None
+        #: Snapshots skipped because they repeated the state already held.
+        self.repeated_snapshots = 0
+        #: How far :meth:`events_between` has checked that ``events`` is in time
+        #: order: (events checked, all in order, time of the last one checked).
+        self._events_order: tuple[int, bool, int] = (0, True, -1)
+        #: Final encoded views and decoded keyframes by (keyframe index, latest),
+        #: most recently used last; the lock guards only these dictionaries.
+        self._view_cache: OrderedDict[tuple[int, bool], bytes] = OrderedDict()
+        self._decoded_cache: OrderedDict[int, dict[str, Any]] = OrderedDict()
+        self._cache_lock = threading.Lock()
+        #: :meth:`series_json` at a version: (version, result).
+        self._series_cache: tuple[int, dict[str, list[dict[str, Any]]]] | None = None
 
     # -- ingestion ------------------------------------------------------------
 
-    def feed(self, frame: Frame) -> None:
+    def repeats_state(self, frame: Frame) -> bool:
+        """Whether ``frame`` is a snapshot of exactly the state already held.
+
+        A game that has ended or is paused answers every reconnect with the same
+        full snapshot at the same game time: one live session wrote 514 identical
+        23 MB snapshots, and re-applying each took 2.6 s of CPU under the GIL. Only
+        a byte-identical snapshot at the current time of a healthy tree that no
+        patch changed since counts, so a reopened stream with another profile
+        (fast replay sends fewer particles) still rebuilds the tree.
+        """
+        if not frame.is_snapshot or frame.events or frame.commands:
+            return False
+        digest = self._snapshot_digest
+        if digest is None or self.desynced or frame.time != self.time:
+            return False
+        return _digest(frame.patch) == digest
+
+    def feed(self, frame: Frame) -> bool:
+        """Apply one frame. False when it was not applied: ignored while the tree
+        is out of sync, failed to apply, or repeated the state (:meth:`repeats_state`)."""
         with self._lock:
+            digest: bytes | None = None
             if frame.is_snapshot:
+                if self.repeats_state(frame):
+                    self.repeated_snapshots += 1
+                    return False
                 # A full-state frame: (re)build the tree from scratch.
                 self.patcher = Patcher(self.patcher.schema)
                 self.desynced = False
+                digest = _digest(frame.patch)
             elif self.desynced:
-                return
+                return False
             pre_events = self._resolve_events(frame) if frame.events else []
             commands = [
                 _decode_raw_command(c) if c.get("kind") == "raw" else c for c in frame.commands
@@ -404,12 +460,31 @@ class Timeline:
             except PatchError:
                 self.errors += 1
                 self.desynced = True
-                return
+                self._snapshot_digest = None
+                return False
+            if digest is not None or frame.patch:
+                self._snapshot_digest = digest
             self.frames += 1
             if frame.skipped and self._prev_frame_t >= 0:
                 self.skips.append([self._prev_frame_t, frame.time])
+                self._pressure = PressureTracker()
             self._prev_frame_t = frame.time
             self.time = frame.time
+            self.resource_history.sample(
+                W.world_of(self.patcher.root),
+                frame.time,
+                pre_events,
+                handicaps=W.lobby_handicaps(self.patcher.root),
+                raw_events=frame.events,
+                commands=commands,
+                discontinuity=bool(frame.skipped) or (frame.is_snapshot and self.frames > 1),
+            )
+            self.healing_history.sample(
+                W.world_of(self.patcher.root),
+                frame.time,
+                frame.events,
+                discontinuity=bool(frame.skipped) or (frame.is_snapshot and self.frames > 1),
+            )
             self._commands(frame.time, commands)
             for ev in pre_events:
                 self.events.append(ev)
@@ -426,6 +501,7 @@ class Timeline:
                 self._next_key = (frame.time // step + 1) * step
             self._track_missiles(frame.time)
             self._track_units(frame.time)
+            return True
 
     def _start_unit_track(self, t: int, rows: list[list[Any]]) -> None:
         """At a keyframe: store the track since the last one, follow this one's units."""
@@ -436,13 +512,15 @@ class Timeline:
         self._track_kf = t
         self._next_track = t + UNIT_TRACK_MS
         # Units only (buildings stand, projectiles have their own track).
-        self._track_pos = {r[0]: (r[3], r[4]) for r in rows if r[0] >= 0 and not r[6] & 1}
+        self._track_pos = {r[0]: (r[3], r[4], r[7]) for r in rows if r[0] >= 0 and not r[6] & 1}
 
     def _track_units(self, t: int) -> None:
-        """Where units are between keyframes, every UNIT_TRACK_MS: ``[t, [[id, x, y,
-        heading], ...]]`` for the ones that moved since the last sample. A second
-        between keyframes is long enough for a unit to turn, curve round a building
-        or stop; drawn as a straight line it slid sideways or backwards."""
+        """Sample unit positions and facing changes between keyframes.
+
+        Each entry is ``[t, [[id, x, y, heading], ...]]``. Keeping turns even
+        when a unit stays in place preserves facing changes that would otherwise
+        be lost between two identical keyframe headings.
+        """
         if self._track_kf < 0 or t < self._next_track or not self._track_pos:
             return
         self._next_track = t + UNIT_TRACK_MS
@@ -452,7 +530,7 @@ class Timeline:
         ents = W.entities_of(world)
         moved: list[list[Any]] = []
         pos = self._track_pos
-        for eid, (px, py) in pos.items():
+        for eid, (px, py, previous_facet) in pos.items():
             e = ents.get(eid)
             # A patch marks every node it edits: untouched units have not moved.
             if e is None or not e.touched:
@@ -460,21 +538,19 @@ class Timeline:
             e.touched = False
             f = e.fields
             x, y = float(f.get(W.E_X, 0.0) or 0.0), float(f.get(W.E_Y, 0.0) or 0.0)
-            if abs(x - px) + abs(y - py) < 0.01:
+            facet = int(f.get(W.E_FACET, 0) or 0)
+            if abs(x - px) + abs(y - py) < 0.01 and facet == previous_facet:
                 continue
-            pos[eid] = (x, y)
-            moved.append([eid, round(x, 2), round(y, 2), int(f.get(W.E_FACET, 0) or 0)])
+            pos[eid] = (x, y, facet)
+            moved.append([eid, round(x, 2), round(y, 2), facet])
         if moved:
             self._track_buf.append([t, moved])
 
     def units_after(self, kf_t: int) -> list[Any]:
         """The unit track ``[[t, [[id, x, y, heading], ...]], ...]`` from keyframe
         ``kf_t`` to the next (see :meth:`_track_units`)."""
-        blob = self.unit_tracks.get(kf_t)
-        if blob:
-            loaded: list[Any] = json.loads(zlib.decompress(blob))
-            return loaded
-        return list(self._track_buf) if kf_t == self._track_kf else []
+        loaded: list[Any] = json.loads(self._units_json(kf_t))
+        return loaded
 
     def _track_missiles(self, t: int) -> None:
         """Projectiles per stream frame (at most every MISSILE_MS), kept with the
@@ -489,7 +565,27 @@ class Timeline:
         if self._missile_kf != kf_t:
             self._flush_missiles()
             self._missile_kf = kf_t
-        rows = W.missile_rows(world)
+        self.catalog.world_players = W.players_of(world)
+        self.catalog.world_sprites = world.fields.get(W.W_SPRITES) or []
+        rows = W.missile_rows(world, self.catalog)
+        # Ingestion-only Node identity catches even same-model Entity recreation.
+        # Only numeric incarnations and complete trail values enter saved samples.
+        previous = getattr(self, "_missile_sources", {})
+        current = {}
+        serial = getattr(self, "_missile_source_serial", 0)
+        entities = W.entities_of(world)
+        for row in rows:
+            entity = entities[row[0]]
+            old = previous.get(row[0])
+            if old is not None and old[0] is entity:
+                incarnation = old[1]
+            else:
+                serial += 1
+                incarnation = serial
+            current[row[0]] = (entity, incarnation)
+            row[8]["incarnation"] = incarnation
+        self._missile_sources = current
+        self._missile_source_serial = serial
         # Particles born since the last sample: kept with their birth time, so short
         # ones (impacts, blood, dust) that live and die between two keyframes are
         # still drawn. The first sample takes none (they are in the keyframe).
@@ -511,11 +607,8 @@ class Timeline:
         born since the previous sample (``[birth_t, *particle_row]``)."""
         # The stored track first: read without the lock, a keyframe whose buffer
         # was just flushed is found stored rather than as the next one's buffer.
-        blob = self.missiles.get(kf_t)
-        if blob:
-            loaded: list[Any] = json.loads(zlib.decompress(blob))
-            return loaded
-        return list(self._missile_buf) if kf_t == self._missile_kf else []
+        loaded: list[Any] = json.loads(self._missiles_json(kf_t))
+        return loaded
 
     def feed_all(self, frames: Iterable[Frame]) -> None:
         for f in frames:
@@ -591,6 +684,9 @@ class Timeline:
                 self.terrain.append((t, zlib.compress(tiles, 6)))
             self._next_terrain = (t // TERRAIN_MS + 1) * TERRAIN_MS
         v["apm"] = {pid: self._apm_now(int(pid), t) for pid in v["players"]}
+        self.resource_history.checkpoint(t)
+        for pid, stats in v["players"].items():
+            stats["resource_income"] = self.resource_history.player(int(pid), t)
         self._activity(v)
         self._player_extras(v)
         kf = Keyframe(t, zlib.compress(json.dumps(v, separators=(",", ":")).encode(), 3))
@@ -624,6 +720,32 @@ class Timeline:
                 self.master_log[key] = [(t, detail)]
             elif log[-1][1] != detail:
                 log.append((t, detail))
+
+        for eid, (owner, mid, private, shared_present) in extras.entity_masters.items():
+            elog = self.entity_master_log.get(eid)
+            if private is None and shared_present and elog is None:
+                continue  # unchanged shared-only units keep the existing shared log path
+            shadow = W.master_detail(private.fields, mid) if private is not None else None
+            source = "private" if private is not None else "player" if shared_present else "missing"
+            state = (owner, mid, source, shadow)
+            if elog is None:
+                self.entity_master_log[eid] = [(t, *state)]
+            elif elog[-1][1:] != state:
+                elog.append((t, *state))
+
+    def entity_master_stats(
+        self, eid: int, owner: int, mid: int, t: int | None = None
+    ) -> dict[str, Any] | None:
+        """Effective per-entity shadow at t, falling back only after an explicit reset."""
+        with self._lock:
+            log = self.entity_master_log.get(eid, ())
+            i = len(log) - 1 if t is None else bisect_right(log, t, key=lambda e: e[0]) - 1
+            if i >= 0 and log[i][1:3] == (owner, mid):
+                if log[i][3] == "private":
+                    return log[i][4]
+                if log[i][3] == "missing":
+                    return None
+            return self.master_stats(owner, mid, t) if owner > 0 else None
 
     def _tree_extras(self, v: dict[str, Any], world: Node) -> None:
         """Per-player numbers read straight from the tree: score sub-rows, the
@@ -710,6 +832,49 @@ class Timeline:
             log = self.activity_log[row[0]]
             if not log or log[-1][1] != row[9]:
                 log.append((t, row[9]))
+        for stats in v["players"].values():
+            for units in stats.get("garrison_units", {}).values():
+                for eid, *_ in units:
+                    log = self.activity_log[eid]
+                    if not log or log[-1][1] != W.ACT_GARRISONED:
+                        log.append((t, W.ACT_GARRISONED))
+        self._sample_pressure(t)
+
+    def _sample_pressure(self, t: int) -> None:
+        """Sample only directly attacked workers, including those now garrisoned."""
+        world = W.world_of(self.patcher.root)
+        if world is None or not self._pressure.active:
+            return
+        entities = W.entities_of(world)
+        workers: dict[int, PressureWorker] = {}
+        attackers: dict[int, tuple[float, float]] = {}
+        for worker, credit in self._pressure.active.items():
+            entity = entities.get(worker)
+            if entity is not None:
+                f = entity.fields
+                inside = int(f.get(W.E_INSIDE, -1) or -1) > 0
+                activity = W.unit_activity(entity, None, inside)
+                state = f.get(W.E_STATE)
+                workers[worker] = PressureWorker(
+                    activity not in (W.ACT_IDLE, W.ACT_MOVING, W.ACT_GARRISONED),
+                    state is None or state <= W.ENTITY_ALIVE,
+                    float(f.get(W.E_X, 0) or 0),
+                    float(f.get(W.E_Y, 0) or 0),
+                )
+            attacker = entities.get(credit.attacker)
+            if attacker is not None:
+                f = attacker.fields
+                state = f.get(W.E_STATE)
+                if state is None or state <= W.ENTITY_ALIVE:
+                    attackers[credit.attacker] = (
+                        float(f.get(W.E_X, 0) or 0),
+                        float(f.get(W.E_Y, 0) or 0),
+                    )
+        self._log_pressure(self._pressure.sample(t, workers, attackers))
+
+    def _log_pressure(self, intervals: Iterable[tuple[int, int, int, int]]) -> None:
+        for attacker, start, end, worker in intervals:
+            self.unit_log[attacker].append((end, "forced_idle", (end - start) / 1000, worker))
 
     def _player_extras(self, v: dict[str, Any]) -> None:
         """Running per-player numbers the view alone cannot know."""
@@ -793,6 +958,11 @@ class Timeline:
                     "t": v["time"],
                     **{f"res_{k}": s["resources"][k] for k in W.RESOURCE_NAMES},
                     **{f"col_{k}": s["collected"][k] for k in (*W.RESOURCE_NAMES, "total")},
+                    "bonus_total": (s.get("resource_income") or {}).get("total", 0),
+                    **{
+                        f"bonus_{k}": (s.get("resource_income") or {}).get("bonus", {}).get(k, 0)
+                        for k in W.RESOURCE_NAMES
+                    },
                     "pop": s["pop"],
                     "pop_cap": s["pop_cap"],
                     "villagers": s["villagers"],
@@ -1045,7 +1215,7 @@ class Timeline:
             d = ((float(row[3]) - kx) ** 2 + (float(row[4]) - ky) ** 2) ** 0.5
             if d > KING_THREAT_RANGED_TILES:
                 continue
-            stats = self.master_stats(owner, int(row[2])) or info.stats
+            stats = self.entity_master_stats(int(row[0]), owner, int(row[2])) or info.stats
             rng = float(stats.get("range", 0) or 0)
             kind = "ranged" if rng > 1.0 else "melee"
             reach = (
@@ -1132,8 +1302,9 @@ class Timeline:
                 return {"id": eid}
             f = e.fields
             mid = int(f.get(W.E_MASTER, -1) or -1)
-            info = self.catalog.master(mid, W.master_node(e, players))
+            info = self.catalog.entity_master(e, players)
             cls = info.cls if info else -1
+            prototype = W.master_node(e, players)
             return {
                 "id": int(eid),
                 "owner": int(f.get(W.E_OWNER, 0) or 0),
@@ -1144,6 +1315,7 @@ class Timeline:
                 "cls": cls,
                 "eco": bool(info and info.cls in W._ECO_CLASSES),
                 "king": W.is_king(mid, cls),
+                "cost": W.master_cost(prototype.fields) if prototype is not None else None,
             }
 
         def master_of(eid: int) -> int:
@@ -1161,9 +1333,19 @@ class Timeline:
         seen: set[Any] = set()
 
         def kill(victim: dict[str, Any], killer: dict[str, Any], attacker: int) -> None:
+            if victim.get("owner", 0) <= 0 or victim.get("cls") in _NOT_KILLS:
+                return
             if victim.get("id") in seen:  # a killing blow and EntityKilled for one death
                 return
+            victim_log = self.unit_log.get(int(victim["id"]), ())
+            if any(kind == "died" for _, kind, _, _ in victim_log):
+                return
             seen.add(victim.get("id"))
+            victim_id = victim.get("id")
+            if victim_id is not None:
+                self.unit_log[int(victim_id)].append(
+                    (t, "died", 1.0, int(killer.get("master", -1)))
+                )
             vo, ko = int(victim.get("owner", 0) or 0), int(killer.get("owner", 0) or 0)
             friendly = allied(ko, vo)
             if attacker >= 0:
@@ -1172,6 +1354,19 @@ class Timeline:
                 if not friendly:
                     self._kills_by_unit[attacker].append(t)
                     self._kill_groups[attacker].append(int(victim.get("cls", -1)))
+                    cost = victim.get("cost")
+                    if cost is None:
+                        self.unit_log[attacker].append((t, "destroyed_unknown", 1.0, -1))
+                    else:
+                        for resource, amount in cost.items():
+                            self.unit_log[attacker].append(
+                                (
+                                    t,
+                                    f"destroyed_{resource}",
+                                    float(amount),
+                                    int(victim.get("master", -1)),
+                                )
+                            )
             if victim.get("eco") and not friendly:
                 if ko > 0:
                     self._tallies[ko]["eco_kills"] += 1
@@ -1213,13 +1408,33 @@ class Timeline:
                     self.unit_log[attacker].append((t, "dealt", dmg, tm))
                     self.unit_log[target].append((t, "taken", dmg, am))
                     self._king_damage(out, t, target, attacker, ents, who)
+                    victim, killer = who(target), who(attacker)
+                    if (
+                        victim.get("cls") == W.CLASS_CIVILIAN
+                        and int(victim.get("owner", 0)) > 0
+                        and int(killer.get("owner", 0)) > 0
+                        and not allied(int(victim["owner"]), int(killer["owner"]))
+                    ):
+                        entity = ents.get(target)
+                        if entity is not None:
+                            activity = W.unit_activity(
+                                entity, None, int(entity.fields.get(W.E_INSIDE, -1) or -1) > 0
+                            )
+                            self._log_pressure(
+                                self._pressure.hit(
+                                    target,
+                                    attacker,
+                                    t,
+                                    working=activity
+                                    in (*W.ACT_GATHER.values(), W.ACT_BUILDING, W.ACT_REPAIRING),
+                                )
+                            )
                 if not ev.get("iskillingblow"):
                     continue
                 victim = who(ev.get("entityid"))
                 killer = who(ev.get("attackerid"))
                 if victim.get("owner", 0) == 0 or victim.get("cls") in _NOT_KILLS:
                     continue  # trees, mines, wildlife, livestock being butchered
-                self.unit_log[target].append((t, "died", 1.0, int(killer.get("master", -1))))
                 kill(victim, killer, attacker)
             elif k == "entitykilled":
                 victim = who(ev.get("id"))
@@ -1640,15 +1855,31 @@ class Timeline:
     # under the GIL. Waiting on the lock made view fetches slow exactly while a
     # recording loads or a live game streams.
 
+    def _keyframe_index(self, keyframes: list[Keyframe], t: int | None) -> int:
+        """The keyframe at or before ``t`` (the first one before it, the newest for
+        None); -1 when there is none yet."""
+        if not keyframes:
+            return -1
+        if t is None:
+            return len(keyframes) - 1
+        return max(0, bisect_right(keyframes, t, key=lambda k: k.time) - 1)
+
+    def _is_final(self, keyframes: list[Keyframe], i: int) -> bool:
+        """Whether keyframe ``i`` and the tracks that follow it can no longer change.
+
+        Its successor is appended only after its unit track is stored, and no
+        projectile sample joins its buffer once the successor exists, so answer this
+        before reading the tracks.
+        """
+        return self.complete or i + 1 < len(keyframes)
+
     def view_at(self, t: int | None) -> dict[str, Any] | None:
         keyframes = self.keyframes
-        if not keyframes:
+        i = self._keyframe_index(keyframes, t)
+        if i < 0:
             return None
-        if t is None:
-            i = len(keyframes) - 1
-        else:
-            i = bisect_right(keyframes, t, key=lambda k: k.time) - 1
-        kf = keyframes[max(0, i)]
+        final = self._is_final(keyframes, i)
+        kf = keyframes[i]
         v: dict[str, Any] = json.loads(zlib.decompress(kf.blob))
         fog = self.fog
         fi = bisect_right(fog, kf.time, key=lambda f: f[0]) - 1
@@ -1668,6 +1899,88 @@ class Timeline:
             self.missiles_after(kf.time)
         )
         v["unit_track"] = self.units_after(kf.time)
+        if not final:
+            # The newest keyframe's tracks are still filling: the browser asks again.
+            v["final"] = False
+        return v
+
+    def view_json(self, t: int | None) -> bytes | None:
+        """:meth:`view_at` as the JSON ``/api/view`` sends, without parsing anything.
+
+        The keyframe is stored as JSON text, and so are the tracks, so the response
+        is spliced from them: parsing a late-game keyframe (257 KB) and encoding it
+        again took about 10 ms a request, three times that while a recording loads.
+        A final response (:meth:`_is_final`) never changes and is kept
+        (:data:`VIEW_CACHE_SIZE`). The output is byte for byte what encoding
+        :meth:`view_at` compactly gives: keyframes hold none of the added keys.
+        """
+        keyframes = self.keyframes
+        i = self._keyframe_index(keyframes, t)
+        if i < 0:
+            return None
+        key = (i, t is None)
+        with self._cache_lock:
+            hit = self._view_cache.get(key)
+            if hit is not None:
+                self._view_cache.move_to_end(key)
+                return hit
+        final = self._is_final(keyframes, i)
+        kf = keyframes[i]
+        body = zlib.decompress(kf.blob)
+        parts = [body[:-1]]  # the keyframe object, still open
+        fog = self.fog
+        fi = bisect_right(fog, kf.time, key=lambda f: f[0]) - 1
+        if fi >= 0:
+            parts += [b',"fog":"', base64.b64encode(fog[fi][1]), b'"']
+        trees = self.trees
+        ti = bisect_right(trees, kf.time, key=lambda f: f[0]) - 1
+        if ti >= 0:
+            parts.append(b',"trees_t":%d' % trees[ti][0])
+        terrain = self.terrain
+        ri = bisect_right(terrain, kf.time, key=lambda f: f[0]) - 1
+        if ri >= 0:
+            parts.append(b',"terrain_t":%d' % terrain[ri][0])
+        prev = keyframes[i - 1].time if t is not None and i >= 1 else None
+        missiles = self._missiles_json(kf.time)
+        if prev is not None:
+            missiles = _join_arrays(self._missiles_json(prev), missiles)
+        parts += [b',"missile_track":', missiles, b',"unit_track":', self._units_json(kf.time)]
+        parts.append(b"}" if final else b',"final":false}')
+        out = b"".join(parts)
+        if final:
+            with self._cache_lock:
+                self._view_cache[key] = out
+                while len(self._view_cache) > VIEW_CACHE_SIZE:
+                    self._view_cache.popitem(last=False)
+        return out
+
+    def _missiles_json(self, kf_t: int) -> bytes:
+        """:meth:`missiles_after` as JSON text."""
+        return _track_json(self.missiles, kf_t, lambda: self._missile_kf, lambda: self._missile_buf)
+
+    def _units_json(self, kf_t: int) -> bytes:
+        """:meth:`units_after` as JSON text."""
+        return _track_json(self.unit_tracks, kf_t, lambda: self._track_kf, lambda: self._track_buf)
+
+    def keyframe_at(self, t: int | None) -> dict[str, Any] | None:
+        """The keyframe :meth:`view_at` would show, without fog or tracks, for the
+        unit and group panels. Shared with other callers: read it, never change it.
+        A few are kept (:data:`DECODED_CACHE_SIZE`; a keyframe never changes once
+        stored): the panel asks about a selection at the same moment repeatedly."""
+        keyframes = self.keyframes
+        i = self._keyframe_index(keyframes, t)
+        if i < 0:
+            return None
+        with self._cache_lock:
+            hit = self._decoded_cache.get(i)
+            if hit is not None:
+                self._decoded_cache.move_to_end(i)
+                return hit
+        v: dict[str, Any] = json.loads(zlib.decompress(keyframes[i].blob))
+        with self._cache_lock:
+            self._decoded_cache[i] = v
+            while len(self._decoded_cache) > DECODED_CACHE_SIZE:
+                self._decoded_cache.popitem(last=False)
         return v
 
     def terrain_at(self, t: int) -> tuple[int, bytes] | None:
@@ -1697,7 +2010,9 @@ class Timeline:
             self.version += 1
             self.changed.notify_all()
 
-    def unit_stats(self, eid: int, t: int | None = None) -> dict[str, Any]:
+    def unit_stats(
+        self, eid: int, t: int | None = None, since: int | None = None
+    ) -> dict[str, Any]:
         """Everything the unit panel shows about one entity as of ``t``.
 
         Kills, eco/friendly kills, damage dealt/taken (with the per-master
@@ -1705,6 +2020,9 @@ class Timeline:
         nearest keyframe (garrison, construction, gate, charge) and its master
         statistics *as its owner has them* at that time.
         """
+        # Decoded before taking the lock: keyframes never change once stored, and
+        # decoding one is the slow part of this request.
+        keyframe = self.keyframe_at(t) or {}
         with self._lock:
             out = {"kills": 0.0, "eco_kills": 0.0, "dealt": 0.0, "taken": 0.0, "died": 0.0}
             by_target: dict[str, float] = defaultdict(float)
@@ -1713,7 +2031,9 @@ class Timeline:
             friendly = 0
             for when, kind, amount, other in self.unit_log.get(eid, ()):
                 if t is not None and when > t:
-                    break
+                    continue
+                if since is not None and when < since:
+                    continue
                 if kind == "dealt":
                     by_target[str(other)] += amount
                 elif kind == "taken":
@@ -1734,15 +2054,35 @@ class Timeline:
             result: dict[str, Any] = {k: round(out[k], 1) for k in keep}
             result["activity"] = self._unit_activity(eid, t)
             result["activity_lm"] = self._unit_activity(eid, t, window=APM_WINDOW_MS)
+            end = self.time if t is None else t
+            result["activity_scope"] = self._unit_activity(
+                eid, t, window=max(0, end - since) if since is not None else None
+            )
+            result.update(military_review(self.unit_log.get(eid, ()), end, since))
+            result["since_ms"] = since
             result["born"] = self._born.get(eid)
+            result["resource_totals"] = self.resource_history.entity(eid, end)
+            result["healing"] = self.healing_history.totals([eid], end, since)
             result["friendly_kills"] = friendly
             result["monk"] = monk
             result["damage_by_target"] = {k: round(v, 1) for k, v in by_target.items()}
             result["damage_by_attacker"] = {k: round(v, 1) for k, v in by_attacker.items()}
-            result.update(self._entity_state(eid, t))
+            result.update(self._entity_state(eid, t, keyframe))
+            query_ms = self.time if t is None else int(t)
+            result.update(
+                entity_stats_validity_version=1,
+                entity_id=eid,
+                as_of_ms=query_ms,
+                valid_from_ms=query_ms,
+                valid_until_ms=self._entity_master_valid_until(
+                    eid, result["owner"], result["master"], query_ms
+                ),
+            )
             return result
 
-    def group_stats(self, ids: Iterable[int], t: int | None = None) -> dict[str, Any]:
+    def group_stats(
+        self, ids: Iterable[int], t: int | None = None, since: int | None = None
+    ) -> dict[str, Any]:
         """What the unit panel shows for a selection of many: the group's combat
         totals as of ``t`` (deaths: members that died by then), the seconds its
         members spent in each activity (``activity`` over their lives,
@@ -1752,17 +2092,31 @@ class Timeline:
         keys = ("kills", "eco_kills", "deaths", "dealt", "taken", "conversions")
         totals = dict.fromkeys(keys, 0.0)
         types: dict[str, Any] = {}
+        entity_types: dict[str, Any] = {}
         life: dict[str, float] = defaultdict(float)
         last: dict[str, float] = defaultdict(float)
+        scoped: dict[str, float] = defaultdict(float)
+        review_log: list[tuple[int, str, float, int]] = []
+        ids = list(dict.fromkeys(ids))
+        # Outside the lock, as in unit_stats.
+        rows = {row[0]: row for row in (self.keyframe_at(t) or {}).get("entities", ())}
         with self._lock:
+            query_ms = self.time if t is None else int(t)
             for eid in ids:
                 for k, v in self._unit_activity(eid, t).items():
                     life[k] += v
                 for k, v in self._unit_activity(eid, t, window=APM_WINDOW_MS).items():
                     last[k] += v
+                for k, v in self._unit_activity(
+                    eid, t, window=max(0, query_ms - since) if since is not None else None
+                ).items():
+                    scoped[k] += v
+                review_log.extend(self.unit_log.get(eid, ()))
                 for when, kind, amount, _other in self.unit_log.get(eid, ()):
                     if t is not None and when > t:
-                        break
+                        continue
+                    if since is not None and when < since:
+                        continue
                     if kind == "died":
                         totals["deaths"] += 1
                     elif kind in ("kill", "eco_kill"):
@@ -1773,7 +2127,19 @@ class Timeline:
                         totals[kind] += amount
                     elif kind in ("convert", "convert_eco"):
                         totals["conversions"] += 1
-                owner, mid = self.entity_meta.get(eid, (-1, -1))
+                owner, mid = self._entity_master_identity(eid, t, rows.get(eid))
+                effective = self.entity_master_stats(eid, owner, mid, t)
+                entity_types[str(eid)] = {
+                    "owner": owner,
+                    "master": mid,
+                    "stats": (
+                        {k: effective.get(k) for k in GROUP_STAT_KEYS}
+                        if effective is not None
+                        else None
+                    ),
+                    "valid_from_ms": query_ms,
+                    "valid_until_ms": self._entity_master_valid_until(eid, owner, mid, query_ms),
+                }
                 key = f"{owner}:{mid}"
                 if owner > 0 and key not in types:
                     st = self.master_stats(owner, mid, t)
@@ -1781,20 +2147,63 @@ class Timeline:
         return {
             "totals": {k: round(v, 1) for k, v in totals.items()},
             "types": types,
+            "entity_types": entity_types,
+            "entity_stats_validity_version": 1,
+            "as_of_ms": query_ms,
             "activity": {k: round(v, 1) for k, v in life.items()},
             "activity_lm": {k: round(v, 1) for k, v in last.items()},
+            "activity_scope": {k: round(v, 1) for k, v in scoped.items()},
+            "since_ms": since,
+            "healing": self.healing_history.totals(ids, query_ms, since),
+            **military_review(review_log, query_ms, since),
         }
 
-    def _entity_state(self, eid: int, t: int | None) -> dict[str, Any]:
-        """The entity at the keyframe nearest ``t``, plus its owner's master stats."""
-        v = self.view_at(t) or {}
-        key = str(eid)
-        row = next((r for r in v.get("entities", ()) if r[0] == eid), None)
+    def _entity_master_valid_until(self, eid: int, owner: int, mid: int, t: int) -> int:
+        """Exclusive forward-only bound, read under group_stats' Timeline lock.
+
+        Bound the effective statistics, not activity totals or Entity geometry.
+        An upcoming first private/source entry also bounds shared-only entities.
+        No lifetime/identity is inferred before the requested time.
+        """
+        until = self.time + 1
+        log = self.entity_master_log.get(eid, ())
+        i = bisect_right(log, t, key=lambda entry: entry[0])
+        if i < len(log):
+            until = min(until, log[i][0])
+        current = log[i - 1] if i else None
+        private_or_missing = (
+            current is not None
+            and current[1:3] == (owner, mid)
+            and current[3] in ("private", "missing")
+        )
+        if not private_or_missing and owner > 0:
+            shared = self.master_log.get((owner, mid), ())
+            j = bisect_right(shared, t, key=lambda entry: entry[0])
+            if j < len(shared):
+                until = min(until, shared[j][0])
+        return max(t, until)  # Future/out-of-extent queries have an empty interval.
+
+    def _entity_master_identity(
+        self, eid: int, t: int | None, row: Sequence[Any] | None
+    ) -> tuple[int, int]:
         owner, mid = (
             (int(row[1]), int(row[2])) if row is not None else self.entity_meta.get(eid, (-1, -1))
         )
+        # For absent/dead rows, retain the historical private identity rather than latest metadata.
+        log = self.entity_master_log.get(eid, ())
+        i = len(log) - 1 if t is None else bisect_right(log, t, key=lambda e: e[0]) - 1
+        if row is None and i >= 0:
+            owner, mid = log[i][1:3]
+        return owner, mid
+
+    def _entity_state(self, eid: int, t: int | None, v: dict[str, Any]) -> dict[str, Any]:
+        """The entity in keyframe ``v`` (:meth:`keyframe_at` ``t``), plus its owner's
+        master stats."""
+        key = str(eid)
+        row = next((r for r in v.get("entities", ()) if r[0] == eid), None)
+        owner, mid = self._entity_master_identity(eid, t, row)
         out: dict[str, Any] = {"owner": owner, "master": mid}
-        stats = self.master_stats(owner, mid, t) if owner > 0 else None
+        stats = self.entity_master_stats(eid, owner, mid, t)
         if stats is not None:
             out["stats"] = stats
             out.update(stats)
@@ -1826,6 +2235,9 @@ class Timeline:
         log = self.activity_log.get(eid, [])
         end = self.time if t is None else t
         start = end - window if window is not None else -1
+        deaths = [when for when, kind, _, _ in self.unit_log.get(eid, ()) if kind == "died"]
+        if deaths:
+            end = min(end, min(deaths))
         out: dict[str, float] = defaultdict(float)
         for i, (when, act) in enumerate(log):
             if when > end:
@@ -1833,16 +2245,60 @@ class Timeline:
             nxt = log[i + 1][0] if i + 1 < len(log) else end
             a, b = max(when, start), min(nxt, end)
             if b > a:
-                out[W.ACTIVITY_NAMES[act]] += (b - a) / 1000.0
+                missing = sum(max(0, min(b, right) - max(a, left)) for left, right in self.skips)
+                out[W.ACTIVITY_NAMES[act]] += max(0, b - a - missing) / 1000.0
         return {k: round(v, 1) for k, v in out.items()}
 
     def events_between(self, t0: int, t1: int) -> list[dict[str, Any]]:
-        with self._lock:
-            return [e for e in self.events if t0 <= e["t"] <= t1]
+        """Events with ``t0 <= t <= t1``, oldest first.
 
-    def series_json(self) -> dict[str, Any]:
-        with self._lock:
-            return {pid: list(rows) for pid, rows in self.series.items()}
+        Without the lock, like the view readers: ``events`` is only appended to,
+        so the first ``n`` entries are fixed once seen, and waiting for a whole
+        frame's ingestion made the event panel's requests take 100 ms to 3 s late
+        in a game. Events arrive in time order, so this is a binary search; one
+        logged out of order (an earlier time) falls back to a scan.
+        """
+        events = self.events
+        n = len(events)
+        if not self._events_in_order(events, n):
+            return [e for e in events[:n] if t0 <= e["t"] <= t1]
+        lo = bisect_left(events, t0, 0, n, key=_time_of)
+        hi = bisect_right(events, t1, lo, n, key=_time_of)
+        return events[lo:hi]
+
+    def _events_in_order(self, events: list[dict[str, Any]], n: int) -> bool:
+        """Whether ``events[:n]`` is in time order, checking only the new ones."""
+        checked, ordered, last = self._events_order
+        if checked >= n or not ordered:
+            return ordered
+        for i in range(checked, n):
+            t = events[i]["t"]
+            if t < last:
+                ordered = False
+                break
+            last = t
+        self._events_order = (n, ordered, last)
+        return ordered
+
+    def series_json(self, since: int | None = None) -> dict[str, list[dict[str, Any]]]:
+        """The time series per player; with ``since``, only rows with ``t >= since``
+        (every player is still listed), for a browser that already has the rest.
+
+        Read without the lock: rows are only appended, at keyframes, in time order
+        (each sample is at least :data:`SERIES_MS` after the last). The full result
+        is kept until the next version; it is 4-5 MB late in an 8-player game, and
+        every open statistics screen asks for it. Callers must not modify it.
+        """
+        version = self.version
+        cached = self._series_cache
+        if cached is None or cached[0] != version:
+            # list() takes the items at once: a new player's key cannot appear mid-loop.
+            cached = (version, {pid: rows[:] for pid, rows in list(self.series.items())})
+            self._series_cache = cached
+        full = cached[1]
+        if since is None:
+            return full
+        return {pid: rows[bisect_left(rows, since, key=_time_of) :] for pid, rows in full.items()}
 
     def summary(self, t: int | None = None) -> dict[str, Any]:
         """End-of-game / statistics-screen aggregates as of ``t`` (None = latest)."""
@@ -1869,6 +2325,7 @@ class Timeline:
                     "razings": s["razings"],
                     "buildings_lost": s["buildings_lost"],
                     "collected": s["collected"],
+                    "resource_income": s.get("resource_income"),
                     "kill_value": s["kill_value"],
                     "relic_gold": s["relic_gold"],
                     "tribute_received": s["tribute_received"],
@@ -2084,6 +2541,42 @@ def housed_state(
     return False, 2 if cap and pop >= cap else 0
 
 
+def _track_json(
+    stored: dict[int, bytes],
+    kf_t: int,
+    filling: Callable[[], int],
+    buffer: Callable[[], list[Any]],
+) -> bytes:
+    """A keyframe's track as JSON text: stored, or the buffer still filling.
+
+    Read without the lock. Ingestion stores a full buffer before it starts the
+    next one, so a track looked for again after reading the buffer is found
+    stored if it was stored meanwhile; the buffer read then may be the next
+    keyframe's. (A final view is cached for good: it must not keep that.)
+    """
+    blob = stored.get(kf_t)
+    if not blob:
+        buf = list(buffer()) if kf_t == filling() else []
+        blob = stored.get(kf_t)
+        if not blob:
+            return json.dumps(buf, separators=(",", ":")).encode()
+    return zlib.decompress(blob)
+
+
+def _join_arrays(a: bytes, b: bytes) -> bytes:
+    """Two compact JSON arrays as one (``[1]`` and ``[2]`` give ``[1,2]``)."""
+    if a == b"[]":
+        return b
+    if b == b"[]":
+        return a
+    return a[:-1] + b"," + b[1:]
+
+
+def _time_of(event: dict[str, Any]) -> int:
+    t: int = event["t"]
+    return t
+
+
 def _ev(t: int, cat: str, kind: str, **fields: Any) -> dict[str, Any]:
     """An event; the high-priority kinds carry ``priority: 'high'``."""
     ev: dict[str, Any] = {"t": t, "cat": cat, "kind": kind, **fields}
@@ -2290,6 +2783,12 @@ def _decode_raw_command(c: dict[str, Any]) -> dict[str, Any]:
         return {"kind": "raw"}
 
 
+def _digest(patch: bytes) -> bytes:
+    """A snapshot's identity for :meth:`Timeline.repeats_state` (about 25 ms for a
+    23 MB late-game snapshot, against seconds to apply it)."""
+    return hashlib.blake2b(patch, digest_size=16).digest()
+
+
 def settle_heap() -> None:
     """Take everything alive now out of the cyclic garbage collector's scans.
 
@@ -2312,8 +2811,7 @@ def load_recording(path: str, data: GameData, progress: Any = None) -> Timeline:
 
     tl = Timeline(data)
     for i, f in enumerate(read_frames(path)):
-        tl.feed(f)
-        if f.is_snapshot:
+        if tl.feed(f) and f.is_snapshot:
             settle_heap()
         if progress is not None and i % 200 == 0:
             progress(tl)

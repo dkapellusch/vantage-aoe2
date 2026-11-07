@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/static/world.css">
 <link rel="stylesheet" href="/static/shell.css">
 <link rel="stylesheet" href="/static/overlays.css">
+<link rel="stylesheet" href="/static/player-review.css">
 </head>
 <body>
 <canvas id="world"></canvas>
@@ -32,12 +33,13 @@
   </section>
   <section id="dashboard" class="panel">
     <div class="dash-head"><button id="dash-prev" class="dash-nav" title="Previous page (Alt+X)">‹</button><span id="dash-title"></span><button id="dash-next" class="dash-nav" title="Next page (Alt+C)">›</button><span class="hint">Alt+C / Alt+X</span></div>
-    <table id="dash-table"></table>
+    <div class="review-dash-body"><table id="dash-table"></table></div>
   </section>
   <section id="minimap-wrap" class="panel">
     <div id="minimap-tools">
       <button id="btn-menu" title="Menu (Esc)">⛨</button>
       <button id="btn-home" title="Replays &amp; recordings (Ctrl+O)">⌂</button>
+      <a id="btn-native" href="/native" title="Open a replay without the game" aria-label="Open a replay without the game" style="display:inline-grid;place-items:center;min-width:28px;color:inherit;text-decoration:none">↗</a>
       <button id="btn-stats" title="Statistics (Ctrl+Alt+S)">▤</button>
       <button id="btn-fog" title="Fog of war: click or right-click cycles off / spy / standard, middle-click combines team fog (Alt+F)">◐</button>
       <button id="btn-mmmode" title="Minimap mode: click or right-click cycles (Alt+M)">▦</button>
@@ -89,7 +91,7 @@
 <div id="launch-status" class="panel hidden"></div>
 <div id="highlight-list" class="panel hidden"></div>
 <div id="status-line"></div>
-<div id="banners"><div id="highlight-bar" class="panel hidden"></div><div id="pause-banner" class="hidden"></div><div id="jump-banner" class="panel hidden"></div><div id="autocast-banner" class="hidden"></div><div id="toast"></div></div>
+<div id="banners"><div id="fidelity-banner" class="hidden" role="status"></div><div id="highlight-bar" class="panel hidden"></div><div id="pause-banner" class="hidden"></div><div id="jump-banner" class="panel hidden"></div><div id="autocast-banner" class="hidden"></div><div id="toast"></div></div>
 <svg width="0" height="0" style="position:absolute"><filter id="gamma"><feComponentTransfer>
   <feFuncR id="gamma-r" type="gamma" amplitude="1" exponent="1"/><feFuncG id="gamma-g" type="gamma" amplitude="1" exponent="1"/>
   <feFuncB id="gamma-b" type="gamma" amplitude="1" exponent="1"/><feFuncA id="gamma-func" type="identity" exponent="1"/>

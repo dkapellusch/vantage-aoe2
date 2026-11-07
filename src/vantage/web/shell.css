@@ -127,3 +127,26 @@ body.overlay-mode #jump-banner { display: none; }
 /* Rewind / fast-forward shuttle (app.js shuttle): lit while playing fast that way. */
 #tc-rew.on, #tc-ff.on { background: var(--accent); border-color: var(--accent); color: #1a1407; }
 #tc-back, #tc-fwd { font: 11px var(--mono); }
+
+/* Stored panel rectangles override skin/layout placement without changing type size. */
+.hud-custom-size {
+  position: fixed !important; left: var(--panel-left) !important; top: var(--panel-top) !important;
+  right: auto !important; bottom: auto !important; transform: none !important;
+  width: var(--panel-width) !important; height: var(--panel-height) !important;
+  min-width: 0 !important; min-height: 0 !important; max-width: calc(100vw - 16px) !important;
+  max-height: calc(100vh - 16px) !important; box-sizing: border-box; overflow: auto !important;
+}
+#minimap-wrap.hud-custom-size { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+#minimap-wrap.hud-custom-size #minimap { width: 100%; height: 100%; min-height: 0; }
+#panel-resize-handles { position: fixed; inset: 0; pointer-events: none; z-index: 5000; }
+#panel-resize-handles button { position: fixed; width: 14px; height: 14px; min-width: 0; padding: 0;
+  pointer-events: auto; border: 1px solid var(--accent); border-radius: 3px; background: #17202be8;
+  box-shadow: 0 0 0 2px #0005; opacity: .75; touch-action: none; }
+#panel-resize-handles button::after { content: ''; display: block; width: 5px; height: 5px;
+  margin: 3px; border-right: 1px solid var(--accent); border-bottom: 1px solid var(--accent); }
+#panel-resize-handles button:is(:hover,:focus-visible) { opacity: 1; outline: 2px solid var(--accent); }
+#panel-resize-handles [data-corner=nw], #panel-resize-handles [data-corner=se] { cursor: nwse-resize; }
+#panel-resize-handles [data-corner=ne], #panel-resize-handles [data-corner=sw] { cursor: nesw-resize; }
+body.hud-resizing { user-select: none; }
+.panel-size-slot { flex: none; pointer-events: none; }
+#minimap-wrap.hud-custom-size:has(#minimap.panel-off) { height: auto !important; }

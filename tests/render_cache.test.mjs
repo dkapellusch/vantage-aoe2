@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { changedTilesInRegion, terrainRegion, changedTreeTiles, groundProjection, mergeDirtyRect, OutlineCache } from '../src/vantage/web/render-cache.js';
+import { changedTilesInRegion, terrainRegion, changedTreeTiles, groundProjection, mergeDirtyRect, treeSpriteState, OutlineCache, coalesceRects } from '../src/vantage/web/render-cache.js';
+
+test('tree fallback stops retrying permanent missing sprites but keeps retryable ones pending', () => {
+  assert.equal(treeSpriteState(null), null); // request not yet admitted
+  assert.equal(treeSpriteState({ failed: false }), null); // loading
+  assert.equal(treeSpriteState({ failed: true, retryAt: 5000 }), null); // temporary error
+  assert.equal(treeSpriteState({ failed: true }), false); // permanent 404 fallback
+  const ready = { img: {}, meta: {} };
+  assert.equal(treeSpriteState(ready), ready);
+});
 
 test('ground reprojection preserves centre, pan direction, and zoom coverage', () => {
   const cache = { x: 50, y: 50, zoom: 1, width: 1000, height: 600, padding: 128 };
@@ -86,3 +95,28 @@ test('outline rasters use a bounded LRU and do not retain oversized entries', ()
   cache.set('a', a, 4); assert.equal(cache.bytes, 12);
 });
 
+test('changed tiles far apart repaint as separate rectangles, near ones as one', () => {
+  // Two farms at opposite corners: two small rectangles, not the whole map.
+  const far = coalesceRects([[0, 0, 10, 10], [990, 990, 1000, 1000]]);
+  assert.deepEqual(far, [[0, 0, 10, 10], [990, 990, 1000, 1000]]);
+  // Touching or overlapping rectangles merge when the union wastes little.
+  assert.deepEqual(coalesceRects([[0, 0, 10, 10], [8, 0, 18, 10], [16, 0, 26, 10]]), [[0, 0, 26, 10]]);
+  // A merge that would cover far more than the parts is not made.
+  assert.equal(coalesceRects([[0, 0, 10, 10], [11, 40, 21, 50]]).length, 2);
+  assert.deepEqual(coalesceRects([]), []);
+  // Every input pixel stays covered.
+  const rs = Array.from({ length: 60 }, (_, i) => [(i * 37) % 500, (i * 91) % 500, (i * 37) % 500 + 12, (i * 91) % 500 + 9]);
+  const out = coalesceRects(rs);
+  for (const [x0, y0, x1, y1] of rs) assert.ok(out.some(([a, b, c, d]) => a <= x0 && b <= y0 && c >= x1 && d >= y1));
+  // A row of neighbouring tiles (a new field of farms) becomes one rectangle.
+  assert.deepEqual(coalesceRects(Array.from({ length: 20 }, (_, i) => [i * 8, 0, i * 8 + 16, 16])), [[0, 0, 168, 16]]);
+});
+
+test('a thousand changed tiles coalesce quickly and stay covered', () => {
+  const rs = Array.from({ length: 1200 }, (_, i) => [(i % 40) * 20, Math.floor(i / 40) * 12, (i % 40) * 20 + 24, Math.floor(i / 40) * 12 + 16]);
+  const t0 = performance.now();
+  const out = coalesceRects(rs);
+  assert.ok(performance.now() - t0 < 50, 'fast');
+  for (const [x0, y0, x1, y1] of rs) assert.ok(out.some(([a, b, c, d]) => a <= x0 && b <= y0 && c >= x1 && d >= y1));
+  assert.ok(out.length <= 64);
+});
