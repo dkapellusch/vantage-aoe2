@@ -197,3 +197,10 @@ input.off-in { width: 74px; }
 .keys-group .keys td:last-child { color: #cfcabd; }
 .keys-group .keys tr:hover td { background: rgba(255,255,255,.04); }
 .keys-group kbd { padding: 1px 5px; border-bottom-width: 2px; color: var(--text); }
+/* Home lists: one line per fact; the file name sits quietly under the game. */
+.list .when { white-space: nowrap; }
+.list td.warn { white-space: nowrap; }
+.list td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.list .rec-file { font-size: 11px; margin: 1px 2px 0; opacity: .8; }
+.list th { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .03em; position: sticky; top: -16px; background: var(--panel-solid); z-index: 1; }
+.list td.nw { white-space: nowrap; }

@@ -797,7 +797,7 @@ function versionCell(r) {
   const msg = vs === 'old'
     ? t('Old game version: recorded on build {b}; the running game (build {cur}) may refuse to load it', { b: r.build || '?', cur: r.newest_build || r.game_build || '?' })
     : t('Unknown game version: Vantage cannot tell whether the running game can load it');
-  return `<td class="warn" ${tip(vs === 'old' ? t('Old version') : t('Unknown version'), msg)}>⚠ ${build}<div class="hint">${vs === 'old' ? t('old version') : t('unknown version')}</div></td>`;
+  return `<td class="warn" ${tip(vs === 'old' ? t('Old version') : t('Unknown version'), msg)}>⚠ ${build} <span class="hint">${vs === 'old' ? t('old version') : t('unknown version')}</span></td>`;
 }
 
 function replayDetails(r, spoilers) {
@@ -839,7 +839,32 @@ function filterReplays(reps, rf, f) {
   });
 }
 
-const date = (s) => (s ? new Date(s * 1000).toLocaleString() : '–');
+// "9 Nov, 09:22": the year only when it is not this one, the full date and
+// time on hover. toLocaleString's "11/9/2026, 9:22:33 AM" wrapped in every row.
+function date(s) {
+  if (!s) return '–';
+  const d = new Date(s * 1000);
+  const opts = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  return `<span class="when" title="${esc(d.toLocaleString())}">${esc(d.toLocaleString(language || undefined, opts))}</span>`;
+}
+
+// One recording as the lists show it: who played (recording_summary on the
+// server reads that in the background), else its file name.
+function recordingGame(r) {
+  const sm = r.summary;
+  if (sm && sm.players && sm.players.length) {
+    // Lobby teams are numbered in slot order, as the replay list numbers them
+    // (a key of 100 or more is a player without a team).
+    const keys = [...new Set(sm.players.map((p) => p.team).filter((k) => k && k < 100))];
+    const team = (p) => (keys.includes(p.team) ? `<sup>${keys.indexOf(p.team) + 1}</sup>` : '');
+    const chips = sm.players.map((p) => `<span class="rp" style="border-color:${esc(p.color || '#888')}">${esc(p.name)}${team(p)} <span class="hint">${esc(p.civ || '')}</span></span>`).join(' ');
+    return `<div class="rec-game">${chips}</div><div class="rec-file hint">${esc(r.name)}</div>`;
+  }
+  return `<div class="rec-game">${esc(r.name)}</div>${r.summary_pending ? `<div class="rec-file hint">${t('Loading…')}</div>` : ''}`;
+}
+const recordingMap = (r) => esc((r.summary && r.summary.map) || '');
+const recordingLength = (r) => (r.summary && r.summary.duration_ms ? fmtTime(r.summary.duration_ms) : '');
 const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
 const gameName = (g) => (g === 'ror' ? t('Return of Rome') : 'AoE2');
 
@@ -956,19 +981,19 @@ function overviewBody(recs, reps, sess) {
         <td><button data-play-ov="${esc(r.dir)}\n${esc(r.name)}" ${watchAttrs()}>${t('Watch')}</button></td></tr>`).join('')}</table>` : `<p class="hint">${t('No replays found in your profile folder.')}</p>`}
       <button class="link" data-goto="replays">${t('All replays ({n})', { n: reps.length })}</button></section>
     <section class="ov-card"><h3>${t('Recent recordings')}</h3>
-      ${recs.length ? `<table class="list">${recs.slice(0, 6).map((r) => `<tr><td>${esc(r.name)}</td><td class="hint">${date(r.mtime)}</td><td class="hint">${mb(r.size)}</td>
+      ${recs.length ? `<table class="list">${recs.slice(0, 6).map((r) => `<tr><td>${recordingGame(r)}</td><td class="nw">${recordingMap(r)}</td><td class="hint">${date(r.mtime)}</td>
         <td><button data-open="${esc(r.path)}">${t('Open')}</button></td></tr>`).join('')}</table>` : `<p class="hint">${t('No recordings yet. Live sessions can be saved to the vault from the Live game tab.')}</p>`}
       <button class="link" data-goto="recordings">${t('All recordings ({n})', { n: recs.length })}</button></section>
   </div>`;
 }
 
 function recordingsBody(recs, f) {
-  const rows = recs.filter((r) => !f || r.name.toLowerCase().includes(f) || JSON.stringify(r.header).toLowerCase().includes(f));
+  const rows = recs.filter((r) => !f || r.name.toLowerCase().includes(f) || JSON.stringify([r.header, r.summary]).toLowerCase().includes(f));
   return `<p class="hint">${t('Vantage recordings (.vrec) play back without the game.')}
       <button class="link" data-folder="recordings">${t('Open recordings folder')}</button>
       <button class="link" data-folder="images">${t('Open images folder')}</button></p>
-    <table class="list"><tr><th>${t('Recording')}</th><th>${t('Source')}</th><th>${t('Date')}</th><th>${t('Size')}</th><th></th></tr>
-    ${rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="hint">${esc(baseName((r.header || {}).replay || (r.header || {}).source || ''))}</td><td>${date(r.mtime)}</td><td>${mb(r.size)}</td>
+    <table class="list"><tr><th>${t('Recording')}</th><th>${t('Map')}</th><th>${t('Duration')}</th><th>${t('Source')}</th><th>${t('Date')}</th><th>${t('Size')}</th><th></th></tr>
+    ${rows.map((r) => `<tr><td>${recordingGame(r)}</td><td class="nw">${recordingMap(r)}</td><td class="num">${recordingLength(r)}</td><td class="hint">${esc(baseName((r.header || {}).replay || (r.header || {}).source || ''))}</td><td>${date(r.mtime)}</td><td class="num">${mb(r.size)}</td>
     <td><button data-open="${esc(r.path)}">${t('Open')}</button></td></tr>`).join('')}</table>
     <div class="form-row"><label>${t('Open a .vrec by path')}</label><input id="open-path" size="60"><button id="open-go">${t('Open')}</button></div>`;
 }
@@ -1110,6 +1135,13 @@ export async function renderHome(onOpened) {
   if (homeTab === 'replays' && reps.some((r) => !missingData(r) && r.duration_ms === undefined) && rf.spoilers) {
     clearTimeout(renderHome._poll);
     renderHome._poll = setTimeout(() => { if (!el.classList.contains('hidden') && homeTab === 'replays') rerender(); }, 3000);
+  }
+  // Recordings still being read (who played): look again shortly, unless a field has the focus.
+  if ((homeTab === 'recordings' || homeTab === 'overview') && recs.some((r) => r.summary_pending)) {
+    clearTimeout(renderHome._recPoll);
+    renderHome._recPoll = setTimeout(() => {
+      if (!el.classList.contains('hidden') && (homeTab === 'recordings' || homeTab === 'overview') && !el.contains(document.activeElement)) rerender();
+    }, 3000);
   }
   el.querySelectorAll('tr.rrow').forEach((tr) => tr.addEventListener('click', (ev) => {
     if (ev.target.closest('button')) return;

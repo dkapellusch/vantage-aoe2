@@ -112,7 +112,9 @@ function placeTools(p) {
   tools.style.left = `${Math.max(0, Math.min(window.innerWidth - w, r.right - w - 2))}px`;
   // Just above the panel's corner, so it covers none of its content (inside at the top edge).
   const h = tools.offsetHeight;
-  tools.style.top = `${r.top - h - 2 >= 0 ? r.top - h - 2 : r.top + 2}px`;
+  // A panel at the window's top edge (the scoreboard) has no room above: the
+  // tools go inside its bottom corner, which is clear, not over its first line.
+  tools.style.top = `${r.top - h - 2 >= 0 ? r.top - h - 2 : r.height >= 56 ? r.bottom - h - 2 : r.top + 2}px`;
   current = p;
 }
 

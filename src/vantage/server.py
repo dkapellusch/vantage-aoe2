@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from vantage import __version__
+from vantage import __version__, recording_summary
 from vantage.certs import cert_status, certs_dir, missing_cert_files
 from vantage.frames import RecordingWriter, read_header
 from vantage.gamedata import (
@@ -132,6 +132,8 @@ class Session:
         #: LIGHT_STREAM_MS.
         self._light_stream = False
         self._last_frame = 0.0
+        #: Reads what unopened recordings hold, for the recordings list.
+        self.summaries = recording_summary.Summarizer()
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -179,6 +181,12 @@ class Session:
                     if tl.feed(f) and f.is_snapshot:
                         settle_heap()
                 tl.finish()
+                # The recordings list shows who played and for how long: both
+                # are known now, at no cost.
+                if self.summaries.enabled and tl.match.get("players"):
+                    summary = recording_summary.describe(tl.match, self.data)
+                    summary["duration_ms"] = int(tl.end - tl.start)
+                    recording_summary.store(self.data.cache_dir, p, summary)
             except Exception as exc:  # surfaced to the UI; the server keeps running
                 self.error = f"{type(exc).__name__}: {exc}"
                 tl.finish()
@@ -499,6 +507,11 @@ class Session:
         self.source["needs_confirm"] = True
         self.source["status"] = "needs_confirm"
         self.source["code"] = code
+
+    def recording_path(self) -> Path | None:
+        """The ``.vrec`` being written now, if any."""
+        w = self._writer
+        return w.path if w is not None else None
 
     def _close_writer(self) -> None:
         """Close the live recording (caller holds ``_writer_lock``)."""
@@ -1566,11 +1579,21 @@ class App:
     def _recordings(self) -> list[dict[str, Any]]:
         out = []
         d = self.session.recordings_dir
+        data = self.session.data
+        live = self.session.recording_path()
+        unread: list[Path] = []
         for p in sorted(d.glob("*.vrec"), key=lambda p: p.stat().st_mtime, reverse=True):
             try:
                 hdr = read_header(p)
             except (OSError, ValueError, EOFError):
                 continue
+            # Who played and on what map (recording_summary): cached, else read
+            # in the background and present on a later listing. Not the file
+            # being written now: it changes with every frame.
+            known = self.session.summaries.enabled
+            summary = recording_summary.load(data.cache_dir, p) if known else None
+            if known and summary is None and p != live:
+                unread.append(p)
             out.append(
                 {
                     "path": str(p),
@@ -1578,8 +1601,11 @@ class App:
                     "size": p.stat().st_size,
                     "mtime": p.stat().st_mtime,
                     "header": hdr,
+                    "summary": summary,
+                    "summary_pending": known and summary is None and p != live,
                 }
             )
+        self.session.summaries.request(data.cache_dir, data.game_dir, unread)
         return out
 
     def _await_load(self, timeout: float = 4.0) -> dict[str, Any]:
