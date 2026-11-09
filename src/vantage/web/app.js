@@ -648,6 +648,7 @@ function tick(now) {
   const over = live && matchEnded(source());
   if (live && S.followLive) {
     S.t = over ? S.end : Math.max(S.start, S.end - 400);
+    if (over) S.playing = false; // opened after the end: stopped at it, not "playing" a frozen clock
   } else if (S.jump && S.jump.wait) {
     // A jump past the loaded part of a recording waits for the loader.
     if (S.end >= S.jump.to) { S.t = S.jump.to; S.jump.wait = false; resetViews(); }
@@ -916,6 +917,11 @@ function renderPauseBanner() {
   // The banner hides while the end-game screen shows; who paused is known only from API 22.
   const namesPauser = src.paused_by > 0 && Number(src.api_version) >= 22;
   if (overlays.isOpen('overlay-endgame')) pb.classList.add('hidden');
+  // A finished game stays paused at its end: that is the end, not a pause.
+  else if (matchEnded(src) && isLive()) {
+    if (S.end - S.t > 1500) pb.classList.add('hidden');
+    else { pb.textContent = t('Replay finished'); pb.classList.remove('hidden'); }
+  }
   // Reading a replay ahead, the game runs (and at its end pauses) well before the viewer
   // gets there: while buffered footage is still playing, the game's pause is not news.
   else if (src.paused && readAhead() && S.end - S.t > 1500) pb.classList.add('hidden');
