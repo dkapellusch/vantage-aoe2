@@ -218,3 +218,10 @@ body.no-ui #skin-logo { display: none; }
 .up-tbar i { display: block; height: 100%; }
 .up-tlegend { grid-column: 2; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .up-tlegend b { font-family: var(--mono); }
+#event-list li.quiet { color: var(--muted); font-size: 12px; }
+/* Event filters: eleven solid accent buttons outshouted the log beneath them.
+   Shown categories are plain; hidden ones recede. */
+#event-filters { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 1px; }
+#event-filters button { margin: 0; min-width: 20px; height: 20px; padding: 0 2px; border-color: transparent; background: none; color: var(--muted); opacity: .38; font-variant-emoji: text; filter: grayscale(1); }
+#event-filters button.on { opacity: 1; color: var(--text); background: rgba(255,255,255,.07); border-color: transparent; }
+#event-filters button:hover { opacity: 1; background: rgba(255,255,255,.14); }

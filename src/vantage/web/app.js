@@ -2,7 +2,7 @@
 
 import {
   S, settings, saveSettings, SPEEDS, api, fetchView, cachedView, cachedViewAt, clearViewCache, toast, players, playerName,
-  playerColor, fmtTime, unitInfo, unitIcon, applyServerConfig, tip, esc, tooltipLevel, refreshSeries, probeAssetOrigin, abortViews, viewTimings, viewStats,
+  playerMarkColor, fmtTime, unitInfo, unitIcon, applyServerConfig, tip, esc, tooltipLevel, refreshSeries, probeAssetOrigin, abortViews, viewTimings, viewStats,
 } from './state.js';
 import * as world from './world.js';
 import { loadMoments, toggleReviewTimeline, reviewStatus } from './review-workspace.js';
@@ -718,14 +718,43 @@ function tick(now) {
 // Placing the dashboard resets and measures panel boxes, a forced layout: do it
 // when one of the panels involved changed size (or the window did), and once a
 // second for anything else (a panel dragged elsewhere), not four times a second.
-let placeDirty = true, placedAt = 0;
+let placeDirty = true, placedAt = 0, placedFloaters = '';
 const placeObserver = new ResizeObserver(() => { placeDirty = true; });
 let placeObserved = false;
+// Caster: the slide-outs and the "resources left" strip keep clear of the panels
+// stacked bottom right (time controls, dashboard, selection) instead of covering them.
+function placeFloaters() {
+  const shown = (el) => el && !el.classList.contains('hidden') && !el.classList.contains('panel-off') && el.getClientRects().length;
+  const caster = document.body.dataset.hudLayout === 'caster';
+  const so = $('slideout');
+  if (shown(so)) {
+    const r = so.getBoundingClientRect();
+    let floor = window.innerHeight - 8;
+    for (const id of ['timebar', 'dashboard', 'unitpanel', 'resleft']) {
+      const el = $(id);
+      if (!shown(el)) continue;
+      const b = el.getBoundingClientRect();
+      if (b.left < r.right && b.right > r.left && b.top > r.top + 120) floor = Math.min(floor, b.top - 6);
+    }
+    const mh = `${Math.max(120, Math.round(floor - r.top))}px`;
+    if (so.style.maxHeight !== mh) so.style.maxHeight = mh;
+  }
+  const rl = $('resleft');
+  if (rl && !rl.classList.contains('hud-custom-size')) {
+    const tb = $('timebar'), m = $('minimap-wrap');
+    const above = caster && shown(rl) ? (shown(tb) ? tb : shown(m) ? m : null) : null;
+    const bottom = above ? `${Math.round(window.innerHeight - above.getBoundingClientRect().top + 6)}px` : '';
+    if (rl.style.bottom !== bottom) { rl.style.bottom = bottom; rl.style.right = above ? '8px' : ''; }
+  }
+}
+
 function placeDashboard() {
   placeDirty = false; placedAt = performance.now();
   if (!placeObserved) {
     placeObserved = true;
-    for (const id of ['dashboard', 'minimap-wrap', 'timebar', 'unitpanel', 'events']) if ($(id)) placeObserver.observe($(id));
+    // The left column's panels too: the team board widens for its Players view,
+    // and the dashboard beside it must make room in the same frame.
+    for (const id of ['dashboard', 'minimap-wrap', 'timebar', 'unitpanel', 'events', 'overview', 'techs', 'production']) if ($(id)) placeObserver.observe($(id));
     window.addEventListener('resize', () => { placeDirty = true; });
   }
   const d = $('dashboard'), m = $('minimap-wrap'), eventsPanel = $('events');
@@ -750,6 +779,7 @@ function placeDashboard() {
       else document.documentElement.style.removeProperty('--up-gap');
     }
   }
+  placeFloaters();
   if (!d || d.classList.contains('hidden')) return;
   const vw = window.innerWidth;
   const shown = (el) => el && !el.classList.contains('hidden') && !el.classList.contains('panel-off') && el.getClientRects().length;
@@ -895,6 +925,9 @@ function renderHud() {
   $('events').classList.toggle('hidden', !settings.showEvents);
   panels.renderUnitPanel();
   panels.renderResourcesLeft(showResLeft);
+  // A slide-out or the resources strip that just opened is placed in this frame.
+  const floaters = `${S.slideout || ''}|${showResLeft}`;
+  if (floaters !== placedFloaters) { placedFloaters = floaters; placeFloaters(); }
   panels.renderTimebar();
   layout.applyPanels();
   const pp = settings.post || {};
@@ -916,6 +949,11 @@ function renderHud() {
   const mode = tooltipLevel();
   if (mode !== tooltipMode) { tooltipMode = mode; document.body.dataset.tooltips = mode; translateStatic(); }
   if ($('fog-label').textContent !== fogLabel()) $('fog-label').textContent = fogLabel();
+  // The toolbar shows what is switched on, so a mode is never a guess.
+  $('btn-fog').classList.toggle('on', !!S.fogMode && S.fogMode !== 'off');
+  $('btn-mmmode').classList.toggle('on', !!S.minimapMode && S.minimapMode !== 'standard');
+  $('btn-res').classList.toggle('on', showResLeft);
+  $('btn-panels').classList.toggle('on', layout.panelsMenuOpen());
   panels.rememberSelection();
   renderTimeExtras();
   renderPauseBanner();
@@ -1619,7 +1657,7 @@ function renderHighlights() {
   patchHtml(list, `<h3>${t('Heroes')} <span class="hint">${t('units with {n}+ kills — click to replay their story', { n: HERO_KILLS })}</span></h3>
     ${hs.length ? hs.map((h) => `<div class="hl-row" data-hero="${h.id}" ${tip(heroName(h), t('Replay its birth, kills and death'))}>
       ${unitIcon(h.mid) ? `<img src="${unitIcon(h.mid)}" alt="">` : ''}
-      <div><div style="color:${playerColor(h.owner)};font-weight:600">${esc(heroName(h))}${h.fell != null ? ` <span class="hl-tag">✝ ${fmtTime(h.fell)}</span>` : ''}</div>
+      <div><div style="color:${playerMarkColor(h.owner)};font-weight:600">${esc(heroName(h))}${h.fell != null ? ` <span class="hl-tag">✝ ${fmtTime(h.fell)}</span>` : ''}</div>
       <div class="hl-tag">${esc(mostKilledTag(h))}</div></div>
       <span class="hl-kills">${t('{n} kills', { n: h.kills.length })}</span></div>`).join('') : `<div class="hint">${t('No heroes yet.')}</div>`}`);
 }
@@ -1641,7 +1679,7 @@ function sequenceBar(q) {
       <span class="hl-label">${t('Autocasting')}</span>
       ${fightSelectButton()}
       <button data-hl="pause" ${q.loading ? 'disabled' : ''} ${tip(pauseLabel, t('Pause or resume the sequence; resuming returns to the paused moment'))}>${q.paused || q.done ? '▶' : '⏸'} ${pauseLabel}</button>
-      <span class="hl-kbe" style="color:${playerColor(h.owner)}">${t('Kills by entity')}${icon ? ` <img src="${icon}" alt="">` : ''}</span>
+      <span class="hl-kbe" style="color:${playerMarkColor(h.owner)}">${t('Kills by entity')}${icon ? ` <img src="${icon}" alt="">` : ''}</span>
       ${q.loading ? `<span class="hl-tag">${t('Preparing…')}</span>` : `${navBtn('prev', q.idx - 1, t('Previous'), t('Jump to the previous moment'))}
       ${navBtn('cur', q.idx, t('Current'), t('Replay the current moment'))}
       ${navBtn('next', q.idx + 1, t('Next'), t('Jump to the next moment'))}`}
@@ -1778,10 +1816,10 @@ function toggleOmni() {
     return `<button data-omni="${a}"><span>${t(label)}</span>${k && k !== '—' ? `<kbd>${esc(keyLabel(k))}</kbd>` : ''}</button>`;
   }).join('')}`;
   const r = $('btn-menu').getBoundingClientRect();
-  el.style.left = `${Math.max(8, r.left)}px`;
   el.style.bottom = `${Math.max(8, window.innerHeight - r.top + 4)}px`;
   el.style.top = 'auto';
   el.classList.remove('hidden');
+  el.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - el.offsetWidth - 8))}px`;
   const first = el.querySelector('button');
   if (first) first.focus();
 }

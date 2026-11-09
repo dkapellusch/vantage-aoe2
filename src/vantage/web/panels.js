@@ -11,7 +11,7 @@ import {
   ARMOR_CLASSES, KING_MASTER, treeCategory, SETTLEMENT_MASTERS, FARM_TECHS, PASTURE_TECHS, POWER_TECHS, SHARED_CASTLE_TECHS,
 } from './games.js';
 import {
-  S, settings, saveSettings, SPEEDS, fmtTime, fmtNum, fmtStock, esc, players, player, playerName, playerColor,
+  S, settings, saveSettings, SPEEDS, fmtTime, fmtNum, fmtStock, esc, players, player, playerName, playerMarkColor,
   teams, teamIcon, plainTeamName, teamMemberLabel, layoutKind, isTwoTeamLayout, sideTeams, teamName, unitInfo, entityStatsValid, entityStatsUsable, legacyStatsFresh, unitIcon, techInfo, techIcon, emblem, playerStats,
   cyclePlayerColor, playerTextColor, AGE_NAMES, RES, tip, techInfoFor, techIconFor, ageName, ageIcon, civEra,
   skinOption, skinAsset,
@@ -465,7 +465,7 @@ function playerTile(p, opts = {}) {
   const flag = settings.playerImages[p.id] ? `<img class="flag" src="${esc(settings.playerImages[p.id])}" alt="">` : '';
   const rank = opts.rank ? `<span class="sb-rank" ${tip(t('Rank'), t('By score; defeated players last'))}>${opts.rank}</span>` : '';
   const persp = S.fogMode !== 'off' && S.perspective === p.id ? ' persp' : '';
-  return `<div class="sb-player ${isDead(p.id) ? 'dead' : ''}${persp}" data-pid="${p.id}" style="border-color:${playerColor(p.id)}" ${tip(t('Click: change colour'), t('Click the name for team details (Ctrl+Alt+R) · hover the emblem for the tech tree'))}>
+  return `<div class="sb-player ${isDead(p.id) ? 'dead' : ''}${persp}" data-pid="${p.id}" style="border-color:${playerMarkColor(p.id)}" ${tip(t('Click: change colour'), t('Click the name for team details (Ctrl+Alt+R) · hover the emblem for the tech tree'))}>
     ${rank}${flag}<img class="emblem" src="${emblem(p.civ)}" alt="">
     <div><div class="sb-name"><span class="sb-pname" data-details="1">${captain}${esc(playerName(p.id, true))}</span> ${opts.king || ''}</div><div class="sb-sub">${esc(civName(p))}${elo}${opts.dots || ''}</div></div>${score}</div>`;
 }
@@ -498,7 +498,7 @@ function teamChip(p, opts) {
   const elo = e ? `<span class="sb-elo" ${tip(t('Elo'), t(ELO_TIP))}>${e.v}${e.kind ? ' ' + e.kind : ''}</span>` : '';
   const score = settings.hideScore || solo ? '' : `<span class="sb-score" ${scoreTip(s, t('Score'))}>${fmtNum(playerScore(p.id))}</span>`;
   const full = `${playerName(p.id, true)} · ${civName(p)}`;
-  return `<div class="sb-player sb-chip ${isDead(p.id) ? 'dead' : ''}${persp}" data-pid="${p.id}" style="--pc:${playerColor(p.id)}" ${tip(full, t('Click: change colour · click the name for team details (Ctrl+Alt+R) · hover the emblem for the tech tree'))}>
+  return `<div class="sb-player sb-chip ${isDead(p.id) ? 'dead' : ''}${persp}" data-pid="${p.id}" style="--pc:${playerMarkColor(p.id)}" ${tip(full, t('Click: change colour · click the name for team details (Ctrl+Alt+R) · hover the emblem for the tech tree'))}>
     ${flag}<img class="emblem" src="${emblem(p.civ)}" alt=""><span class="sb-pname" data-details="1">${captain}${esc(label)}</span>${opts.king || ''}${elo}${score}</div>`;
 }
 
@@ -511,7 +511,7 @@ function teamSide(team, right, sr, kingFor) {
   const avg = settings.teamScore === 'average';
   const total = teamScoreOn() ? `<span class="sb-total" ${scoreTip(teamScoreStats(team), t(avg ? 'Team average score' : 'Team score'))}>${avg && team.players.length > 1 ? '⌀ ' : ''}${fmtNum(teamScoreValue(team))}</span>` : '';
   const label = `<span class="sb-tname" data-details="1" ${tip(plainTeamName(team), t('Click: team details (Ctrl+Alt+R)'))}>${esc(teamName(team))}${twins ? `<small class="sb-count">×${names.length}</small>` : ''}</span>`;
-  const head = `<div class="sb-teamhead" style="--tc:${playerColor(team.players[0].id)}"><i class="sb-strip"></i>${ico ? `<img class="sb-team-ico" src="${esc(ico)}" alt="">` : ''}${label}${seed ? `<span class="sb-seed" ${tip(t('Seed'))}>${esc(seed)}</span>` : ''}${dotsHtml(sr, key)}${total}</div>`;
+  const head = `<div class="sb-teamhead" style="--tc:${playerMarkColor(team.players[0].id)}"><i class="sb-strip"></i>${ico ? `<img class="sb-team-ico" src="${esc(ico)}" alt="">` : ''}${label}${seed ? `<span class="sb-seed" ${tip(t('Seed'))}>${esc(seed)}</span>` : ''}${dotsHtml(sr, key)}${total}</div>`;
   return `<div class="sb-side ${right ? 'right' : ''}">${head}<div class="team ${right ? 'right' : ''}">${team.players.map((p) => teamChip(p, { king: kingFor(p) })).join('')}</div></div>`;
 }
 
@@ -523,7 +523,7 @@ function leadHtml(a, b) {
   const lead = Math.round(d) === 0 ? `<div class="sb-lead even">${esc(t('even'))}</div>`
     : `<div class="sb-lead" style="color:${playerTextColor(ahead.players[0].id)}" ${tip(t('Lead'), teamName(ahead))}>${d > 0 ? '<b class="arr">◀</b>' : ''}${fmtNum(Math.abs(d))}${d < 0 ? '<b class="arr">▶</b>' : ''}</div>`;
   const share = (100 * va) / tot;
-  return `<div class="sb-share" ${tip(t('Score share'), `${Math.round(share)}% – ${Math.round(100 - share)}%`)}><i style="width:${share.toFixed(1)}%;background:${playerColor(a.players[0].id)}"></i><i style="background:${playerColor(b.players[0].id)}"></i></div>${lead}`;
+  return `<div class="sb-share" ${tip(t('Score share'), `${Math.round(share)}% – ${Math.round(100 - share)}%`)}><i style="width:${share.toFixed(1)}%;background:${playerMarkColor(a.players[0].id)}"></i><i style="background:${playerMarkColor(b.players[0].id)}"></i></div>${lead}`;
 }
 
 export function renderScoreboard(speedLabel) {
@@ -552,7 +552,7 @@ export function renderScoreboard(speedLabel) {
     html = `${centerBlock(speedLabel, sr)}<table class="sb-community">${ranked.map((p, i) => {
       const s = playerStats(p.id) || {};
       return `<tr class="sb-player ${isDead(p.id) ? 'dead' : ''}" data-pid="${p.id}" ${tip(t('Click: change colour'), t('Click the name for team details'))}>
-        <td class="sb-rank">${i + 1}</td><td><i class="sb-swatch" style="background:${playerColor(p.id)}"></i></td>
+        <td class="sb-rank">${i + 1}</td><td><i class="sb-swatch" style="background:${playerMarkColor(p.id)}"></i></td>
         <td><img class="emblem" src="${emblem(p.civ)}" alt=""></td>
         <td class="sb-name"><span class="sb-pname" data-details="1" style="color:${playerTextColor(p.id)}">${esc(playerName(p.id))}</span> ${kingFor(p)}${dotsHtml(sr, String(p.id))}</td>
         <td class="sb-sub">${esc(civName(p))}</td><td>${has(s.age) ? `<img class="sb-age" src="${AGE_ICON(s.age, p.id)}" alt="" ${tip(ageName(s.age, p.id))}>` : ''}</td>
@@ -698,7 +698,7 @@ function victoryHtml() {
       parts.push(`<div class="vic-row" ${tip(t('King of the Hill'), t('Who holds the monument and how long until they win'))}>
         <span class="vic-ico">⛰</span><span>${pn(own)}</span>
         <span class="num">${esc(t('{time} left', { time: t('{n} years', { n: time }) }))}</span>
-        <div class="vic-bar koth"><i style="width:${(frac * 100).toFixed(2)}%;background:${playerColor(own)}"></i><b class="koth-band" style="width:${(100 / 550 * 100).toFixed(2)}%"></b></div></div>`);
+        <div class="vic-bar koth"><i style="width:${(frac * 100).toFixed(2)}%;background:${playerMarkColor(own)}"></i><b class="koth-band" style="width:${(100 / 550 * 100).toFixed(2)}%"></b></div></div>`);
     }
   }
   const cd = countdownInfo(v);
@@ -774,7 +774,7 @@ export function renderOverview() {
       const tasks = s.tasks || {};
       const res = RES.map((r) => `<span class="${r}" ${tip(t(r), t('{n} banked, {w} workers', { n: fmtStock(s.resources[r]), w: tasks[r] || 0 }))}>${fmtStock(s.resources[r])}<small>${tasks[r] || 0}</small></span>`).join('');
       rows.push(`<div class="ov-row${isDead(p.id) ? ' dead' : ''}" data-pid="${p.id}">
-        <div class="ov-color" style="background:${playerColor(p.id)}"></div>
+        <div class="ov-color" style="background:${playerMarkColor(p.id)}"></div>
         ${ageShield(s, p.id)}
         <div><div class="ov-name">${esc(playerName(p.id))}</div>
           <div class="ov-civ"><span ${tip(t('Villagers'), t('Including garrisoned ones, as the game counts them'))}>${t('{n} vil', { n: s.villagers })}</span> · ${t('{n} mil', { n: s.military })} · <span ${tip(t('idle villagers'))} style="color:${s.idle_villagers ? 'var(--bad)' : 'inherit'}">${t('{n} idle', { n: s.idle_villagers })}</span></div>${reqs}</div>
@@ -918,7 +918,7 @@ export function renderTechs() {
     const dynActive = (s.research_active || []).filter((a) => !isStatic(a.tech) && !utSet.has(a.tech));
     const dyn = dynActive.map((a) => `<div class="tech doing" data-tech="${a.tech}" data-pid="${a.player || pid}" data-building="${a.building || ''}" ${tip(techInfoFor(a.tech, a.player || pid).name, `${t('researching {p}%', { p: Math.round(a.progress * 100) })} · ${t('click: go to its building')}`)}><img src="${techIconFor(a.tech, a.player || pid)}" alt=""><div class="prog" style="width:${Math.round(a.progress * 100)}%"></div></div>`).join('');
     const linger = lingering(pids, new Set([...dynActive.map((a) => a.tech), ...utSet])).map((e) => `<div class="tech yes linger" data-tech="${e.tech}" data-pid="${e.player}" data-x="${e.x ?? ''}" data-y="${e.y ?? ''}" ${tip(techInfoFor(e.tech, e.player).name, t('researched'))}><img src="${techIconFor(e.tech, e.player)}" alt=""></div>`).join('');
-    rows.push(`<div class="tech-row${isDead(pid) ? ' dead' : ''}"><div class="who" style="background:${playerColor(pid)}"></div>${groups}<div class="dyn-techs">${dyn}${linger}</div></div>`);
+    rows.push(`<div class="tech-row${isDead(pid) ? ' dead' : ''}"><div class="who" style="background:${playerMarkColor(pid)}"></div>${groups}<div class="dyn-techs">${dyn}${linger}</div></div>`);
   }
   // Square icons, as large as fit a row (min 12 px): never squashed into slivers.
   const room = Math.min(window.innerWidth * 0.55, 1100) - 80;
@@ -1002,7 +1002,7 @@ function renderSlideout() {
       if (!s) return '';
       const done = new Set(s.research_done || []);
       const active = new Map((s.research_active || []).map((a) => [a.tech, a]));
-      return `<div class="so-row"><div class="so-name" style="border-color:${playerColor(p.id)}">${esc(playerName(p.id))}</div>${[...staticGroups([p.id]), ...fullTechGroups([p.id])].map((g) => `<div class="so-group">${g.map((tid) => staticTechCell(tid, p.id, done, active, true)).join('')}</div>`).join('')}</div>`;
+      return `<div class="so-row"><div class="so-name" style="border-color:${playerMarkColor(p.id)}">${esc(playerName(p.id))}</div>${[...staticGroups([p.id]), ...fullTechGroups([p.id])].map((g) => `<div class="so-group">${g.map((tid) => staticTechCell(tid, p.id, done, active, true)).join('')}</div>`).join('')}</div>`;
     }).join('');
     const html = `<div class="so-head"><span class="title">${t('Technologies')}</span><span class="hint">Alt+P</span></div>${rows}`;
     if (el._html !== html) { el._html = html; patchHtml(el, html); }
@@ -1059,7 +1059,7 @@ function miniChart(canvas, key) {
   g.fillText(fmtTime(t0), L, H - 2); g.fillText(fmtTime(t1), W - 40, H - 2);
   data.forEach((rows, i) => {
     if (!rows.length) return;
-    g.strokeStyle = playerColor(ps[i].id); g.lineWidth = 1.6; g.beginPath();
+    g.strokeStyle = playerMarkColor(ps[i].id); g.lineWidth = 1.6; g.beginPath();
     rows.forEach((x, k) => { const px = xOf(x.t), py = yOf(+x[key] || 0); if (k) g.lineTo(px, py); else g.moveTo(px, py); });
     g.stroke();
   });
@@ -1171,7 +1171,7 @@ export function renderProduction() {
       const s = playerStats(p.id);
       if (!s) continue;
       for (const [mid, n] of Object.entries(s.units || {})) total[mid] = (total[mid] || 0) + n;
-      rows.push(`<div class="prod-row${isDead(p.id) ? ' dead' : ''}" data-ui-key="player-${p.id}"><span class="dot" style="background:${playerColor(p.id)}"></span>${compIcons(s.units || {}, p.id)}<span class="tech-gap"></span>${productionHtml(s.production || [], p.id)}</div>`);
+      rows.push(`<div class="prod-row${isDead(p.id) ? ' dead' : ''}" data-ui-key="player-${p.id}"><span class="dot" style="background:${playerMarkColor(p.id)}"></span>${compIcons(s.units || {}, p.id)}<span class="tech-gap"></span>${productionHtml(s.production || [], p.id)}</div>`);
     }
     if (team.players.length > 1 && Object.keys(total).length) {
       rows.push(`<div class="prod-row team-total" data-ui-key="team-${esc(team.key)}"><span class="tt-label" ${tip(t('Team composition'), teamName(team))}>Σ</span>${compIcons(total, 0, String(team.key))}</div>`);
@@ -1488,7 +1488,7 @@ export function renderDashboard() {
     const icons = headerIcons(c);
     return `<th ${tip(t(m.h), t(m.tip || ''))}>${icons || t(m.abbr || m.h)}</th>`;
   };
-  const nameTd = (pid, right) => `<td class="pname${right ? ' r' : ''}" style="border-color:${playerColor(pid)}">${esc(playerName(pid))}</td>`;
+  const nameTd = (pid, right) => `<td class="pname${right ? ' r' : ''}" style="border-color:${playerMarkColor(pid)}">${esc(playerName(pid))}</td>`;
   const two = isTwoTeamLayout() && teams().length === 2;
   const combine = layout === 'nonOppositional';
   const td = (c, s, pid) => {
@@ -1704,9 +1704,9 @@ function isHigh(e) {
 }
 
 function eventLi(e, i, attr = 'data-i') {
-  return `<li data-ui-key="${esc(JSON.stringify([e.t, e.kind, e.player, e.x, e.y, e.unit, e.killer, e.victim]))}" class="${isHigh(e) ? 'high' : ''}" ${attr}="${i}">
+  return `<li data-ui-key="${esc(JSON.stringify([e.t, e.kind, e.player, e.x, e.y, e.unit, e.killer, e.victim]))}" class="${isHigh(e) ? 'high' : e.kind === 'under_attack' ? 'quiet' : ''}" ${attr}="${i}">
     <span class="et" data-t="${e.t}" ${tip(t('Jump to this moment'))}>${fmtTime(e.t)}</span>
-    <span class="ec" style="background:${playerColor(e.player)}"></span><span>${eventText(e)}</span></li>`;
+    <span class="ec" style="background:${playerMarkColor(e.player)}"></span><span>${eventText(e)}</span></li>`;
 }
 
 let shownEvents = '';
@@ -1725,8 +1725,23 @@ function recentVisibleEvents(limit) {
   while (lo < hi) { const m = (lo + hi) >> 1; if (ev[m].t <= S.t) lo = m + 1; else hi = m; }
   const out = [];
   const hidden = settings.eventFilterOut;
-  for (let i = lo - 1; i >= 0 && out.length < limit; i--) if (!ageUpRepeat(ev, i) && !hidden.includes(eventCat(ev[i]))) out.push(ev[i]);
+  for (let i = lo - 1; i >= 0 && out.length < limit; i--) if (!ageUpRepeat(ev, i) && !attackRepeat(ev, i) && !hidden.includes(eventCat(ev[i]))) out.push(ev[i]);
   return out.reverse();
+}
+
+// The game raises "under attack" every few seconds for as long as a fight lasts:
+// a raid filled the log with one sentence per unit hit and pushed the kills out
+// of sight. One alert per player per half minute says the same; alerts the
+// server marks high (kings, towns under siege) always show.
+const ATTACK_FOLD_MS = 30000;
+function attackRepeat(ev, i) {
+  const e = ev[i];
+  if (e.kind !== 'under_attack' || e.priority === 'high') return false;
+  const slot = Math.floor(e.t / ATTACK_FOLD_MS);
+  for (let j = i - 1; j >= 0 && Math.floor(ev[j].t / ATTACK_FOLD_MS) === slot; j--) {
+    if (ev[j].kind === 'under_attack' && ev[j].player === e.player) return true;
+  }
+  return false;
 }
 
 // age_up (derived a keyframe after the fact) repeats the age research event when
@@ -1819,12 +1834,12 @@ function renderPinned(box, vis) {
   // Only alerts are pinned above the log (the log right below already lists the rest).
   const live = vis.filter((e) => e.kind !== 'age_up' && e.cat !== 'status' && isHigh(e) && S.t - e.t < noteMs(e)).slice(-NOTE_ROWS);
   highEvents = live;
-  const key = language + live.map((e) => e.t + e.kind + (e.player ?? '') + (isHigh(e) ? playerColor(targetPlayer(e)) : '')).join('|');
+  const key = language + live.map((e) => e.t + e.kind + (e.player ?? '') + (isHigh(e) ? playerMarkColor(targetPlayer(e)) : '')).join('|');
   if (key !== shownPinned) {
     shownPinned = key;
     patchHtml(box, live.map((e, i) => {
       const high = isHigh(e);
-      const tint = high ? ` style="background:${playerColor(targetPlayer(e))}33"` : '';
+      const tint = high ? ` style="background:${playerMarkColor(targetPlayer(e))}33"` : '';
       return eventLi(e, i).replace('<li ', `<li${tint} `);
     }).join(''));
   }
@@ -1866,7 +1881,7 @@ function gaiaPanel(el) {
 
 function deadIcon(id) {
   const d = S.selectionInfo.get(id);
-  return `<div class="icon-count" ${tip(unitInfo(d.mid, d.owner).name, t('dead'))} style="outline:2px solid ${playerColor(d.owner)}"><img src="${unitIcon(d.mid, d.owner)}" alt="" style="filter:grayscale(1) brightness(.6)"><b>☠</b></div>`;
+  return `<div class="icon-count" ${tip(unitInfo(d.mid, d.owner).name, t('dead'))} style="outline:2px solid ${playerMarkColor(d.owner)}"><img src="${unitIcon(d.mid, d.owner)}" alt="" style="filter:grayscale(1) brightness(.6)"><b>☠</b></div>`;
 }
 
 // Kills, damage dealt/taken (with per-type breakdown on hover), conversions.
@@ -2259,7 +2274,7 @@ function groupHtml(rows, deadIds, compact = false) {
     const g = (k) => (has(st[k]) ? st[k] : e.authoritative ? null : us[k]);
     const frac = e.max ? e.hp / e.max : 1;
     return `<div class="up-trow" data-mid="${[...e.mids].join(',')}" data-owner="${e.o}" data-ids="${e.ids.join(',')}" ${tip(e.u.name, t('click: select one · Shift: select row · Ctrl: remove one · Ctrl+Shift: remove row'))}>
-      <span class="up-ticon" style="outline:2px solid ${playerColor(e.o)}"><img src="${unitIcon(e.mid, e.o, e.ids[0])}" alt=""><b>${e.n}</b></span>
+      <span class="up-ticon" style="outline:2px solid ${playerMarkColor(e.o)}"><img src="${unitIcon(e.mid, e.o, e.ids[0])}" alt=""><b>${e.n}</b></span>
       <span class="up-tname">${esc(e.u.name)}<i class="up-thp"><i style="width:${Math.round(clamp(e.max ? frac : 0, 0, 1) * 100)}%"></i></i></span>
       <span ${tip(t('Attack'))}>${num(g('attack'))}</span><span ${tip(t('Melee / pierce armour'))}>${num(g('melee_armor'))}/${num(g('pierce_armor'))}</span><span ${tip(t('Range'))}>${num(g('range'))}</span>
     </div>`;
@@ -2427,10 +2442,9 @@ export function renderResourcesLeft(show) {
   if (!rows || !rows.length) { setHtml(el, `<span class="hint">${t('no data yet')}</span>`); return; }
   let r = rows[0];
   for (const x of rows) { if (x.t <= S.t) r = x; else break; }
-  setHtml(el, `<div class="title">${t('Resources left on map')}</div>
-    <div style="color:var(--food)">${t('Food')} ${fmtNum(r.food)}</div><div style="color:var(--wood)">${t('Wood')} ${fmtNum(r.wood)}</div>
-    <div style="color:var(--gold)">${t('Gold')} ${fmtNum(r.gold)}</div><div style="color:var(--stone)">${t('Stone')} ${fmtNum(r.stone)}</div>
-    <div>${t('Relics')} ${r.relics}</div>`);
+  // One strip: what is still out there, with the game's own resource icons.
+  const cell = (res, label, v) => `<span class="rl-cell" ${tip(t(label))}><img src="/ui/resource_${res}.png" alt="${esc(t(label))}"><b>${fmtNum(v)}</b></span>`;
+  setHtml(el, `<span class="rl-title">${t('Resources left on map')}</span>${cell('food', 'Food', r.food)}${cell('wood', 'Wood', r.wood)}${cell('gold', 'Gold', r.gold)}${cell('stone', 'Stone', r.stone)}<span class="rl-cell" ${tip(t('Relics'))}><span class="rl-lab">${t('Relics')}</span><b>${r.relics}</b></span>`);
 }
 
 // -- time controls -----------------------------------------------------------------------------
@@ -2438,7 +2452,8 @@ export function renderResourcesLeft(show) {
 export function renderTimebar() {
   const sp = SPEEDS[S.speedIndex];
   setText($('tc-speed'), (S.playing ? '' : '❚❚ ') + (sp < 0 ? '◀ ' : '') + Math.abs(sp) + '×');
-  setText($('tc-play'), S.playing ? '⏸' : '▶');
+  $('tc-play').classList.toggle('ico-pause', !!S.playing);
+  $('tc-play').classList.toggle('ico-play', !S.playing);
   // The shuttle buttons light up while playing fast in their direction.
   $('tc-rew').classList.toggle('on', S.playing && sp < 0);
   $('tc-ff').classList.toggle('on', S.playing && sp > 1);
@@ -2475,7 +2490,7 @@ export function drawScrub() {
     const e = S.events[i];
     if (ageUpRepeat(S.events, i)) continue; // one tick per age
     if (e.cat !== 'age' && e.cat !== 'status' && e.cat !== 'victory' && !(e.kind === 'kill' && e.victim && (e.victim.kind === 'building'))) continue;
-    g.fillStyle = playerColor(e.player);
+    g.fillStyle = playerMarkColor(e.player);
     g.fillRect(xOf(e.t) - 1, e.cat === 'age' ? 2 : H - 8, 2, 6);
   }
   for (const b of S.bookmarks) {

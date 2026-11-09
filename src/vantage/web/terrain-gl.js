@@ -57,6 +57,7 @@ function init() {
   canvas = document.createElement('canvas');
   gl = canvas.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: false });
   if (!gl) return false;
+  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost(); });
   const vs = `attribute vec3 p; uniform vec4 cam; uniform vec4 view; varying vec2 uv; uniform vec4 uvMap;
     void main() {
       // cam: x, y (tile), zoom, unused; view: w, h (css px), tile w, tile h
@@ -87,6 +88,18 @@ function init() {
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   return true;
 }
+
+// A lost context (a driver reset, the GPU process restarting, memory pressure)
+// takes every buffer, texture and program with it: forget them all and start
+// over with a new canvas on the next frame, as the sprite renderer does.
+let lostListener = null;
+function lost() {
+  gl = null; canvas = null; prog = null; loc = null; compose = null;
+  chunkMesh.clear(); fullMesh = null; textures.clear(); composed.clear(); imageTex.clear();
+  if (lostListener) lostListener();
+}
+/** Call `fn` after the context is lost, so the caller drops what it drew with it. */
+export function onContextLost(fn) { lostListener = fn; }
 
 /** Can the height-mapped ground be drawn (WebGL available, heights set)? */
 export function available() { return !!corner && init(); }

@@ -565,6 +565,28 @@ export function playerColor(pid, key = 'primary') {
   return scheme || skinColor(pid, key, p.color_id) || p.color;
 }
 
+// Player colour for marks on the dark panels (bars, strips, chart lines, swatches):
+// the game colour itself, lifted towards white only while it is too dark to
+// read there. Pure blue (#0000ff) has a tenth of yellow's luminance and all but
+// vanished as a thin bar or line; it becomes the lighter blue the game's own
+// interface uses. Colours that already read (red, green, yellow...) are untouched.
+const markCache = new Map();
+export function playerMarkColor(pid) {
+  const c = playerColor(pid);
+  let out = markCache.get(c);
+  if (out) return out;
+  const m = /^#([0-9a-f]{6})$/i.exec(c || '');
+  if (!m) return c;
+  const n = parseInt(m[1], 16);
+  let rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const lin = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+  const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  for (let i = 0; i < 12 && lum(rgb) < 0.16; i++) rgb = rgb.map((v) => Math.round(v + (255 - v) * 0.08));
+  out = `#${rgb.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  markCache.set(c, out);
+  return out;
+}
+
 // Player colour lifted towards white, for text on dark panels.
 export function playerTextColor(pid) {
   const bright = skinColor(pid, 'primaryBright', (S.colorOverride[pid] ?? (player(pid) || {}).color_id));

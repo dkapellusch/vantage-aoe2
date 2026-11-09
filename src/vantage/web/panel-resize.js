@@ -161,6 +161,9 @@ function placeHandles() {
     && !host.closest('.hidden, .panel-off, .collapsed') && !document.body.classList.contains('no-ui');
   handleBox.classList.toggle('hidden', !visible);
   if (!visible) return;
+  // A HUD panel's handles hide under an open overlay (shell.css): the overlay
+  // may open from the keyboard while the pointer still rests on the panel.
+  handleBox.classList.toggle('for-hud', !!host.closest('#hud'));
   const r = host.getBoundingClientRect();
   for (const button of handleBox.children) {
     const corner = button.dataset.corner;

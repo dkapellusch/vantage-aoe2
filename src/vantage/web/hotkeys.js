@@ -213,6 +213,33 @@ export function actionFor(e) {
   return table.get(eventCombo(e)) || null;
 }
 
+// The quick reference's sections, in reading order. An action belongs to the first
+// group whose test accepts it; "Panels" takes the rest.
+const KEY_GROUPS = [
+  ['Time controls', /^(toggleScrubbingBar|pause|playPause|speedStep|skip|bookmark|jump)/],
+  ['Selecting and following', /^(followSelection|unFollowSelection|focusSelection|setZoomLevel|updateZoomLevel|gotoIdle|gotoKing|toggleCursorClip)/],
+  ['Fog of war and perspective', /FogOfWar|^setPerspective|^setPlayer\d/],
+  ['Colours and display', /^(cycleMinimapMode|toggleRangeCircles|cycleBaseColorMode|cycleColorMode|toggleOverlayDisplay|toggleMinimapDisplayWhenNoOverlay|showGameSpeedAndFps|toggleFullScreen|toggleCrossThreadProfiling)$/],
+  ['Autocast', /^(toggleAutocast|showHighlights)$/],
+  ['Go to the next building', /^goto/],
+  ['Select every building of a type', /^selectAll/],
+  ['Control groups', /ControlGroup/],
+  ['Panels', /./],
+];
+
+/** describeKeys() in sections: [[title, [[binding, description], ...]], ...]. */
+export function describeKeyGroups() {
+  const groups = KEY_GROUPS.map(([title]) => [title, []]);
+  for (const a of Object.keys(KEYMAP)) {
+    if (/ControlGroup[1-9]/.test(a)) continue;
+    groups[KEY_GROUPS.findIndex(([, test]) => test.test(a))][1].push([binding(a), KEYMAP[a][1]]);
+  }
+  // "Panels" (everything else) reads best right after the time controls.
+  const rest = groups.pop();
+  groups.splice(1, 0, rest);
+  return groups.filter(([, rows]) => rows.length);
+}
+
 export function describeKeys() {
   return Object.keys(KEYMAP).filter((a) => !/ControlGroup[1-9]/.test(a)).map((a) => [binding(a), KEYMAP[a][1]]);
 }

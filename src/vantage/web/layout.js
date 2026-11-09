@@ -179,9 +179,11 @@ export function togglePanelsMenu(anchor) {
   if (panelsMenuOpen()) { closePanelsMenu(); return; }
   renderMenu();
   const r = (anchor || $('btn-panels')).getBoundingClientRect();
-  el.style.left = `${Math.max(8, r.left)}px`;
   el.style.bottom = `${Math.max(8, window.innerHeight - r.top + 4)}px`;
   el.classList.remove('hidden');
+  // Beside its button, but never past the window's edge (the button sits at the
+  // right edge in the caster layout).
+  el.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - el.offsetWidth - 8))}px`;
 }
 
 export function installPanelsMenu(onChange) {

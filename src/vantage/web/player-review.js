@@ -102,7 +102,14 @@ export function performanceCells(data, grouped, scope = 'life') {
     ['pressure', data?.forced_idle_seconds != null ? `≈${(data.forced_idle_seconds / 60).toFixed(1)}` : '–', t('Forced · vil·min'), t('Estimated downtime of directly attacked workers moving, idle or garrisoned within 15 seconds and 12 tiles; excludes unhit workers and avoids double counting')],
   ];
   const needsRestart = data && (!Object.hasOwn(data, 'destroyed_value') || !Object.hasOwn(data, 'forced_idle_seconds') || !supportsScopes);
-  return `${needsRestart ? `<div class="review-metrics-unavailable" role="status">${t('Restart Vantage for review metrics')}</div>` : ''}<div class="review-performance">${cells.map(([icon, value, label, detail]) => `<div class="review-metric" tabindex="0" ${tip(label, detail)}>${reviewIcon(icon)}<b>${value}</b><span>${label}</span></div>`).join('')}</div>`;
+  return `${needsRestart ? `<div class="review-metrics-unavailable" role="status">${t('Restart Vantage for review metrics')}</div>` : ''}<div class="review-performance">${cells.map(([icon, value, label, detail]) => `<div class="review-metric" tabindex="0" ${tip(label, detail)}>${reviewIcon(icon)}<b>${value}</b>${metricLabel(label)}</div>`).join('')}</div>`;
+}
+
+// "Idle · unit·min": the name on one line and its unit beneath, so five
+// metrics fit side by side without their labels running into each other.
+function metricLabel(label) {
+  const [name, ...unit] = label.split(' · ');
+  return `<span>${name}${unit.length ? `<small>${unit.join(' · ')}</small>` : ''}</span>`;
 }
 
 export function militaryCard(ids) {

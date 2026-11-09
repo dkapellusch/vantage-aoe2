@@ -39,15 +39,15 @@
   </section>
   <section id="minimap-wrap" class="panel">
     <div id="minimap-tools">
-      <button id="btn-menu" title="Menu (Esc)">⛨</button>
-      <button id="btn-home" title="Replays &amp; recordings (Ctrl+O)">⌂</button>
-      <a id="btn-native" href="/native" title="Open a replay without the game" aria-label="Open a replay without the game" style="display:inline-grid;place-items:center;min-width:28px;color:inherit;text-decoration:none">↗</a>
-      <button id="btn-stats" title="Statistics (Ctrl+Alt+S)">▤</button>
-      <button id="btn-fog" title="Fog of war: click or right-click cycles off / spy / standard, middle-click combines team fog (Alt+F)">◐</button>
-      <button id="btn-mmmode" title="Minimap mode: click or right-click cycles (Alt+M)">▦</button>
-      <button id="btn-res" title="Resources left (Alt+R)">⛏</button>
-      <button id="btn-panels" title="Panels: show, hide and collapse (Alt+V)">▣</button>
-      <button id="btn-settings" title="Settings">⚙</button>
+      <button id="btn-menu" class="ico ico-menu" title="Menu (Esc)" aria-label="Menu"></button>
+      <button id="btn-home" class="ico ico-home" title="Replays &amp; recordings (Ctrl+O)" aria-label="Replays &amp; recordings"></button>
+      <a id="btn-native" class="ico ico-native" href="/native" title="Open a replay without the game" aria-label="Open a replay without the game"></a>
+      <button id="btn-stats" class="ico ico-stats" title="Statistics (Ctrl+Alt+S)" aria-label="Statistics"></button>
+      <button id="btn-fog" title="Fog of war: click or right-click cycles off / spy / standard, middle-click combines team fog (Alt+F)" class="ico ico-fog" aria-label="Fog of war"></button>
+      <button id="btn-mmmode" title="Minimap mode: click or right-click cycles (Alt+M)" class="ico ico-mmmode" aria-label="Minimap mode"></button>
+      <button id="btn-res" class="ico ico-res" title="Resources left (Alt+R)" aria-label="Resources left"></button>
+      <button id="btn-panels" title="Panels: show, hide and collapse (Alt+V)" class="ico ico-panels" aria-label="Panels"></button>
+      <button id="btn-settings" class="ico ico-settings" title="Settings" aria-label="Settings"></button>
       <button id="btn-help" title="Quick reference (?)">?</button>
     </div>
     <canvas id="minimap"></canvas>
@@ -56,9 +56,9 @@
   <section id="timebar" class="panel">
     <div id="time-controls">
       <button id="tc-back" title="Back 30s (-)">↺30</button>
-      <button id="tc-rew" title="Rewind: play backwards; again for faster (2×, 4×, 8×)">⏪</button>
-      <button id="tc-play" title="Play/pause (F3)">⏸</button>
-      <button id="tc-ff" title="Fast forward; again for faster (2×, 4×, 8×)">⏩</button>
+      <button id="tc-rew" title="Rewind: play backwards; again for faster (2×, 4×, 8×)" class="ico ico-rew" aria-label="Rewind"></button>
+      <button id="tc-play" class="ico ico-pause" title="Play/pause (F3)" aria-label="Play/pause"></button>
+      <button id="tc-ff" title="Fast forward; again for faster (2×, 4×, 8×)" class="ico ico-ff" aria-label="Fast forward"></button>
       <button id="tc-fwd" title="Forward 30s (=)">↻30</button>
       <button id="tc-slower" title="Slower ([)">−</button>
       <span id="tc-speed">1×</span>

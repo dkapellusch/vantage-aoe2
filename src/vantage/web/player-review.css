@@ -10,7 +10,7 @@
 .review-performance{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;margin:8px 0;border-top:1px solid #ffffff12;border-bottom:1px solid #ffffff12}
 .review-metric{display:flex;flex-direction:column;align-items:center;gap:5px;padding:10px 1px;min-width:0}
 .review-metric svg{color:#a6b4c1}.review-metric b{font-size:19px;font-variant-numeric:tabular-nums;font-weight:600;letter-spacing:-.3px}
-.review-metric span{font-size:9px;color:#a7aeb8;white-space:nowrap}.review-scopes{display:flex;align-items:center;gap:4px;margin-top:8px}
+.review-metric span{font-size:10px;color:#a7aeb8;white-space:nowrap;text-align:center;line-height:1.25;max-width:100%;overflow:hidden;text-overflow:ellipsis}.review-metric span small{display:block;font-size:9px;opacity:.7}.review-scopes{display:flex;align-items:center;gap:4px;margin-top:8px}
 .review-scopes>span{margin-right:auto;color:#8995a1;font-size:11px}.review-scopes button,.review-dash-tabs button{padding:4px 8px;font-size:11px;background:transparent;border:1px solid transparent}
 .review-scopes button[aria-pressed=true],.review-dash-tabs button[aria-pressed=true]{background:#ffffff0d;border-color:#ffffff26;color:#eee}
 .review-details{border-top:1px solid #ffffff12;margin-top:8px;padding-top:6px}.review-details summary{cursor:pointer;font-size:11px;color:#99a5b1}
@@ -67,3 +67,37 @@
 .review-income-player td:first-child,.review-income-player th:first-child { text-align: left; }
 .review-income-category th { padding-top: 14px; color: var(--muted); font-size: 11px; }
 .review-income-category th span { float: right; color: var(--accent); }
+/* Dashboard: one control row (‹ pages ›) over the table. The arrows used to sit
+   in a row of their own above the tabs, and the table kept its natural width
+   and row height inside a taller panel, leaving a dead band beside and below it. */
+#dashboard {
+  --dash-row-height: 26px;
+  --dash-body-height: calc(22px + var(--dash-rows, 2) * var(--dash-row-height) + 4px);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: 30px minmax(0, 1fr);
+  column-gap: 4px;
+  height: calc(30px + var(--dash-body-height) + 12px);
+}
+#dashboard.mini { --dash-row-height: 20px; }
+#dashboard .dash-head { display: contents; }
+#dashboard #dash-prev { grid-column: 1; grid-row: 1; align-self: center; margin: 0; }
+#dashboard #dash-next { grid-column: 3; grid-row: 1; align-self: center; margin: 0; }
+#dashboard .review-dash-tabs { grid-column: 2; grid-row: 1; align-items: center; padding-bottom: 0; scrollbar-width: none; }
+#dashboard .review-dash-body { grid-column: 1 / -1; grid-row: 2; scrollbar-gutter: auto; }
+#dashboard .dash-nav { height: 22px; min-width: 22px; padding: 0 6px; line-height: 20px; color: var(--muted); }
+#dashboard .dash-nav:hover { color: var(--text); }
+#dashboard .review-dash-tabs button { color: var(--muted); border-radius: 4px; }
+#dashboard .review-dash-tabs button:hover { color: var(--text); background: #ffffff0a; }
+#dashboard .review-dash-tabs button[aria-pressed=true] { color: var(--accent); background: rgba(217,180,90,.13); border-color: rgba(217,180,90,.35); }
+#dash-table { width: 100%; }
+#dash-table th { height: 22px; position: sticky; top: 0; background: var(--panel-solid); z-index: 1; font-size: 9.5px; letter-spacing: .04em; }
+#dash-table td { height: var(--dash-row-height); padding-top: 0; padding-bottom: 0; }
+#dash-table tr:nth-child(odd) td { background: rgba(255,255,255,.025); }
+#dash-table tr:hover td { background: rgba(255,255,255,.06); }
+#dash-table td.pname { padding-left: 8px; }
+#dash-table td.pname.r { padding-right: 8px; }
+#dash-table th.dash-gap, #dash-table td.dash-gap { width: 18px; background: none !important; border-left: 1px solid var(--line); }
+.review-event-list button i { display: inline-block; width: 3px; height: 11px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.review-investigate > .review-investigation { margin: 8px 0 4px; }
+.review-details > summary { font-size: 12px; font-weight: 600; letter-spacing: .02em; padding: 2px 0; }
+.review-details > summary:hover { color: var(--text); }

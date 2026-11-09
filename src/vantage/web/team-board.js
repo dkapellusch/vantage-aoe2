@@ -6,7 +6,7 @@
 // value marked. Sections fold to their heading (settings.teamBoardCollapsed).
 // Fields a recording lacks (older builds) leave their rows out.
 
-import { settings, saveSettings, esc, tip, fmtNum, fmtStock, playerStats, playerColor, playerTextColor, teamName, plainTeamName, teamMemberLabel, RES } from './state.js';
+import { settings, saveSettings, esc, tip, fmtNum, fmtStock, playerStats, playerMarkColor, playerTextColor, teamName, plainTeamName, teamMemberLabel, RES } from './state.js';
 import { t } from './i18n.js';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -67,7 +67,7 @@ const folded = (key) => Array.isArray(settings.teamBoardCollapsed) && settings.t
 
 function head(a, b) {
   const side = (team, right) => {
-    const c = playerColor(team.players[0].id);
+    const c = playerMarkColor(team.players[0].id);
     return `<span class="tb-team${right ? ' right' : ''}" data-details="1" ${tip(plainTeamName(team), t('Click: switch Teams / Players (Ctrl+Alt+R)'))}><i style="background:${c}"></i><span>${esc(teamName(team))}</span></span>`;
   };
   const view = teamBoardView();
@@ -84,7 +84,7 @@ function statRow(row, a, b, sa, sb) {
   const va = sumStat(sa, row.f), vb = sumStat(sb, row.f);
   if (va == null && vb == null) return '';
   const c = compare(va || 0, vb || 0, row.lower);
-  const ca = playerColor(a.players[0].id), cb = playerColor(b.players[0].id);
+  const ca = playerMarkColor(a.players[0].id), cb = playerMarkColor(b.players[0].id);
   const lc = c.lead === 'a' ? playerTextColor(a.players[0].id) : playerTextColor(b.players[0].id);
   const fmt = row.stock ? fmtStock : fmtNum;
   const delta = c.lead == null ? `<em class="even">${esc(t('even'))}</em>` : `<em style="color:${lc}">${c.lead === 'a' ? '<b class="arr">◀</b>' : ''}${fmt(c.diff)}${c.lead === 'b' ? '<b class="arr">▶</b>' : ''}</em>`;
@@ -139,12 +139,12 @@ function playersView(sides, ctx) {
   };
   let rows = '';
   for (const team of sides) {
-    const color = playerColor(team.players[0].id);
+    const color = playerMarkColor(team.players[0].id);
     rows += `<tr class="tb-tm"><td colspan="${cols.length + 2}"><i style="background:${color}"></i>${esc(teamName(team))}</td></tr>`;
     for (const p of team.players) {
       const s = playerStats(p.id);
       if (!s) continue;
-      rows += `<tr class="tb-pl${ctx.isDead(p.id) ? ' dead' : ''}" data-pid="${p.id}"><td class="who"><i style="background:${playerColor(p.id)}"></i><span ${tip(ctx.fullName(p))}>${esc(teamMemberLabel(p.id))}</span></td><td class="age">${ctx.ageShield(s, p.id)}</td>${cols.map((c, i) => cell(c, i, s)).join('')}</tr>`;
+      rows += `<tr class="tb-pl${ctx.isDead(p.id) ? ' dead' : ''}" data-pid="${p.id}"><td class="who"><i style="background:${playerMarkColor(p.id)}"></i><span ${tip(ctx.fullName(p))}>${esc(teamMemberLabel(p.id))}</span></td><td class="age">${ctx.ageShield(s, p.id)}</td>${cols.map((c, i) => cell(c, i, s)).join('')}</tr>`;
       const req = ctx.ageRequirements(s, p.id);
       if (req) rows += `<tr class="tb-req"><td></td><td colspan="${cols.length + 1}">${req}</td></tr>`;
     }

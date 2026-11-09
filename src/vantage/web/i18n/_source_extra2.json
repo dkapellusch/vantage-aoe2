@@ -1207,5 +1207,8 @@
  "The game refused the connection: check the certificate files — retrying…",
  "The game accepts only a spectator app holding its client certificate. Put these files in {dir}:",
  "Vantage keeps trying and connects once the files are in place.",
- "Live games and replays go through the running game, which accepts only a spectator app holding its client certificate. Vantage cannot ship it: the home screen says which files are missing and where they go, and the Live-games page of the Vantage wiki has the details. Recordings (.vrec) play without them."
+ "Live games and replays go through the running game, which accepts only a spectator app holding its client certificate. Vantage cannot ship it: the home screen says which files are missing and where they go, and the Live-games page of the Vantage wiki has the details. Recordings (.vrec) play without them.",
+ "Go to the next building",
+ "Select every building of a type",
+ "Control groups"
 ]

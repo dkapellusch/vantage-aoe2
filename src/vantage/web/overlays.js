@@ -5,7 +5,7 @@
 import { ECO_TECHS, MIL_TECHS } from './games.js';
 import {
   S, SPEEDS, settings, saveSettings, resetSettings, replaceSettings, DEFAULT_SETTINGS, api, fetchView, fmtTime, fmtNum, esc, players,
-  gameKey, playerName, playerColor, playerTextColor, teams, sideTeams, teamName, unitInfo, unitIcon, AGE_NAMES, toast, tip, tooltipLevel,
+  gameKey, playerName, playerMarkColor, playerTextColor, teams, sideTeams, teamName, unitInfo, unitIcon, AGE_NAMES, toast, tip, tooltipLevel,
   refreshSeries,
 } from './state.js';
 import * as HK from './hotkeys.js';
@@ -209,6 +209,14 @@ function lowerBound(rows, tm) {
 }
 const TICK_STEPS = [15000, 30000, 60000, 120000, 300000, 600000, 900000, 1800000, 3600000];
 
+// The round step (1, 2, 2.5 or 5 times a power of ten) giving about `ticks` grid lines up to `max`.
+export function niceStep(max, ticks) {
+  const raw = Math.max(max, 1e-9) / Math.max(1, ticks);
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / pow;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * pow;
+}
+
 /**
  * Draw a per-player time-series chart.
  *   drawChart(canvas?, opts?, seek?)
@@ -287,10 +295,13 @@ export function drawChart(canvas, opts, seek) {
   const yTicks = small ? 2 : 4;
   // One format for every tick of the axis (not "8425" beside "16.8k").
   const kAxis = yMax >= 10000;
-  for (let k = 0; k <= yTicks; k++) {
-    const v = yMax * k / yTicks, y = yOf(v);
+  // Grid lines on round values (500, 1000, 1500), not on quarters of whatever
+  // the maximum happens to be (480, 960, 1440).
+  const yStep = niceStep(yMax, yTicks);
+  for (let v = 0; v <= yMax + 1e-9; v += yStep) {
+    const y = yOf(v);
     g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke();
-    g.fillText(kAxis ? `${+(v / 1000).toFixed(v && v < 100000 ? 1 : 0)}k` : String(Math.round(v)), 4, y + 4);
+    g.fillText(!v ? '0' : kAxis ? `${+(v / 1000).toFixed(v < 100000 ? 1 : 0)}k` : String(+v.toFixed(yStep < 1 ? 1 : 0)), 4, y + 4);
   }
   const maxTicks = small ? 4 : 8;
   const step = TICK_STEPS.find((s) => span / s <= maxTicks) || TICK_STEPS[TICK_STEPS.length - 1];
@@ -300,7 +311,7 @@ export function drawChart(canvas, opts, seek) {
   g.save();
   g.beginPath(); g.rect(L, T - 2, W - L - R, H - T - B + 2); g.clip();
   for (let s = tops.length - 1; s >= 0; s--) {
-    const color = playerColor(series[s].p.id);
+    const color = playerMarkColor(series[s].p.id);
     g.beginPath();
     for (let i = 0; i < n; i++) { const x = xOf(times[i]), y = yOf(tops[s][i]); if (i) g.lineTo(x, y); else g.moveTo(x, y); }
     if (stacked) {
@@ -313,7 +324,7 @@ export function drawChart(canvas, opts, seek) {
     const ageLabelX = [];
     const ages = (S.events || []).filter((e) => e.kind === 'age_up' && !hidden.has(e.player) && inRange(e.t));
     for (const e of ages) {
-      g.strokeStyle = playerColor(e.player); g.setLineDash([3, 3]);
+      g.strokeStyle = playerMarkColor(e.player); g.setLineDash([3, 3]);
       g.beginPath(); g.moveTo(xOf(e.t), T); g.lineTo(xOf(e.t), H - B); g.stroke(); g.setLineDash([]);
     }
     // Labels after every line, on a dark backing; ones close together step down
@@ -325,7 +336,7 @@ export function drawChart(canvas, opts, seek) {
       ageLabelX.push([x, row]);
       const y = T + 10 + row * 11;
       g.fillStyle = 'rgba(10,12,16,.8)'; g.fillRect(x + 1, y - 9, g.measureText(label).width + 3, 11);
-      g.fillStyle = playerColor(e.player); g.fillText(label, x + 2, y);
+      g.fillStyle = playerMarkColor(e.player); g.fillText(label, x + 2, y);
     }
   }
   if (o.ecoTechs || o.milTechs) {
@@ -333,7 +344,7 @@ export function drawChart(canvas, opts, seek) {
       if (e.kind !== 'researched' || hidden.has(e.player) || !inRange(e.t)) continue;
       const eco = ECO_TECHS.has(e.tech), mil = MIL_TECHS.has(e.tech);
       if (!((eco && o.ecoTechs) || (mil && o.milTechs))) continue;
-      g.fillStyle = playerColor(e.player);
+      g.fillStyle = playerMarkColor(e.player);
       g.beginPath(); g.arc(xOf(e.t), H - B - 4, 3, 0, Math.PI * 2); g.fill();
     }
   }
@@ -471,6 +482,10 @@ export async function renderStats(seek, metric = null) {
   const keys = tabSeries(chartState.tab);
   if (!keys.includes(chartState.key)) chartState.key = keys[0];
   const zb = (id, label, name, detail) => `<button id="${id}" ${tip(t(name), detail ? t(detail) : '')}>${label}</button>`;
+  // Statistics opens on the whole game for every player. Investigating (one
+  // interval, two players) takes over the chart only when it was asked for: a
+  // value clicked on the dashboard, or an interval already chosen.
+  const investigating = !!metric || !!S.reviewRange;
   el.innerHTML = `${closeBtn()}<h2>${t('Statistics')}</h2>
     <div class="tabs">${Object.entries(TABS).map(([k, tab]) => `<button data-tab="${k}" class="${k === chartState.tab ? 'on' : ''}">${t(tab.title)}</button>`).join('')}</div>
     ${settings.showStatsTimeControls ? timeStrip() : ''}
@@ -493,11 +508,12 @@ export async function renderStats(seek, metric = null) {
         ${zb('ch-zoomreset', t('All'), 'Whole game')}
       </span>
     </div>
-    <div class="legend">${players().map((p) => `<label><input type="checkbox" data-pid="${p.id}" ${chartState.hidden.has(p.id) ? '' : 'checked'}><i style="background:${playerColor(p.id)}"></i>${esc(playerName(p.id))}</label>`).join('')}
+    <div class="legend">${players().map((p) => `<label><input type="checkbox" data-pid="${p.id}" ${chartState.hidden.has(p.id) ? '' : 'checked'}><i style="background:${playerMarkColor(p.id)}"></i>${esc(playerName(p.id))}</label>`).join('')}
       <span class="hint">${t('Hover to compare · wheel to zoom · right-click to jump to that time')}</span></div>
-    ${chartState.tab === 'bonus' ? `<div id="stats-agg">${aggregates('bonus')}</div><details class="review-chart-options"><summary>${t('Investigate')}</summary>${investigationHtml(chartState.key)}</details>` : investigationHtml(chartState.key)}
+    ${chartState.tab === 'bonus' ? `<div id="stats-agg">${aggregates('bonus')}</div><details class="review-chart-options"><summary>${t('Investigate')}</summary>${investigationHtml(chartState.key)}</details>` : ''}
     <div class="chart-wrap"><canvas id="chart"></canvas></div>
-    ${chartState.tab === 'bonus' ? '' : `<details class="review-details"><summary>${t('Totals')}</summary><div id="stats-agg">${aggregates(chartState.tab)}</div></details>`}`;
+    ${chartState.tab === 'bonus' ? '' : `<details class="review-details review-investigate" ${investigating ? 'open' : ''}><summary>${t('Investigate')}</summary>${investigationHtml(chartState.key)}</details>
+    <details class="review-details" open><summary>${t('Totals')}</summary><div id="stats-agg">${aggregates(chartState.tab)}</div></details>`}`;
   el.setAttribute('aria-busy', 'false');
   wireClose(el);
   const investigateRange = (from, to, pids) => {
@@ -506,7 +522,7 @@ export async function renderStats(seek, metric = null) {
     el.querySelectorAll('.legend input').forEach((checkbox) => { checkbox.checked = !chartState.hidden.has(+checkbox.dataset.pid); });
     drawStatsChart();
   };
-  wireInvestigation(el, chartState.key, seekFn(statsSeek), closeAll, investigateRange);
+  wireInvestigation(el, chartState.key, seekFn(statsSeek), closeAll, investigateRange, investigating);
   $('ch-type').value = chartState.type;
   $('ch-transform').value = chartState.transform;
   const redraw = () => drawStatsChart();
@@ -516,7 +532,7 @@ export async function renderStats(seek, metric = null) {
   $('ch-key').addEventListener('change', (e) => {
     chartState.key = e.target.value;
     el.querySelector('.review-investigation').outerHTML = investigationHtml(chartState.key);
-    wireInvestigation(el, chartState.key, seekFn(statsSeek), closeAll, investigateRange); redraw();
+    wireInvestigation(el, chartState.key, seekFn(statsSeek), closeAll, investigateRange, !!S.reviewRange); redraw();
   });
   $('ch-type').addEventListener('change', (e) => { chartState.type = e.target.value; redraw(); });
   $('ch-transform').addEventListener('change', (e) => { chartState.transform = e.target.value; redraw(); });
@@ -2024,7 +2040,7 @@ function castingTab() {
     ${ps.map((p) => {
       const key = castingKey(p);
       const img = castingMap(['playerImages'])[key] || '';
-      return `<div class="cast-player" style="border-color:${playerColor(p.id)}">
+      return `<div class="cast-player" style="border-color:${playerMarkColor(p.id)}">
         <div class="cast-head">${img ? `<img class="cast-img" src="${esc(img)}" alt="">` : '<span class="cast-img"></span>'}<b>${esc(p.name)}</b><span class="hint">${esc(key)}</span></div>
         <div class="form-row">${lab('Display name')}<input data-pname="${p.id}" value="${esc(castingMap(['playerNames'])[key] || '')}" placeholder="${esc(p.name)}"></div>
         <div class="form-row">${lab('Flag / image')}<select data-pimgsel="${p.id}">${imgOptions(img)}</select></div>
@@ -2385,13 +2401,16 @@ export function renderHelp() {
     ['Time bar click', 'Seek'], ['Time bar right-click', 'Add / remove bookmark'], ['Chart right-click', 'Jump to time'],
     ['Chart wheel', 'Zoom the chart'],
   ];
-  const keys = typeof HK.describeKeys === 'function' ? HK.describeKeys() : [];
+  const keyCell = (k) => (k === '—' ? `<span class="hint">${t('unbound')}</span>` : `<kbd>${esc(keyLabel(k))}</kbd>`);
+  const section = (title, rows) => `<section class="keys-group"><h3>${t(title)}</h3><table class="keys">${rows.join('')}</table></section>`;
+  // Sections flow into as many columns as the window has room for, so the whole
+  // reference is in view at once instead of one long list beside an empty half.
+  const groups = HK.describeKeyGroups().map(([title, rows]) => section(title, rows.map(([k, d]) => `<tr><td>${keyCell(k)}</td><td>${esc(t(d))}</td></tr>`)));
+  groups.splice(2, 0, section('Mouse', mouse.map(([k, d]) => `<tr><td><kbd>${esc(t(k))}</kbd></td><td>${esc(t(d))}</td></tr>`)));
   el.innerHTML = `${closeBtn()}<h2>${t('Quick reference')}</h2>
     ${aboutLine()}
     <p class="hint">${t('Change any key in Settings → Hotkeys.')} <button class="link" id="qr-docs">${t('Documentation')}</button></p>
-    <div class="grid2"><div><h3>${t('Keyboard')}</h3>
-    <table class="keys">${keys.map(([k, d]) => `<tr><td>${k === '—' ? `<span class="hint">${t('unbound')}</span>` : `<kbd>${esc(keyLabel(k))}</kbd>`}</td><td>${esc(t(d))}</td></tr>`).join('')}</table></div>
-    <div><h3>${t('Mouse')}</h3><table class="keys">${mouse.map(([k, d]) => `<tr><td><kbd>${esc(t(k))}</kbd></td><td>${esc(t(d))}</td></tr>`).join('')}</table></div></div>`;
+    <div class="keys-groups">${groups.join('')}</div>`;
   wireClose(el);
   const d = $('qr-docs');
   if (d) d.addEventListener('click', openDocs);

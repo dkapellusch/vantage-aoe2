@@ -187,3 +187,13 @@ input.off-in { width: 74px; }
 .skins-list .chips { max-width: 260px; }
 .skins-list .nowrap { white-space: nowrap; }
 .badge { display: inline-block; padding: 0 6px; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; color: var(--muted); }
+/* Quick reference: sections in columns. */
+.keys-groups { columns: 330px; column-gap: 34px; margin-top: 10px; }
+.keys-group { break-inside: avoid; margin: 0 0 18px; }
+.keys-group h3 { margin: 0 0 5px; padding-bottom: 4px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--accent); border-bottom: 1px solid var(--line); }
+.keys-group table.keys { width: 100%; border-collapse: collapse; }
+.keys-group .keys td { padding: 2.5px 0; vertical-align: baseline; }
+.keys-group .keys td:first-child { width: 1%; white-space: nowrap; padding-right: 14px; }
+.keys-group .keys td:last-child { color: #cfcabd; }
+.keys-group .keys tr:hover td { background: rgba(255,255,255,.04); }
+.keys-group kbd { padding: 1px 5px; border-bottom-width: 2px; color: var(--text); }

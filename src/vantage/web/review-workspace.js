@@ -89,7 +89,10 @@ export function parseReviewTime(value) {
   const result = parts.reduce((total, part) => total * 60 + Number(part), 0) * 1000;
   return Number.isSafeInteger(result) ? result : null;
 }
-export function wireInvestigation(el, key, seek, close, onRange = null) {
+// `auto`: apply the interval at once (it narrows the chart to that interval and
+// those two players, and switches the selection panel to its "fight" scope).
+// Without it nothing changes until Apply or a player is chosen.
+export function wireInvestigation(el, key, seek, close, onRange = null, auto = true) {
   const a = el.querySelector('#review-player'), b = el.querySelector('#review-opponent');
   if (!a || !b) return;
   a.value = String(S.investigatePlayer || players()[0]?.id); b.value = String(S.investigateOpponent || players().find((p) => p.id !== +a.value)?.id || a.value);
@@ -104,12 +107,26 @@ export function wireInvestigation(el, key, seek, close, onRange = null) {
       return `<div style="--owner-color:${playerTextColor(pid)}">${ownerIdentity(pid)}<b>${delta == null ? '–' : `${delta > 0 ? '+' : ''}${fmtNum(delta)}`}</b><small>Δ ${esc(key.replaceAll('_', ' '))}</small></div>`;
     }).join('');
     const events = S.events.filter((event) => event.t >= from && event.t <= to && [event.player, event.killer?.owner, event.victim?.owner, event.owner].some((pid) => [+a.value, +b.value].includes(pid))).slice(-35);
-    el.querySelector('#review-observations').innerHTML = `<div class="review-comparison">${comparison}</div><div class="review-event-list">${events.map((event, i) => `<button data-review-event="${i}">${fmtTime(event.t)} · ${esc(event.kind === 'kill' ? `${unitInfo(event.killer?.master, event.killer?.owner).name} → ${unitInfo(event.victim?.master, event.victim?.owner).name}` : event.kind.replaceAll('_', ' '))}${event.tech != null ? ` · ${esc(S.catalog.techs?.[event.tech]?.name || event.tech)}` : ''}</button>`).join('') || `<span class="hint">${t('No recorded events in this interval')}</span>`}</div>`;
+    el.querySelector('#review-observations').innerHTML = `<div class="review-comparison">${comparison}</div><div class="review-event-list">${events.map((event, i) => `<button data-review-event="${i}">${fmtTime(event.t)} · ${investigationEventLabel(event)}</button>`).join('') || `<span class="hint">${t('No recorded events in this interval')}</span>`}</div>`;
     el.querySelectorAll('[data-review-event]').forEach((button) => { button.onclick = () => { seek(events[+button.dataset.reviewEvent].t); close(); }; });
     return true;
   };
   el.querySelector('#review-apply').onclick = apply; a.onchange = b.onchange = apply;
   el.querySelector('#review-play').onclick = () => { if (!apply()) return; seek(S.reviewRange.from); S.reviewPlaybackUntil = S.reviewRange.to; S.playing = true; close(); };
   el.querySelector('#review-save').onclick = () => { if (!apply()) return; close(); toggleReviewTimeline(seek); };
-  apply();
+  if (auto) apply();
+}
+
+// One line of the interval's event list: whose it is (a colour mark and name) and
+// what happened, naming the unit or technology ("trained" alone said nothing).
+function investigationEventLabel(event) {
+  const pid = event.kind === 'kill' ? event.killer?.owner : event.player;
+  const who = pid != null && pid > 0 ? `<i style="background:${playerTextColor(pid)}"></i>${esc(playerName(pid))} · ` : '';
+  const unit = (ref, owner) => esc(unitInfo(ref?.master ?? ref, ref?.owner ?? owner).name);
+  let what;
+  if (event.kind === 'kill') what = `${unit(event.killer)} → ${unit(event.victim)}`;
+  else if (event.kind === 'trained' && event.master != null) what = `${t('trained')} · ${unit(event.master, event.player)}`;
+  else if (event.kind === 'under_attack' && event.master != null) what = `${t('under attack')} · ${unit(event.master, event.player)}`;
+  else what = `${esc(t(event.kind.replaceAll('_', ' ')))}${event.tech != null ? ` · ${esc(S.catalog.techs?.[event.tech]?.name || event.tech)}` : ''}`;
+  return `${who}${what}`;
 }

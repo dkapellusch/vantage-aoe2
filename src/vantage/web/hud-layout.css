@@ -37,3 +37,8 @@ body.hud-arrange #hud .panel[id] > * { pointer-events: none; }
 #panels-menu .pm-layouts { align-items: center; border-top: 0; margin-top: 0; }
 #panels-menu .pm-layouts .hint { flex: none; }
 #panels-menu .pm-presets button.on { color: var(--accent); border-color: var(--accent); }
+/* The chosen layout: accent text on a faint accent ground (button.on's solid
+   accent fill under accent text left the label unreadable). */
+#panels-menu .pm-presets button.on { background: rgba(217,180,90,.14); }
+#panels-menu .pm-presets button { white-space: nowrap; }
+#panels-menu { min-width: 270px; }

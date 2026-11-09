@@ -1674,6 +1674,8 @@ const CHUNK = 16, CHUNK_PX = 32;
 let staleBudget = 1;
 const chunkCache = new Map();
 let chunkGen = 0;
+// The chunks composited on the GPU went with a lost context: build them again.
+TG.onContextLost(() => { chunkCache.clear(); chunkGen++; });
 
 // `gpu`: composite on the WebGL ground (terrain-gl.js composeChunk) and return its
 // token for TG.drawChunk; otherwise a canvas.
