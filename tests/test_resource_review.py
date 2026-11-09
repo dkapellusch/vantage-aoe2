@@ -543,7 +543,9 @@ def economic_baseline(
     players[1].fields[W.P_MASTERS][mid] = master(paid)
 
 
-def test_maya_extra_yield_is_separate_from_income_and_not_counted_twice_on_dropoff() -> None:
+def test_maya_resource_longevity_is_not_reported_as_extra_yield() -> None:
+    # Longevity makes resources last longer; it is not a proven gather-rate or
+    # yield bonus, so a 1.15 multiplier alone must not create an effect row.
     h, w, worker, attrs, _ = scene(16)
     neutral_attrs = Node(SCHEMA.model_id("PlayerAttributes"), {})
     w.fields[W.W_PLAYERS][0] = Node(SCHEMA.model_id("Player"), {W.P_ATTR: neutral_attrs})
@@ -552,14 +554,9 @@ def test_maya_extra_yield_is_separate_from_income_and_not_counted_twice_on_dropo
     tick(h, w, 0)
     worker.fields[W.E_HELD_AMT] = 115
     tick(h, w, 1000)
-    assert h.player(1, 1000)["extra_yield"]["gold"] == 15
+    assert h.player(1, 1000)["extra_yield"]["gold"] == 0
     assert h.player(1, 1000)["bonus"]["gold"] == 0
-    assert h.player(1, 500)["extra_yield"]["gold"] == 0
-    worker.fields[W.E_HELD_AMT] = 0
-    attr(attrs, "goldTotal", 115)
-    tick(h, w, 2000)
-    assert h.player(1, 2000)["extra_yield"]["gold"] == 15
-    assert h.player(1, 2000)["effects"][0]["source"] == "Maya resource longevity"
+    assert not h.player(1, 1000)["effects"]
 
 
 def test_unit_discounts_count_completed_production_not_queued_or_cancelled_units() -> None:
@@ -675,8 +672,8 @@ def test_maya_stacked_yield_does_not_attribute_handicap_to_its_civilization_bonu
     worker.fields[W.E_HELD_AMT] = 184
     tick(h, w, 1000, handicaps={1: 160})
     effects = {row["source"]: row["total"] for row in h.player(1, 1000)["effects"]}
-    assert effects == {"Maya resource longevity": 24, "Handicap · 160%": 60}
-    assert h.player(1, 1000)["extra_yield"]["gold"] == 24
+    assert effects == {"Handicap · 160%": 60}
+    assert h.player(1, 1000)["extra_yield"]["gold"] == 0
     assert h.player(1, 1000)["handicap_yield"]["gold"] == 60
 
 
@@ -1180,3 +1177,25 @@ def test_query_state_roundtrip_answers_every_query_the_same() -> None:
         assert restored.player(1, t) == history.player(1, t)
     # Unknown ids still answer (the logs keep their default factories).
     assert restored.entity(123, 1000) == history.entity(123, 1000)
+
+
+def test_saved_maya_longevity_rows_are_not_reported():
+    from vantage.economy_benefits import EconomyBenefits
+
+    benefits = EconomyBenefits(None)
+    benefits.logs[1].append(
+        (
+            0,
+            {
+                "Maya resource longevity": {
+                    "source": "Maya resource longevity",
+                    "category": "yield",
+                    "resources": [15.0, 0.0, 0.0, 0.0],
+                    "count": 1,
+                }
+            },
+        )
+    )
+    report = benefits.player(1, 1000)
+    assert report["effects"] == []
+    assert report["extra_yield"]["food"] == 0

@@ -15,6 +15,9 @@ from vantage import world as W
 from vantage.patch import Node
 
 RES = ("food", "wood", "stone", "gold")
+# Rows older saved reviews may still carry. Longevity makes resources last
+# longer; it is not a gather-rate or yield gain, so it is never reported.
+RETIRED_SOURCES = frozenset({"Maya resource longevity"})
 ADJUST = [W._fid("ResearchState", f"costAdjustment{i}") for i in range(3)]
 
 
@@ -208,20 +211,19 @@ class EconomyBenefits:
             if baseline or worker is None or worker.owner not in players:
                 continue
             player = players[worker.owner]
-            maya, handicap = [], []
+            handicap = []
             is_maya = player.fields.get(W.P_CIV) == 16
             percent = (handicaps or {}).get(worker.owner, 100)
             handicap_factor = max(1.0, percent / 100)
             for i, factor in enumerate(factors[worker.owner]):
                 gathered = max(0.0, amounts[i] - old[i])
-                # A global multiplier alone proves no civilization bonus. Name
-                # only the confirmed Maya component and an explicit lobby
-                # handicap that is also present in the observed multiplier.
+                # A global multiplier alone proves no civilization bonus. Maya
+                # resource longevity is divided out only so it is not mistaken
+                # for handicap; it is not reported, because it extends how long
+                # resources last rather than proving a gather-rate or yield gain.
                 applied_handicap = handicap_factor if factor + 0.0001 >= handicap_factor else 1.0
                 longevity = min(1.15, max(1.0, factor / applied_handicap)) if is_maya else 1.0
-                maya.append(gathered * (1 - 1 / longevity))
                 handicap.append(gathered / longevity * (1 - 1 / applied_handicap))
-            self._add(worker.owner, "Maya resource longevity", "yield", maya)
             if percent > 100:
                 self._add(worker.owner, f"Handicap · {percent}%", "handicap", handicap)
 
@@ -237,7 +239,11 @@ class EconomyBenefits:
     def player(self, owner: int, t: int) -> dict[str, Any]:
         log = self.logs.get(owner, [])
         index = bisect_right(log, t, key=lambda row: row[0]) - 1
-        values = log[index][1] if index >= 0 else {}
+        values = {
+            name: row
+            for name, row in (log[index][1] if index >= 0 else {}).items()
+            if name not in RETIRED_SOURCES
+        }
 
         def resources(amounts: list[float]) -> dict[str, float]:
             return {r: round(n, 1) for r, n in zip(RES, amounts, strict=True)}
