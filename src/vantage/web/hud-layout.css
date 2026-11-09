@@ -8,7 +8,7 @@ body[data-hud-layout="caster"] #scoreboard { left: 8px; right: 8px; transform: n
 body[data-hud-layout="caster"] #events { top: calc(var(--sb-bottom, 58px) + 6px); }
 body[data-hud-layout="caster"] #minimap-wrap { left: auto; right: 8px; }
 body[data-hud-layout="caster"] #timebar { left: auto; right: 8px; }
-body[data-hud-layout="caster"] #unitpanel { right: var(--mm-gap, 326px); }
+body[data-hud-layout="caster"] #unitpanel { right: var(--up-gap, var(--mm-gap, 326px)); }
 body[data-hud-layout="caster"] #dashboard { min-width: 0; }
 /* The left column fills the height below the scoreboard: the team board is
    pinned to its bottom, the other panels (techs, production) stay at its top.

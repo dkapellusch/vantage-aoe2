@@ -735,6 +735,21 @@ function placeDashboard() {
     const gap = m.classList.contains('hidden') ? '8px' : `${Math.round(window.innerWidth - m.getBoundingClientRect().left + 8)}px`;
     if (document.documentElement.style.getPropertyValue('--mm-gap') !== gap) document.documentElement.style.setProperty('--mm-gap', gap);
   }
+  // Caster: the time controls above the minimap can be wider than it; a selection panel
+  // tall enough to reach them stands left of them instead of under them.
+  {
+    const up = $('unitpanel'), tbar = $('timebar');
+    let gap = '';
+    if (up && tbar && !up.classList.contains('hidden') && !tbar.classList.contains('hidden')
+        && document.body.dataset.hudLayout === 'caster') {
+      const u = up.getBoundingClientRect(), b = tbar.getBoundingClientRect();
+      if (u.top < b.bottom && u.bottom > b.top && b.width > 0) gap = `${Math.round(window.innerWidth - b.left + 8)}px`;
+    }
+    if (document.documentElement.style.getPropertyValue('--up-gap') !== gap) {
+      if (gap) document.documentElement.style.setProperty('--up-gap', gap);
+      else document.documentElement.style.removeProperty('--up-gap');
+    }
+  }
   if (!d || d.classList.contains('hidden')) return;
   const vw = window.innerWidth;
   const shown = (el) => el && !el.classList.contains('hidden') && !el.classList.contains('panel-off') && el.getClientRects().length;
