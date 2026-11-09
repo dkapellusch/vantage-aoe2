@@ -1991,6 +1991,15 @@ function relevantUpgrades(rows) {
     const tid = stage.tech ?? (stage.kind === 'tech' ? stage.id : null);
     if (tid != null && tid >= 0 && nodeStatus(stage) !== 'hidden') stages.set(tid, stage);
   }
+  // A building's own research: every technology it researches that this civilisation can get.
+  const buildingIds = new Set(rows.map((r) => r[2]));
+  if (rows.every((r) => unitInfo(r[2], pid, r[0]).kind === 'building')) {
+    for (const node of tree.nodes || []) {
+      if (node.kind === 'tech' && buildingIds.has(node.building) && nodeStatus(node) === 'available' && !stages.has(node.id)) {
+        stages.set(node.id, { ...node, tech: node.id });
+      }
+    }
+  }
   return `<section class="review-upgrades"><div class="review-upgrades-head"><span>${t('Relevant upgrades')}</span><button data-full-tree="${pid}">${t('Full tree')} ↗</button></div><div class="review-upgrade-list">${[...stages.entries()].map(([tid, stage]) => {
     const a = active.get(tid), unavailable = nodeStatus(stage) === 'struck';
     const status = done.has(tid) ? 'done' : a ? 'doing' : unavailable ? 'unavailable' : (stage.age || 1) - 1 > (stats.age || 0) ? 'later' : 'available';
