@@ -76,6 +76,8 @@ All notable changes to Vantage are documented here. The format follows
 - The dashboard is one control row (previous, pages, next) over a table that fills the panel.
 - The transport and the minimap toolbar use one set of drawn icons instead of Unicode symbols,
   which some systems showed as colour emoji.
+- The home screen reopens at once: it shows the lists it last fetched and refreshes them behind,
+  so reopening it, switching its tabs and typing in its search box no longer wait for the server.
 - "Resources left" is a one-line strip with the game's resource icons, placed above the time
   controls in the Caster layout. Dates in the home lists are short and stay on one line.
 
