@@ -2935,11 +2935,51 @@ function rangeEllipse(px, py, tiles) {
   ctx.ellipse(px, py, tiles * TW / 2 * z * Math.SQRT2, tiles * TH / 2 * z * Math.SQRT2, 0, 0, Math.PI * 2);
 }
 
-function areaSquare(x, y, h) {
-  const pts = [[x - h, y - h], [x + h, y - h], [x + h, y + h], [x - h, y + h]].map(([a, b]) => groundScreen(a, b));
-  ctx.beginPath();
-  pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
-  ctx.closePath();
+// Zones of one colour are filled once as a union and outlined only where they
+// reach beyond every other zone of that colour, so overlaps stay as clear as a
+// single zone instead of stacking into a darker, busier patch.
+const zoneLayer = document.createElement('canvas');
+function ellipsePath(path, px, py, tiles) {
+  const z = S.camera.zoom;
+  path.moveTo(px + tiles * TW / 2 * z * Math.SQRT2, py);
+  path.ellipse(px, py, tiles * TW / 2 * z * Math.SQRT2, tiles * TH / 2 * z * Math.SQRT2, 0, 0, Math.PI * 2);
+}
+function squarePath(path, x, y, h) {
+  [[x - h, y - h], [x + h, y - h], [x + h, y + h], [x - h, y + h]]
+    .map(([a, b]) => groundScreen(a, b))
+    .forEach(([px, py], i) => (i ? path.lineTo(px, py) : path.moveTo(px, py)));
+  path.closePath();
+}
+function drawZones(zones) {
+  if (!zones.size) return;
+  if (zoneLayer.width !== canvas.width || zoneLayer.height !== canvas.height) {
+    zoneLayer.width = canvas.width; zoneLayer.height = canvas.height;
+  }
+  const lc = zoneLayer.getContext('2d');
+  const base = ctx.getTransform();
+  for (const zone of zones.values()) {
+    // Outline: every outline in full, then everything inside the union removed.
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    lc.clearRect(0, 0, zoneLayer.width, zoneLayer.height);
+    lc.setTransform(base);
+    lc.globalCompositeOperation = 'source-over';
+    lc.globalAlpha = 1;
+    lc.strokeStyle = zone.color; lc.lineWidth = 2;
+    lc.stroke(zone.path);
+    lc.globalCompositeOperation = 'destination-out';
+    lc.fill(zone.path);
+    if (zone.stroke) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = zone.stroke;
+      ctx.drawImage(zoneLayer, 0, 0);
+      ctx.restore();
+    }
+    if (zone.fill) {
+      ctx.globalAlpha = zone.fill; ctx.fillStyle = zone.color; ctx.fill(zone.path);
+    }
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawRangeCircles() {
@@ -2948,6 +2988,13 @@ function drawRangeCircles() {
   const bMode = settings.rangeCircleModeBuildings || 'always';
   const sMode = settings.rangeCircleModeSelectedEntities || 'always';
   ctx.save();
+  const zones = new Map();
+  const zoneOf = (kind, color, fill, stroke) => {
+    const key = `${kind}|${color}|${fill}|${stroke}`;
+    let zone = zones.get(key);
+    if (!zone) zones.set(key, (zone = { path: new Path2D(), color, fill, stroke }));
+    return zone.path;
+  };
   for (const r of entityRows) {
     const selected = S.selection.has(r[0]);
     const building = r[6] & 1;
@@ -2968,14 +3015,12 @@ function drawRangeCircles() {
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
     if ((st.range || 0) >= 1.5) {
-      rangeEllipse(px, py, st.range + half);
-      ctx.strokeStyle = color; ctx.globalAlpha = alpha; ctx.stroke();
-      if (selected) { ctx.globalAlpha = 0.07; ctx.fillStyle = color; ctx.fill(); }
+      ellipsePath(zoneOf('range', color, selected ? 0.07 : 0, alpha), px, py, st.range + half);
     }
     if ((st.min_range || 0) > 0) {
       // Dead zone: units closer than this cannot be hit.
+      ellipsePath(zoneOf('dead', '#e05a4a', selected ? 0.16 : 0.08, 0), px, py, st.min_range + half);
       rangeEllipse(px, py, st.min_range + half);
-      ctx.globalAlpha = selected ? 0.16 : 0.08; ctx.fillStyle = '#e05a4a'; ctx.fill();
       ctx.setLineDash([5, 4]); ctx.globalAlpha = alpha; ctx.strokeStyle = '#e05a4a'; ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -2985,9 +3030,8 @@ function drawRangeCircles() {
       ctx.setLineDash([]);
     }
     if (square != null) {
-      areaSquare(r[3], r[4], r[2] === CARAVANSERAI ? half + (st.aura_range || 8) : square);
-      ctx.globalAlpha = selected ? 0.12 : 0.06; ctx.fillStyle = '#f2c94c'; ctx.fill();
-      ctx.globalAlpha = alpha; ctx.strokeStyle = '#f2c94c'; ctx.stroke();
+      squarePath(zoneOf('area', '#f2c94c', selected ? 0.12 : 0.06, alpha), r[3], r[4],
+        r[2] === CARAVANSERAI ? half + (st.aura_range || 8) : square);
     } else if ((st.aura_range || 0) > 1) {
       rangeEllipse(px, py, st.aura_range + half);
       ctx.setLineDash([6, 3, 1, 3]); ctx.globalAlpha = alpha; ctx.strokeStyle = '#f2c94c'; ctx.stroke();
@@ -2995,6 +3039,7 @@ function drawRangeCircles() {
     }
     ctx.globalAlpha = 1;
   }
+  drawZones(zones);
   ctx.restore();
 }
 
