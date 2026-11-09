@@ -15,7 +15,7 @@ import { fidelityNotice } from './recording-fidelity.js';
 import * as audio from './audio.js';
 import * as layout from './layout.js';
 import { patchHtml } from './dom.js';
-import { shuttleSpeed, eventIndexAfter } from './playback.js';
+import { shuttleSpeed, eventIndexAfter, replayBufferWait, matchEnded } from './playback.js';
 import { GOTO_BUILDINGS, applyGame } from './games.js';
 import { chooseFight, FightSelection, highlightParticipants } from './autocast-focus.js';
 import { installPanelResizing } from './panel-resize.js';
@@ -175,6 +175,8 @@ async function applySession(desc) {
     S.bookmarks = await api('/api/bookmarks').catch(() => []);
     await loadMoments(); S.reviewPlaybackUntil = null;
     endgameShown = false;
+    // The previous game's results must not stay over a new session.
+    if (overlays.isOpen('overlay-endgame')) overlays.closeAll();
     S.highlight.seq = null;
     S.followLive = desc.mode === 'live';
     readAheadArmed = desc.mode === 'live';
@@ -587,17 +589,17 @@ function measureProduction(now) {
 }
 /** Wall ms playback should still wait so it never catches up with the game (0 = play). */
 export function bufferWait() {
-  const total = source().replay_duration_ms;
-  if (!isLive() || S.followLive || !S.liveSpeedPicked || !S.playing || !total) return 0;
-  if (production.rate == null || production.samples < 4) return 0; // measure ~12 s first
-  const watch = SPEEDS[S.speedIndex] * gameSpeed(); // game ms per wall ms
-  const make = production.rate;
-  // Keeping up (within 5 %): no buffering; the live-edge hold covers small gaps.
-  if (watch <= 0 || make >= watch * 0.95 || S.end >= total - 1000) return 0;
-  // At the current pace the game reaches the end after (total - end) / make and
-  // playback after (total - t) / watch: wait the difference, once, then play at
-  // full speed (another pause only if the game slows down further).
-  return Math.max(0, (total - S.end) / Math.max(make, 1e-3) - (total - S.t) / watch);
+  const src = source();
+  if (!isLive() || S.followLive || !S.liveSpeedPicked || !S.playing) return 0;
+  return replayBufferWait({
+    total: src.replay_duration_ms, end: S.end, t: S.t,
+    watch: SPEEDS[S.speedIndex] * gameSpeed(), rate: production.rate, samples: production.samples,
+    producing: !gameStoppedProducing(src),
+  });
+}
+/** The game sends no more frames: paused (a replay pauses itself at its end), over, or stalled. */
+function gameStoppedProducing(src) {
+  return !!(src.paused || matchEnded(src) || src.waiting);
 }
 
 function targetSpeed() {
@@ -618,7 +620,7 @@ function reportPlaybackEnd(live) {
 }
 function gameOver(live) {
   if (!live) return !!(S.view && S.view.game_ended === true);
-  if (source().status === 'ended' || S.complete) return true;
+  if (matchEnded(source()) || S.complete) return true;
   const now = performance.now();
   if (now < gameOverCheckAt) return false;
   gameOverCheckAt = now + 500;
@@ -642,8 +644,10 @@ function tick(now) {
   if (fpsAcc > 0.5) { S.fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
   const live = isLive();
   S.bufferWait = 0; S.gfxWait = false;
+  // A finished match sends nothing more: its last frame is the end, with no 0.4 s hold behind it.
+  const over = live && matchEnded(source());
   if (live && S.followLive) {
-    S.t = Math.max(S.start, S.end - 400);
+    S.t = over ? S.end : Math.max(S.start, S.end - 400);
   } else if (S.jump && S.jump.wait) {
     // A jump past the loaded part of a recording waits for the loader.
     if (S.end >= S.jump.to) { S.t = S.jump.to; S.jump.wait = false; resetViews(); }
@@ -656,13 +660,14 @@ function tick(now) {
     S.t += dt * 1000 * (q && q.rate != null ? q.rate : SPEEDS[S.speedIndex] * gameSpeed());
     // Live, playback holds 0.4 s behind the newest data (as following the live
     // edge does) so there is a next view to interpolate towards; never backwards.
-    const edge = live ? Math.max(S.start, S.end - 400) : S.end;
+    const edge = live && !over ? Math.max(S.start, S.end - 400) : S.end;
     if (S.t >= edge) {
       S.t = Math.max(Math.min(prev, S.end), edge);
+      if (over) S.playing = false; // the end of a finished match: stopped, not stuck playing
       // Caught up with the live edge: follow it, unless a speed was picked in this
       // live session (then wait at the edge and keep that speed: at 4x the game is
       // told to run faster than 4x so a buffer builds, and the view stays at 4x).
-      if (live && !S.highlight.seq && !S.liveSpeedPicked) S.followLive = true;
+      if (live && !over && !S.highlight.seq && !S.liveSpeedPicked) S.followLive = true;
     }
     if (S.t < S.start) { S.t = S.start; S.playing = false; }
     // Graphics buffering (world.viewReady): hold just before the next view until
@@ -911,6 +916,10 @@ function renderPauseBanner() {
   // The banner hides while the end-game screen shows; who paused is known only from API 22.
   const namesPauser = src.paused_by > 0 && Number(src.api_version) >= 22;
   if (overlays.isOpen('overlay-endgame')) pb.classList.add('hidden');
+  // Reading a replay ahead, the game runs (and at its end pauses) well before the viewer
+  // gets there: while buffered footage is still playing, the game's pause is not news.
+  else if (src.paused && readAhead() && S.end - S.t > 1500) pb.classList.add('hidden');
+  else if (src.paused && readAhead() && src.replay_duration_ms && S.end >= src.replay_duration_ms - 5000) { pb.textContent = t('Replay finished'); pb.classList.remove('hidden'); }
   else if (src.paused) { pb.textContent = namesPauser ? t('Game paused by {p}', { p: playerName(src.paused_by) }) : t('Game paused'); pb.classList.remove('hidden'); }
   else if (waiting) { pb.textContent = waiting.length ? t('Waiting for players: {who}', { who: waiting.map(playerName).join(', ') }) : t('Waiting for players'); pb.classList.remove('hidden'); }
   else pb.classList.add('hidden');
@@ -1069,6 +1078,8 @@ function shuttle(dir) {
 
 function togglePause() {
   if (S.highlight.seq && !S.highlight.seq.loading) { toggleSequencePause(); return; }
+  // Play at the end of a finished match: watch it again from the start.
+  if (!S.playing && isLive() && matchEnded(source()) && S.t >= S.end - 500) { seek(S.start); S.playing = true; return; }
   S.playing = !S.playing;
   if (!S.playing) S.followLive = false;
   if (!readAhead()) liveControl('pause', !S.playing); // reading ahead: the game keeps filling the buffer

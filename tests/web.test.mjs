@@ -168,6 +168,21 @@ test('a bounded stats response is only valid inside its interval', async () => {
   assert.equal(entityStatsValid(bounded, 7, [7, 1, 4], 2000, 1, 1000), false);
 });
 
+test('playing forward past a bounded response keeps showing it until the refetch lands', async () => {
+  const { entityStatsUsable } = await import('../src/vantage/web/state.js');
+  const bounded = { entity_stats_validity_version: 1, generation: 1, entity_id: 7, owner: 1, master: 4,
+    valid_from_ms: 1000, valid_until_ms: 2000 };
+  const row = [7, 1, 4];
+  assert.equal(entityStatsUsable(bounded, 7, row, 1500, 1, 1000), true); // inside
+  assert.equal(entityStatsUsable(bounded, 7, row, 3500, 1, 1000), true); // a little past the end: live playback
+  assert.equal(entityStatsUsable(bounded, 7, row, 20000, 1, 1000), false); // a jump far ahead
+  assert.equal(entityStatsUsable(bounded, 7, row, 900, 1, 1000), false); // rewound: never stale
+  assert.equal(entityStatsUsable(bounded, 7, [7, 2, 4], 3500, 1, 1000), false); // converted: new owner
+  assert.equal(entityStatsUsable(bounded, 7, row, 3500, 2, 1000), false); // another game
+  assert.equal(entityStatsUsable(bounded, 8, row, 3500, 1, 1000), false); // another unit
+  assert.equal(entityStatsUsable(null, 7, row, 1500, 1, 1000), false);
+});
+
 test('an incremental series fetch replaces rows from its start and keeps the rest', () => {
   const old = { 1: [{ t: 0, a: 1 }, { t: 5000, a: 2 }, { t: 10000, a: 3 }], 2: [{ t: 0, b: 1 }] };
   const merged = mergeSeries(old, { 1: [{ t: 10000, a: 4 }, { t: 15000, a: 5 }], 3: [{ t: 15000, c: 1 }] }, 10000);

@@ -1105,6 +1105,26 @@ def test_view_json_is_the_view_byte_for_byte_and_caches_final_keyframes(
     assert len(tl._view_cache) == 2
 
 
+def test_flushing_makes_the_newest_state_viewable_without_ending_the_timeline() -> None:
+    """A game that is over sends nothing more, and its last moments (when the winners
+    are decided) fall after the newest 1 s keyframe: they must still be viewable."""
+    tl = _start()
+    _feed(tl, 1050)  # the next keyframe is due at 2000
+    _feed(tl, 1450)
+    assert tl.time == 1450 and tl.keyframes[-1].time == 1050
+    version = tl.version
+    tl.flush_keyframe()
+    assert tl.keyframes[-1].time == 1450 and tl.version > version
+    view = tl.view_at(None)
+    assert view is not None and view["time"] == 1450
+    assert not tl.complete  # a flush is not the end: the game may still start another match
+    version = tl.version
+    tl.flush_keyframe()  # nothing new: no change
+    assert tl.version == version
+    _feed(tl, 1950)  # ingestion carries on
+    assert tl.time == 1950
+
+
 def test_views_of_a_whole_game_match_byte_for_byte() -> None:
     tl = Timeline(GameData(None))
     for f in game_frames(12):

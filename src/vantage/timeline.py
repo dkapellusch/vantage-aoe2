@@ -619,6 +619,18 @@ class Timeline:
             self.feed(f)
         self.finish()
 
+    def flush_keyframe(self) -> None:
+        """Make the newest state viewable: a keyframe at the current time when the
+        last one is older. A finished game sends nothing more, so its last moments (the
+        winners are decided there) would otherwise stay between two keyframes. Unlike
+        :meth:`finish` the timeline is not complete: the game may start another match."""
+        with self._lock:
+            if not self.frames or (self.keyframes and self.keyframes[-1].time == self.time):
+                return
+            self._keyframe()
+            self.version += 1
+            self.changed.notify_all()
+
     def finish(self) -> None:
         with self._lock:
             if self.frames and (not self.keyframes or self.keyframes[-1].time != self.time):

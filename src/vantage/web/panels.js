@@ -12,7 +12,7 @@ import {
 } from './games.js';
 import {
   S, settings, saveSettings, SPEEDS, fmtTime, fmtNum, fmtStock, esc, players, player, playerName, playerColor,
-  teams, teamIcon, plainTeamName, teamMemberLabel, layoutKind, isTwoTeamLayout, sideTeams, teamName, unitInfo, entityStatsValid, legacyStatsFresh, unitIcon, techInfo, techIcon, emblem, playerStats,
+  teams, teamIcon, plainTeamName, teamMemberLabel, layoutKind, isTwoTeamLayout, sideTeams, teamName, unitInfo, entityStatsValid, entityStatsUsable, legacyStatsFresh, unitIcon, techInfo, techIcon, emblem, playerStats,
   cyclePlayerColor, playerTextColor, AGE_NAMES, RES, tip, techInfoFor, techIconFor, ageName, ageIcon, civEra,
   skinOption, skinAsset,
   withAssetVersion,
@@ -267,6 +267,9 @@ function loadTree(civ) {
   const p = fetch(`/api/techtree/${civ}?lang=${encodeURIComponent(language || 'en')}`, { priority: 'low' }).then((r) => r.json()).catch(() => null).then((tree) => {
     const ok = tree && tree.nodes ? tree : null;
     techTrees.set(key, ok);
+    // A failed or empty answer (the game data not ready yet) must not stick for the
+    // whole session: forget it shortly, and the next render asks again.
+    if (!ok) setTimeout(() => { if (techTrees.get(key) === null) techTrees.delete(key); }, 5000);
     for (const b of (ok && ok.buildings) || []) if (!buildingMeta.has(b.id)) buildingMeta.set(b.id, { icon: b.icon, name: b.name });
     return ok;
   });
@@ -2388,6 +2391,7 @@ function unitStats(id, row) {
     unitStatCache.set(key, c);
   }
   const valid = entityStatsValid(c.data, id, row, at, generation, c.queryAt);
+  const usable = valid || entityStatsUsable(c.data, id, row, at, generation, c.queryAt);
   if (!c.pending && (!valid || now - c.started >= 1000) && (!c.failed || now - c.started >= 1000)) {
     c.started = now; c.pending = true; c.failed = false;
     const sequence = ++c.sequence;
@@ -2401,7 +2405,7 @@ function unitStats(id, row) {
       if (unitStatCache.get(key) === c && c.sequence === sequence) c.pending = false;
     });
   }
-  return valid ? c.data : null;
+  return usable ? c.data : null;
 }
 
 // -- resources left --------------------------------------------------------------------------

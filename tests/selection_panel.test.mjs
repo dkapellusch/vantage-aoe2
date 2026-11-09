@@ -31,12 +31,24 @@ test('mixed-owner sections retain their own state when their order changes', () 
   setSelectionHtml(el,markup(2,'owner-2-units','owner-1-units'),'1:42,43');
   assert.deepEqual(el.details.map(d=>d.open),[false,true]);
 });
-test('selection or game changes reset inspection state even with identical markup', () => {
+test('an opened section stays open when another object is selected; scroll starts at the top', () => {
   const el = panel(), html = markup(1,'mechanics');
   setSelectionHtml(el,html,'1:42'); el.details[0].open=true; el.scrollTop=60;
-  setSelectionHtml(el,html,'1:43'); assert.equal(el.details[0].open,false); assert.equal(el.scrollTop,0);
-  el.details[0].open=true;
-  setSelectionHtml(el,html,'2:43'); assert.equal(el.details[0].open,false);
+  setSelectionHtml(el,html,'1:43'); assert.equal(el.details[0].open,true); assert.equal(el.scrollTop,0);
+  setSelectionHtml(el,html,'2:44'); assert.equal(el.details[0].open,true);
+});
+test('a section toggled just before the selection changes is remembered', () => {
+  const el = panel(), html = markup(1,'mechanics');
+  setSelectionHtml(el,html,'1:42'); el.details[0].open=true;
+  setSelectionHtml(el,html,'1:43'); el.details[0].open=false;
+  setSelectionHtml(el,html,'1:44'); assert.equal(el.details[0].open,false);
+});
+test('the Details section is one setting across economic and military objects', () => {
+  const el = panel();
+  setSelectionHtml(el,markup(1,'mechanics'),'1:villager'); el.details[0].open=true;
+  setSelectionHtml(el,markup(1,'activity'),'1:knight'); assert.equal(el.details[0].open,true);
+  el.details[0].open=false;
+  setSelectionHtml(el,markup(1,'mechanics'),'1:villager2'); assert.equal(el.details[0].open,false);
 });
 test('temporarily missing sections can return without losing the user’s open state', () => {
   const el = panel(); setSelectionHtml(el,markup(1,'activity'),'1:42'); el.details[0].open=true;

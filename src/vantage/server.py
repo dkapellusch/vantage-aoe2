@@ -279,7 +279,7 @@ class Session:
                 self._restart_stream = False
                 progressed = False
                 try:
-                    if source.get("status") != "needs_certs":
+                    if source.get("status") != "needs_certs" and not self._match_over(timeline):
                         source["status"] = "connecting"
                     game = LiveGame(host, port).connect(timeout=5)
                     self._live = game
@@ -325,6 +325,11 @@ class Session:
                     loaded = True
                     self.error = None
                     self._stream_error = None
+                    if self._match_over(timeline):
+                        # A reconnect to a finished game: it is still finished, whatever
+                        # the stream's first frame looks like. The viewer reads "the game
+                        # is over" from this status.
+                        source["status"] = "ended"
 
                     if minimize:
                         with contextlib.suppress(Exception):
@@ -417,6 +422,9 @@ class Session:
                         game.close()
                 if self._restart_stream and not stop.is_set():
                     continue  # asked for a fresh stream (e.g. to start a recording)
+                if self._match_over(timeline):
+                    # Nothing more comes: show the final moments, where the result is.
+                    timeline.flush_keyframe()
                 if exit_on_end and loaded and self.error is None:
                     break  # the stream ended cleanly: done, not reconnecting
                 game_over = timeline.game_ended or source.get("status") == "ended"
@@ -575,8 +583,16 @@ class Session:
 
     #: ``ScreenState.Location``: the spectator lobby screen, the game screen.
     _SCREEN_LOBBY, _SCREEN_GAME = 5, 2
-    #: ``GameState``: the match is over.
-    _GAME_DONE = 3
+    #: ``GameState``: the match is on, the match is over.
+    _GAME_PLAYING, _GAME_DONE = 2, 3
+
+    def _match_over(self, timeline: Timeline | None) -> bool:
+        """The match is over: the world says so, or the game's own state does (a replay
+        that reached its end sets no ``gameEnded`` in the world)."""
+        return bool(
+            (timeline is not None and timeline.game_ended)
+            or self.source.get("game_state") == self._GAME_DONE
+        )
 
     def oracle_message(self, msg: dict[str, Any]) -> None:
         """Apply one Oracle status message to ``source``."""
@@ -610,6 +626,8 @@ class Session:
             src["game_state"] = msg.get("value", 0)
             if src["game_state"] == self._GAME_DONE:
                 src["status"] = "ended"
+            elif src.get("status") == "ended" and src["game_state"] == self._GAME_PLAYING:
+                src["status"] = "playing"  # the game started another match
         elif kind == "gametype":
             src["game_type"] = msg.get("value", 0)
         elif kind == "currentreplay":

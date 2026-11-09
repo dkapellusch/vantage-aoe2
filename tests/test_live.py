@@ -414,6 +414,56 @@ def test_an_ended_game_is_neither_reapplied_nor_rerecorded_on_reconnect(
     assert [f.time for f in read_frames(rec)] == [2000]  # one snapshot, not one per stream
 
 
+def test_a_game_the_game_reports_over_stays_ended_across_reconnects(
+    fake: tuple[FakeGame, int], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A replay that reached its end has no gameEnded flag in the world, but the
+    game says "match over" (Oracle game state). Every reconnect must keep saying
+    so: the viewer decides "the game is over" from the status, and a status that
+    went connecting / ready / playing again left it frozen at the last frame."""
+    import vantage.server as S
+
+    game, port = fake
+    snap = snapshot_builder(2000).push(fid("Root", "world")).pop()
+    game.stream = lambda: [Frame(time=2000, patch=snap.forward())]
+    delays: list[int] = []
+    monkeypatch.setattr(S, "reconnect_delay", lambda over, idle: delays.append(idle) or 0.15)
+    session = Session(GameData(None), tmp_path)
+    session.open_live(port=port, record=False)
+    assert _wait(lambda: session.source.get("status") == "ended")
+    seen: set[Any] = set()
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and len(delays) < 5:
+        seen.add(session.source.get("status"))
+        time.sleep(0.002)
+    session.stop()
+    assert len(delays) >= 5, "the stream did not reconnect"
+    assert seen == {"ended"}
+
+
+def test_the_last_moments_of_a_game_that_ended_become_viewable(
+    fake: tuple[FakeGame, int], tmp_path: Path
+) -> None:
+    """The frames after the newest 1 s keyframe (where a replay's result is decided)
+    are shown once the game says it is over, so the last view is the last state."""
+    from tests.helpers import delta, snapshot_frame
+
+    game, port = fake
+    game.stream = lambda: [
+        snapshot_frame(0),
+        Frame(time=1050, patch=delta(1050).forward()),
+        Frame(time=1450, patch=delta(1450).forward()),
+    ]
+    session = Session(GameData(None), tmp_path)
+    session.open_live(port=port, record=False)
+    tl = session.timeline
+    assert tl is not None
+    assert _wait(lambda: session.source.get("status") == "ended")
+    assert _wait(lambda: tl.keyframes and tl.keyframes[-1].time == 1450)
+    assert tl.time == 1450 and not tl.complete  # viewable, yet the session is still following the game
+    session.stop()
+
+
 def test_reconnect_backs_off_only_once_the_game_is_over() -> None:
     from vantage.server import RECONNECT_ENDED_MAX_S, RECONNECT_S, reconnect_delay
 

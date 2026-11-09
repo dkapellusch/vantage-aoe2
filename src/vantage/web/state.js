@@ -712,6 +712,19 @@ export function entityStatsValid(data, id, row, at, generation, queriedAt) {
     && Number.isInteger(data.valid_until_ms) && data.valid_from_ms <= at && at < data.valid_until_ms;
 }
 
+// Playing forward, the clock leaves a bounded response's interval (a live game
+// bounds it at the newest data it had) a moment before the refetch lands: the
+// kills, deaths and idle time of the same unit stay up meanwhile instead of
+// blanking. Rewinding, a far jump, a converted unit or another game never reuse it.
+const FORWARD_STATS_SLACK_MS = 5000;
+export function entityStatsUsable(data, id, row, at, generation, queriedAt) {
+  if (entityStatsValid(data, id, row, at, generation, queriedAt)) return true;
+  return !!data && data.entity_stats_validity_version === 1 && data.generation === generation
+    && data.entity_id === id && (!row || (data.owner === row[1] && data.master === row[2]))
+    && Number.isInteger(data.valid_from_ms) && Number.isInteger(data.valid_until_ms)
+    && at >= data.valid_from_ms && at - data.valid_until_ms < FORWARD_STATS_SLACK_MS;
+}
+
 export function techIcon(tid) {
   const t = techInfo(tid);
   return t.icon >= 0 ? withAssetVersion(`/icon/tech/${t.icon}.png?g=${S.game}`) : '';

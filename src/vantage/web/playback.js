@@ -216,3 +216,33 @@ export function eventIndexAfter(events, time) {
   while (lo < hi) { const m = (lo + hi) >> 1; if (events[m].t <= time) lo = m + 1; else hi = m; }
   return lo;
 }
+
+/**
+ * Wall ms a replay read ahead by the game should still wait before the viewer
+ * plays on, so it never catches up with the game (0 = play).
+ *
+ * `total` is the replay's length from its header, `end` how far the game has got,
+ * `t` the viewer's position, `watch` the viewer's game ms per wall ms, `rate` the
+ * game's measured production in the same unit. `producing` is false once the game
+ * has stopped sending frames (paused, ended, stalled): its rate then decays to 0
+ * and the wait would grow without bound for data that will never arrive, so the
+ * viewer plays what it has instead.
+ */
+export function replayBufferWait({ total, end, t, watch, rate, samples, producing }) {
+  if (!total || !producing) return 0;
+  if (rate == null || samples < 4) return 0; // measure ~12 s first
+  // Keeping up (within 5 %): no buffering; the live-edge hold covers small gaps.
+  if (watch <= 0 || rate >= watch * 0.95 || end >= total - 1000) return 0;
+  // At the current pace the game reaches the end after (total - end) / rate and
+  // playback after (total - t) / watch: wait the difference, once.
+  return Math.max(0, (total - end) / Math.max(rate, 1e-3) - (total - t) / watch);
+}
+
+/**
+ * The match is over, as far as the game says. A replay that played to its end
+ * sets no `gameEnded` in the world: the game's own state (`GameState.DONE` = 3)
+ * and the session's status are what tell.
+ */
+export function matchEnded(src) {
+  return !!src && (src.status === 'ended' || Number(src.game_state) === 3);
+}

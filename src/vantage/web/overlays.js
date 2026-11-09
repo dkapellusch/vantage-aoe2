@@ -2507,6 +2507,9 @@ export async function renderEndgame(seek) {
   // from the last moment itself.
   const lastView = S.view || (await fetchView(S.end).catch(() => null));
   const ended = !!(lastView && lastView.game_ended);
+  const src = (S.session && S.session.source) || {};
+  const gameDone = Number(src.game_state) === 3; // the game itself reports the match over
+  const replayed = !!(src.replay || (src.header && src.header.replay));
   const sm = S.summary || {};
   let ps = players().filter((p) => sm[p.id]);
   const placed = ps.some((p) => sm[p.id].placing);
@@ -2516,8 +2519,11 @@ export async function renderEndgame(seek) {
   const banner = winners.length
     ? t('{who} is victorious!', { who: winners.map(pname).join(' & ') })
     : ps.length && ps.every((p) => sm[p.id].status !== 'playing') ? t('Everyone lost!')
-    // A recording can stop before the game does: say so rather than "Game over".
-    : !ended && ps.some((p) => sm[p.id].status === 'playing') ? t('The recording ends here; the game went on')
+    // A recording can stop before the game does: say so rather than "Game over". The
+    // game's own "match over" signal wins, and a replay says only that it ends, as
+    // its file does not say whether the match went on.
+    : !ended && !gameDone && ps.some((p) => sm[p.id].status === 'playing')
+      ? (replayed ? t('The replay ends here') : t('The recording ends here; the game went on'))
     : t('Game over');
   const podium = placed ? `<div class="placings">${ps.filter((p) => sm[p.id].placing && sm[p.id].placing <= 3).map((p) => {
     const pl = sm[p.id].placing;
@@ -2529,7 +2535,6 @@ export async function renderEndgame(seek) {
     return `<tr><td ${tip(t(label), detail ? t(detail) : '')}>${t(label)}</td>${cells.map((x) => `<td>${x ?? '–'}</td>`).join('')}</tr>`;
   };
   const ageCell = (s) => [1, 2, 3].map((a) => (s.age_times && s.age_times[a] ? `<a class="seek" data-seek="${s.age_times[a]}" ${tip(t('Jump to {time}', { time: fmtTime(s.age_times[a]) }))}>${fmtTime(s.age_times[a])}</a>` : '–')).join(' · ');
-  const src = (S.session && S.session.source) || {};
   const saved = src.recording_saved || (S.session && S.session.mode === 'live' ? src.recording : null);
   const autoClose = +(settings.endgameAutoClose || 0);
   el.innerHTML = `${closeBtn()}<div id="endgame-banner">${banner}</div>${podium}
