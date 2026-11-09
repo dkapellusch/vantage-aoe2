@@ -394,7 +394,9 @@ def _serve(args: argparse.Namespace) -> int:
     rec_dir.mkdir(parents=True, exist_ok=True)
     session = Session(data, rec_dir)
     # The recordings list names who played: read in the background, cached per file.
-    session.summaries.enabled = True
+    summaries = getattr(session, "summaries", None)  # a substitute session may have none
+    if summaries is not None:
+        summaries.enabled = True
     server = browser_timer = None
     # Every exit below closes what was opened, in this order: a failure before
     # the server is bound submits no conversion and leaves no socket behind.
