@@ -2138,7 +2138,7 @@ function singlePanel(el, r) {
     <div class="hpbar"><div style="width:${Math.round(r[5] * 100)}%"></div></div>
     <div class="hint">${t('HP')} ${numbersReady ? `${Math.round(r[5] * hpMax)} / ${baseDelta(base.hp ?? (sv('hp') || u.hp), hpMax)}` : '– / –'}${r[6] & 8 ? ` · <b style="color:var(--bad)">${t('idle')}</b>` : doing}${r[6] & 16 && !consHtml ? ` · ${t('under construction')}` : ''}</div>
     ${consHtml}${faithHtml}${chargeFillHtml}${gateHtml}
-    ${workingHtml}${economic ? `<details class="review-details" data-panel-detail="mechanics"><summary>${t('Details')}</summary>${resourceTotalsHtml(us?.resource_totals, u.cls === 4)}${mechanics}${eff}${combatHtml(us)}</details>` : `${militaryCard([r[0]])}${mechanics}`}
+    ${economic && u.kind === 'building' && (nonZero(rng.cur) || us?.kills || us?.dealt) ? militaryCard([r[0]]) : ''}${workingHtml}${economic ? `<details class="review-details" data-panel-detail="mechanics"><summary>${t('Details')}</summary>${resourceTotalsHtml(us?.resource_totals, u.cls === 4)}${mechanics}${eff}${combatHtml(us)}</details>` : `${militaryCard([r[0]])}${mechanics}`}
     ${garHtml}${relevantUpgrades([r])}
     ${r[1] > 0 && u.cost && Object.keys(u.cost).length ? `<div class="hint" style="margin-top:4px">${t('Cost')}: ${costText(u.cost)}</div>` : ''}
     ${economic ? '' : `${carry}${marketHtml}${farmQ}${prodHtml}<details class="review-details" data-panel-detail="activity"><summary>${t('Details')}</summary>${eff}</details>`}`);
