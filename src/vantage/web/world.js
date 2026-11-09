@@ -3559,7 +3559,11 @@ export function installInput(onSelect) {
     wheelZoom(e);
   }, { passive: false });
   let miniDrag = false;
-  const miniMove = (e) => { const [x, y] = minimapToWorld(e); S.camera.x = x; S.camera.y = y; camAnim = null; };
+  // The minimap is a diamond in a rectangle: its corners are off the map.
+  const miniMove = (e) => {
+    const [x, y] = minimapToWorld(e);
+    S.camera.x = Math.max(0, Math.min(mapW, x)); S.camera.y = Math.max(0, Math.min(mapH, y)); camAnim = null;
+  };
   mini.addEventListener('mousedown', (e) => { if (e.button === 0) { miniDrag = true; miniMove(e); } });
   window.addEventListener('mousemove', (e) => { if (miniDrag) miniMove(e); });
   window.addEventListener('mouseup', () => { miniDrag = false; });
