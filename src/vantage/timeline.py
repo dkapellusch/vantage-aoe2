@@ -937,7 +937,9 @@ class Timeline:
                 s[k] = round(tallies[k])
             apm = v["apm"].get(pid, {})
             self._apm_peak[ipid] = max(self._apm_peak[ipid], apm.get("total", 0))
-            minutes = t / 60_000
+            # Actions are counted only from when the timeline began (a viewer
+            # attached mid-game never saw the earlier ones), so divide by that time.
+            minutes = max(0, t - self.start) / 60_000
             s["apm_peak"] = self._apm_peak[ipid]
             s["apm_avg"] = round(self._apm_total[ipid] / minutes) if minutes >= 1 else 0
             s["eapm"] = apm.get("effective", 0)
@@ -2363,7 +2365,7 @@ class Timeline:
                 for e in events:
                     if e["kind"] == "trained" and e.get("player") == ipid:
                         created[str(e.get("master"))] += 1
-                minutes = end / 60_000
+                minutes = max(0, end - self.start) / 60_000
                 eff_actions = rows[-1].get("actions_effective", 0) if rows else 0
                 out[pid] = {
                     "kills": s["kills"],

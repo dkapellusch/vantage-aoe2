@@ -1248,3 +1248,16 @@ def test_series_rows_and_summary_carry_the_collected_rate() -> None:
     assert (last["rate_food"], last["rate_wood"], last["rate_total"]) == (600, 300, 900)
     assert rows[0]["rate_total"] == 0
     assert tl.summary()["1"]["collected_rate"]["total"] == 900
+
+
+def test_average_apm_counts_only_the_time_the_timeline_observed() -> None:
+    # Attached 20 minutes into a game: actions seen in the 2 observed minutes
+    # must not be divided over the whole 22.
+    tl = Timeline(GameData(None))
+    tl.feed(snapshot_frame(1_200_000))
+    tl._apm_total[1] = 240
+    _feed(tl, 1_260_000)
+    _feed(tl, 1_320_000)
+    v = tl.view_at(None)
+    assert v is not None
+    assert v["players"]["1"]["apm_avg"] == round(240 / ((tl.time - tl.start) / 60_000))
