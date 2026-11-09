@@ -1076,16 +1076,47 @@ async function playReplay(r, confirmed = false) {
   if (homeOpened) homeOpened();
 }
 
-export async function renderHome(onOpened) {
+// The home screen's lists as last fetched. Reopening the screen, switching its
+// tabs and typing in its search box paint from here at once; a fresh copy is
+// fetched behind that (listing replays and recordings takes about a second
+// while a recording is still loading).
+let homeData = null, homeLoading = null;
+function loadHome() {
+  if (!homeLoading) {
+    const arr = (x) => (Array.isArray(x) ? x : []);
+    homeLoading = Promise.all([
+      api('/api/recordings').then(arr, () => []), api('/api/replays').then(arr, () => []), api('/api/session?probe=1').catch(() => ({})),
+      api('/api/config').catch(() => ({})),
+    ]).then(([recs, reps, sess, config]) => { homeData = { recs, reps, sess, config }; return homeData; })
+      .finally(() => { homeLoading = null; });
+  }
+  return homeLoading;
+}
+
+// Fetch the lists again; repaint only when something changed, and never under
+// the user's typing.
+async function refreshHome(el) {
+  const shown = JSON.stringify(homeData);
+  const next = await loadHome();
+  const typing = el.contains(document.activeElement) && document.activeElement.matches('input, select, textarea');
+  if (JSON.stringify(next) !== shown && !el.classList.contains('hidden') && !typing) paintHome(el, next);
+}
+
+/** `cached`: paint what is already known without asking the server again. */
+export async function renderHome(onOpened, cached = false) {
   if (onOpened) homeOpened = onOpened;
   const el = $('overlay-home');
+  if (homeData) {
+    paintHome(el, homeData);
+    if (!cached) await refreshHome(el);
+    return;
+  }
   // Listing the replays reads every header: show something on the first open.
   if (!el.innerHTML.trim()) { el.innerHTML = `${closeBtn()}<h2>${t('Vantage')}</h2><p class="hint">${t('Loading…')}</p>`; wireClose(el); }
-  const arr = (x) => (Array.isArray(x) ? x : []);
-  const [recs, reps, sess, config] = await Promise.all([
-    api('/api/recordings').then(arr, () => []), api('/api/replays').then(arr, () => []), api('/api/session?probe=1').catch(() => ({})),
-    api('/api/config').catch(() => ({})),
-  ]);
+  paintHome(el, await loadHome());
+}
+
+function paintHome(el, { recs, reps, sess, config }) {
   nativeReplays = config.native_replays === true;
   if (nativeReplays && homeTab === 'live') homeTab = 'replays';
   watchBlock = !nativeReplays && certsMissing(sess).length ? t('Watching a replay needs the certificate files, missing from {dir}.', { dir: sess.certs.dir }) : '';
@@ -1099,14 +1130,16 @@ export async function renderHome(onOpened) {
       ${homeTab === 'replays' || homeTab === 'recordings' ? `<input id="home-filter" placeholder="${esc(t('Search…'))}" value="${esc(homeFilter)}" style="margin-left:auto">` : ''}
     </div>${body}`;
   wireClose(el);
-  const rerender = () => renderHome();
+  // Tabs, filters and row clicks repaint from what is known; the polls ask again.
+  const rerender = () => renderHome(null, true);
+  const refresh = () => refreshHome(el);
   el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { homeTab = b.dataset.tab; rerender(); }));
   el.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => { homeTab = b.dataset.goto; rerender(); }));
   const filt = $('home-filter');
   if (filt) {
     filt.addEventListener('input', () => {
       homeFilter = filt.value; replayLimit = REPLAY_PAGE; clearTimeout(filt._t);
-      filt._t = setTimeout(() => renderHome().then(() => { const n = $('home-filter'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }), 250);
+      filt._t = setTimeout(() => renderHome(null, true).then(() => { const n = $('home-filter'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }), 250);
     });
   }
   el.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', async () => {
@@ -1134,13 +1167,13 @@ export async function renderHome(onOpened) {
   if (all) all.addEventListener('click', () => { replayLimit = Infinity; rerender(); });
   if (homeTab === 'replays' && reps.some((r) => !missingData(r) && r.duration_ms === undefined) && rf.spoilers) {
     clearTimeout(renderHome._poll);
-    renderHome._poll = setTimeout(() => { if (!el.classList.contains('hidden') && homeTab === 'replays') rerender(); }, 3000);
+    renderHome._poll = setTimeout(() => { if (!el.classList.contains('hidden') && homeTab === 'replays') refresh(); }, 3000);
   }
   // Recordings still being read (who played): look again shortly, unless a field has the focus.
   if ((homeTab === 'recordings' || homeTab === 'overview') && recs.some((r) => r.summary_pending)) {
     clearTimeout(renderHome._recPoll);
     renderHome._recPoll = setTimeout(() => {
-      if (!el.classList.contains('hidden') && (homeTab === 'recordings' || homeTab === 'overview') && !el.contains(document.activeElement)) rerender();
+      if (!el.classList.contains('hidden') && (homeTab === 'recordings' || homeTab === 'overview')) refresh();
     }, 3000);
   }
   el.querySelectorAll('tr.rrow').forEach((tr) => tr.addEventListener('click', (ev) => {

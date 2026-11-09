@@ -949,6 +949,7 @@ class App:
         #: Replay headers keyed by (path, size, mtime); durations fill in from
         #: a background scan because reading them walks the whole file.
         self._replay_meta: dict[tuple[str, int, float], dict[str, Any]] = {}
+        self._recording_headers: dict[tuple[str, int, int], dict[str, Any]] = {}
         self._replay_scan: threading.Thread | None = None
         #: Settings overrides pushed to every browser (``--patch-config``) and
         #: whether browsers should ignore their saved settings.
@@ -1583,10 +1584,18 @@ class App:
         live = self.session.recording_path()
         unread: list[Path] = []
         for p in sorted(d.glob("*.vrec"), key=lambda p: p.stat().st_mtime, reverse=True):
-            try:
-                hdr = read_header(p)
-            except (OSError, ValueError, EOFError):
-                continue
+            st = p.stat()
+            # Headers are kept per file as it is on disk: a listing of a hundred
+            # recordings then opens no gzip stream at all (the list is asked for
+            # on every home-screen open).
+            key = (str(p), st.st_size, st.st_mtime_ns)
+            hdr = self._recording_headers.get(key)
+            if hdr is None:
+                try:
+                    hdr = read_header(p)
+                except (OSError, ValueError, EOFError):
+                    continue
+                self._recording_headers[key] = hdr
             # Who played and on what map (recording_summary): cached, else read
             # in the background and present on a later listing. Not the file
             # being written now: it changes with every frame.
@@ -1598,8 +1607,8 @@ class App:
                 {
                     "path": str(p),
                     "name": p.name,
-                    "size": p.stat().st_size,
-                    "mtime": p.stat().st_mtime,
+                    "size": st.st_size,
+                    "mtime": st.st_mtime,
                     "header": hdr,
                     "summary": summary,
                     "summary_pending": known and summary is None and p != live,

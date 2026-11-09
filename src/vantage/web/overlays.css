@@ -63,7 +63,7 @@ img.agg-icon { width: 20px; height: 20px; vertical-align: -5px; }
 .set-body .form-row label { flex: 0 0 260px; min-width: 0; }
 /* Text fields take the rest of the row and never push it past the column. */
 .set-body .form-row { flex-wrap: wrap; }
-.set-body .form-row input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]) { flex: 1 1 160px; min-width: 0; max-width: 100%; }
+.set-body .form-row input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=number]) { flex: 1 1 160px; min-width: 0; max-width: 100%; }
 .set-body .form-row button { white-space: nowrap; }
 .set-body input[type=range] { width: 180px; }
 .dash-ed { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
@@ -204,3 +204,11 @@ input.off-in { width: 74px; }
 .list .rec-file { font-size: 11px; margin: 1px 2px 0; opacity: .8; }
 .list th { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .03em; position: sticky; top: -16px; background: var(--panel-solid); z-index: 1; }
 .list td.nw { white-space: nowrap; }
+/* Hotkeys: an action and its key read as one line (the table used to span the
+   whole overlay, the key a thousand pixels from its name). */
+.hk-table { width: auto; min-width: min(760px, 100%); }
+.hk-table td:first-child { padding-right: 28px; }
+.hk-table tr:hover td { background: rgba(255,255,255,.03); }
+.set-body .form-row #hk-filter { flex: 0 1 420px; }
+/* A number needs a few characters, not the rest of the row. */
+.set-body .form-row input[type=number] { flex: 0 0 90px; min-width: 0; }

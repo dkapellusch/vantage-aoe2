@@ -36,7 +36,7 @@ A minimised game streams far fewer particle effects (smoke, dust and so on). If 
 
 By default, recordings go to `~/.local/share/vantage/recordings` on Linux and `%LOCALAPPDATA%\Vantage\recordings` on Windows. `vantage serve` prints the folder in use at start-up, and `--recordings-dir` changes it. Live recordings are named `live-YYYYMMDD-HHMMSS-N.vrec`.
 
-The home screen's **Recordings** tab lists that folder, newest first, and has **Open recordings folder**.
+The home screen's **Recordings** tab lists that folder, newest first, and has **Open recordings folder**. Each row names the players, their civilisations and the map; the length appears once a recording has been opened. Vantage reads this from each file in the background the first time it is listed and remembers it, so a long list fills in over a minute or two. The search box matches these names as well as file names.
 
 ## Opening a recording
 

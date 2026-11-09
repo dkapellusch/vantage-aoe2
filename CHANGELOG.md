@@ -8,6 +8,13 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Added
 
+- The recordings list says who played each recording, on what map and (once it has been opened)
+  for how long, instead of only its file name. The match is read from each recording's first
+  snapshot by a low-priority helper process and cached per file, so the list appears at once and
+  fills in. Search matches player, civilisation and map names too.
+- The quick reference (`?`) is grouped into sections laid out in columns.
+- The minimap toolbar shows which modes are on (fog, minimap mode, resources left).
+
 - Team board: in team games and 1v1s the team overview compares the two sides stat by stat,
   with bars and the leader's margin. It adds the collection rate (resources per minute over the
   last game minute, a new `collected_rate` view field and `rate_*` series) and resources
@@ -35,6 +42,18 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Fixed
 
+- The ground stays drawn after the browser loses the WebGL context (a driver reset, the GPU
+  process restarting): the terrain renderer starts over as the sprite renderer already did,
+  instead of leaving the map black.
+- Player colours too dark to read on the panels (pure blue above all) are lifted for bars,
+  strips, chart lines and swatches.
+- The Panels menu and the ⛨ menu stay inside the window, and the chosen layout's name is readable.
+- The dashboard makes room at once when the team board switches to its wider Players view; the
+  technology and graph slide-outs stop above the time controls instead of covering them.
+- The selection panel's five metric labels no longer run into each other.
+- A panel's toolbar and resize handles no longer show through an open overlay, and the
+  scoreboard's toolbar no longer covers the right team's name.
+
 - A forager that became a builder or farmer before delivering its berries lost the secondary
   (bonus) wood already earned on that load; it now follows the carried berries.
 
@@ -45,6 +64,20 @@ All notable changes to Vantage are documented here. The format follows
   their artifacts (it used this package's folder, where their imports do not resolve).
 
 ### Changed
+
+- Statistics opens on the whole game for every player. It used to narrow the chart to the last
+  minute and two players on every open, and switch the selection panel to its "fight" scope;
+  that now happens only when you investigate an interval or click a dashboard value. Totals are
+  open below the chart, grid lines sit on round values, and the interval's event list names the
+  unit or technology and whose it was.
+- The event log shows one "under attack" alert per player per half minute (kings and other
+  high-priority alerts always show), in a quieter style, so a raid no longer pushes the kills
+  out of view. Its filter buttons no longer outweigh the log.
+- The dashboard is one control row (previous, pages, next) over a table that fills the panel.
+- The transport and the minimap toolbar use one set of drawn icons instead of Unicode symbols,
+  which some systems showed as colour emoji.
+- "Resources left" is a one-line strip with the game's resource icons, placed above the time
+  controls in the Caster layout. Dates in the home lists are short and stay on one line.
 
 - The two-team scoreboard shows a team score total per side (Settings → *Team score*: total,
   average or off; replaces *Team average score*) with the score share and lead under the clock.

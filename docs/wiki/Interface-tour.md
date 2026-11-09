@@ -89,6 +89,7 @@ The columns cover stockpiles, workers per resource, idle workers and idle town-c
 The **event log** on the right lists what happens: kills and losses, units trained and techs researched, age-ups, chat (including chat sent while the game is paused), tribute, market trades, conversions, diplomacy changes, player status (resigned, dropped, waiting), king alerts, wonders and relics, and victory countdowns.
 
 - The category icons along the top filter it. *Train and research* is hidden by default.
+- "Under attack" alerts are folded to one per player per half minute; alerts about kings and other high-priority ones always show.
 - Important events (a king threatened or killed, treason, wonders, relics, a near King of the Hill victory) get a highlighted area of their own.
 - Click an event's icon or row to move the camera there. Click its time to jump there in time too.
 - <kbd>PageUp</kbd> and <kbd>PageDown</kbd> scroll the log. <kbd>Shift+PageUp</kbd> and <kbd>Shift+PageDown</kbd> jump to the oldest or newest events.
@@ -125,11 +126,11 @@ Click a unit's name in the panel to give it a name of your own, such as a hero's
 
 The minimap shows terrain, players' units and buildings, and the camera's view. Click or drag on it to move the camera. <kbd>Alt+M</kbd> (or the button beside it) cycles **standard**, **military** and **resource** modes.
 
-The buttons beside the minimap are: the ⛨ menu, ⌂ home (replays and recordings), statistics, the fog mode, the minimap mode, resources left, ▣ panels, settings and the quick reference.
+The buttons beside the minimap are: the menu (a shield), home (replays and recordings), open a replay without the game, statistics, the fog mode, the minimap mode, resources left, panels, settings and the quick reference. A button is highlighted while its mode is on.
 
 ## Resources left
 
-**Resources left** (<kbd>Alt+R</kbd>) totals the natural resources still on the map, including relics.
+**Resources left** (<kbd>Alt+R</kbd>) is a strip totalling the natural resources still on the map, including relics.
 
 ## Time controls
 
@@ -139,6 +140,7 @@ The bar above the minimap is covered in [Time controls](Time-controls.md).
 
 **Statistics** (<kbd>Ctrl+Alt+S</kbd>) has tabs for **Score, Military, Economy, Technology, Society** and **APM**.
 
+- Statistics opens on the whole game for every player. **Investigate** (under the chart) compares two players over an interval and narrows the chart to it; clicking a value on the dashboard opens Statistics already investigating that player.
 - **Charts**: line or stacked, shown as actual values, % of the current total, or relative to the maximum. They can be overlaid with age-ups and economy or military techs. The wheel zooms a chart, and a right-click jumps the game to that moment.
 - **Tables**: kills and losses, buildings razed and lost, conversions, relics, trade, tribute, market, research, age-up times, peak villagers and army, and more.
 - **Time controls** on this screen show every value as it was at the chosen moment.

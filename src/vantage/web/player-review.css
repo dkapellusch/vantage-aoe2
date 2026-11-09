@@ -71,7 +71,8 @@
    in a row of their own above the tabs, and the table kept its natural width
    and row height inside a taller panel, leaving a dead band beside and below it. */
 #dashboard {
-  --dash-row-height: 26px;
+  /* 30 px: some cells stack a second value under the first (.dash-sub). */
+  --dash-row-height: 30px;
   --dash-body-height: calc(22px + var(--dash-rows, 2) * var(--dash-row-height) + 4px);
   grid-template-columns: auto minmax(0, 1fr) auto;
   grid-template-rows: 30px minmax(0, 1fr);
@@ -91,7 +92,7 @@
 #dashboard .review-dash-tabs button[aria-pressed=true] { color: var(--accent); background: rgba(217,180,90,.13); border-color: rgba(217,180,90,.35); }
 #dash-table { width: 100%; }
 #dash-table th { height: 22px; position: sticky; top: 0; background: var(--panel-solid); z-index: 1; font-size: 9.5px; letter-spacing: .04em; }
-#dash-table td { height: var(--dash-row-height); padding-top: 0; padding-bottom: 0; }
+#dash-table td { height: var(--dash-row-height); padding-top: 0; padding-bottom: 0; line-height: 1.15; }
 #dash-table tr:nth-child(odd) td { background: rgba(255,255,255,.025); }
 #dash-table tr:hover td { background: rgba(255,255,255,.06); }
 #dash-table td.pname { padding-left: 8px; }
