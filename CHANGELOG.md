@@ -8,6 +8,9 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Added
 
+- Vantage hub (`tools/hub`, Linux, experimental): a web app for uploading replays. Each upload is
+  converted by the replay farm and gets an unlisted page with a results table, charts over time
+  and the viewer built in.
 - Replay farm (`tools/farm`, Linux, experimental): converts many replays to recordings at once
   with several isolated, headless copies of the installed game, next to a game being played.
   Includes a fast clock for machines whose kernel clock source is HPET.
@@ -68,6 +71,8 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Changed
 
+- Replay farm: game copies run with a read-only file system and the home folder hidden, and the
+  farm can be used as a long-lived pool from Python.
 - Statistics opens on the whole game for every player. It used to narrow the chart to the last
   minute and two players on every open, and switch the selection panel to its "fight" scope;
   that now happens only when you investigate an interval or click a dashboard value. Totals are

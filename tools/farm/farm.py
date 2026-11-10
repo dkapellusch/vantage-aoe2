@@ -255,22 +255,29 @@ class Instance:
             self.procs.append(subprocess.Popen(cmd, env=env, stdout=log, stderr=log))
         # The sandbox keeps the host's process ids on purpose: Steam tells its clients
         # apart by pid, and drops a client whose pid another one already uses.
-        sandbox = [
-            "bwrap",
-            "--dev-bind",
-            "/",
-            "/",
-            "--tmpfs",
-            "/tmp",
-            "--unshare-user",
-            "--unshare-net",
-            "--cap-add",
-            "CAP_NET_ADMIN",
-            "--die-with-parent",
-            "bash",
-            "-c",
-            INNER,
-        ]
+        # Everything is read-only except the instance's own folder, and the home folder is
+        # hidden but for Steam (read-only) and the farm's library and staged replays: a
+        # replay is a file from anyone, read by the game's own parser.
+        home = str(Path.home())
+        steam = str(Path(env["STEAM_COMPAT_CLIENT_INSTALL_PATH"]).resolve())
+        farm = self.dir.parent
+        for sub in ("run", "cache", "home"):
+            (self.dir / sub).mkdir(exist_ok=True)
+        (farm / "staging").mkdir(exist_ok=True)
+        (farm / "lib").mkdir(exist_ok=True)
+        env.update(XDG_RUNTIME_DIR=str(self.dir / "run"), XDG_CACHE_HOME=str(self.dir / "cache"))
+        sandbox = ["bwrap", "--ro-bind", "/", "/", "--dev-bind", "/dev", "/dev"]
+        sandbox += ["--tmpfs", "/tmp", "--tmpfs", home, "--ro-bind", steam, steam]
+        dot_steam = Path.home() / ".steam"  # links into the Steam folder that its client reads
+        if dot_steam.is_dir():
+            sandbox += ["--ro-bind", str(dot_steam), str(dot_steam)]
+        if not str(Path(env["FARM_PROTON"]).resolve()).startswith(steam + "/"):
+            sandbox += ["--ro-bind", env["FARM_PROTON"], env["FARM_PROTON"]]
+        sandbox += ["--ro-bind", str(farm / "lib"), str(farm / "lib")]
+        sandbox += ["--ro-bind", str(farm / "staging"), str(farm / "staging")]
+        sandbox += ["--bind", str(self.dir), str(self.dir)]
+        sandbox += ["--unshare-user", "--unshare-net", "--cap-add", "CAP_NET_ADMIN"]
+        sandbox += ["--die-with-parent", "bash", "-c", INNER]
         self.procs.append(
             subprocess.Popen(
                 sandbox,
@@ -496,10 +503,8 @@ def instance_env(opts: argparse.Namespace, farm: Path, game: Path, proton: Path)
 
 
 def stage(replay: Path, farm: Path) -> Path:
-    """Replays under /tmp are copied aside: an instance has a /tmp of its own."""
+    """A copy of the replay in the one folder the game copies can read."""
     replay = replay.resolve()
-    if not str(replay).startswith("/tmp/"):
-        return replay
     key = hashlib.sha1(str(replay).encode()).hexdigest()[:12]
     target = farm / "staging" / f"{key}-{replay.name}"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -507,132 +512,215 @@ def stage(replay: Path, farm: Path) -> Path:
     return target
 
 
+class FarmError(RuntimeError):
+    """The farm cannot run here; the message says what is missing."""
+
+
+def options(**over: Any) -> argparse.Namespace:
+    """The convert command's options with their defaults, for callers in Python."""
+    opts = build_parser().parse_args(["convert", "-"])
+    for key, value in over.items():
+        setattr(opts, key, value)
+    return opts
+
+
+class Pool:
+    """Game copies converting replays from a queue.
+
+    ``on_result`` is called (from a worker thread) with one row per replay:
+    ``ok``, ``replay``, ``target``, ``tag`` and the conversion's timings or
+    error. A copy starts when its worker first has a replay. With
+    ``idle_seconds`` set the pool is long-lived: a copy that has had nothing to
+    do for that long is stopped, and started again on the next replay. Without
+    it the workers end when the queue is empty (``join``).
+    """
+
+    def __init__(
+        self,
+        opts: argparse.Namespace,
+        on_result: Any,
+        idle_seconds: float | None = None,
+        log: Any = print,
+    ) -> None:
+        self.opts = opts
+        self.on_result = on_result
+        self.idle_seconds = idle_seconds
+        self.log = log
+        self.farm = farm_dir()
+        game = Path(opts.game_dir) if opts.game_dir else find_game()
+        if not game or not (game / "AoE2DE_s.exe").is_file():
+            raise FarmError("game install not found (use --game-dir)")
+        compat = find_compatdata(game)
+        proton = Path(opts.proton) if opts.proton else find_proton()
+        if not compat or not proton:
+            raise FarmError("the game's Proton prefix or Proton itself was not found")
+        for tool in ("bwrap", "gamescope", "socat"):
+            if not shutil.which(tool):
+                raise FarmError(f"{tool} is not installed")
+        if not steam_running():
+            raise FarmError("the Steam client is not running (the game needs it to start)")
+        self.compat = compat
+        self.env = instance_env(opts, self.farm, game, proton)
+        self.jobs: queue.Queue[tuple[Path, Path, Any, int]] = queue.Queue()
+        self.instances: list[Instance] = []
+        self.threads: list[threading.Thread] = []
+        self.closed = threading.Event()
+        self.busy = 0
+        self.lock = threading.Lock()
+
+    def describe(self) -> str:
+        return (
+            f"clock x{self.opts.clock_scale}, "
+            f"{'integrated' if self.env['FARM_GS_DEV'] else 'discrete'} GPU, "
+            f"fast clock {'on' if 'LD_PRELOAD' in self.env else 'off'}"
+        )
+
+    def submit(self, replay: Path, target: Path, tag: Any = None) -> None:
+        self.jobs.put((replay, target, tag, 0))
+        with self.lock:
+            if len(self.threads) < self.opts.jobs and self.jobs.qsize() > 0:
+                inst = Instance(self.farm, len(self.instances), self.opts, self.env)
+                thread = threading.Thread(target=self._work, args=(inst,), daemon=True)
+                self.instances.append(inst)
+                self.threads.append(thread)
+                thread.start()
+
+    def pending(self) -> int:
+        """Replays waiting or being converted."""
+        return self.jobs.qsize() + self.busy
+
+    def join(self) -> None:
+        for thread in list(self.threads):
+            while thread.is_alive():
+                thread.join(0.5)
+
+    def close(self) -> None:
+        self.closed.set()
+        for inst in self.instances:
+            inst.stop()
+
+    def _ensure(self, inst: Instance) -> bool:
+        if inst.alive() and inst.conversions < self.opts.recycle:
+            return True
+        time.sleep(inst.index * self.opts.stagger if not inst.procs else 0)
+        make_prefix(self.compat, inst.dir)
+        inst.conversions = 0
+        inst.start()
+        if not inst.wait_ready(self.opts.start_timeout):
+            self.log(f"[{inst.index}] game did not start (see {inst.dir}/log)")
+            inst.stop()
+            return False
+        time.sleep(3)  # the menu settles
+        return True
+
+    def _convert(self, inst: Instance, replay: Path, target: Path) -> dict[str, Any]:
+        opts = self.opts
+        staged = stage(replay, self.farm)
+        cmd = [sys.executable, __file__, "_convert", "--port", str(inst.port)]
+        cmd += ["--replay", str(staged), "--out", str(target)]
+        cmd += ["--resolution-ms", str(opts.resolution_ms), "--particles", opts.particles]
+        cmd += ["--quiet-seconds", str(opts.quiet_seconds)] + (["--full"] if opts.full else [])
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        staged.unlink(missing_ok=True)
+        inst.conversions += 1
+        try:
+            row: dict[str, Any] = json.loads(proc.stdout.strip().splitlines()[-1])
+        except (IndexError, ValueError):
+            row = {"load": "ERROR", "error": proc.stderr.strip()[-300:]}
+        row["ok"] = proc.returncode == 0
+        return row
+
+    def _work(self, inst: Instance) -> None:
+        last = time.monotonic()
+        while not self.closed.is_set():
+            try:
+                replay, target, tag, attempt = self.jobs.get(timeout=1)
+            except queue.Empty:
+                if self.idle_seconds is None:
+                    break
+                if inst.alive() and time.monotonic() - last > self.idle_seconds:
+                    self.log(f"[{inst.index}] idle: stopping the game copy")
+                    inst.stop()
+                continue
+            with self.lock:
+                self.busy += 1
+            try:
+                if self._ensure(inst):
+                    row = self._convert(inst, replay, target)
+                else:
+                    row = {"ok": False, "load": "NO_GAME", "error": "the game did not start"}
+                if not row["ok"]:
+                    inst.stop()  # a fresh game for the next one
+                    if attempt < 1 and not self.closed.is_set():
+                        self.jobs.put((replay, target, tag, attempt + 1))
+                        continue
+                row.update(replay=replay.name, target=str(target), tag=tag, instance=inst.index)
+                self.on_result(row)
+            finally:
+                with self.lock:
+                    self.busy -= 1
+                last = time.monotonic()
+        inst.stop()
+
+
 def cmd_convert(opts: argparse.Namespace) -> int:
-    farm = farm_dir()
-    game = Path(opts.game_dir) if opts.game_dir else find_game()
-    if not game or not (game / "AoE2DE_s.exe").is_file():
-        raise SystemExit("game install not found (use --game-dir)")
-    compat = find_compatdata(game)
-    proton = Path(opts.proton) if opts.proton else find_proton()
-    if not compat or not proton:
-        raise SystemExit("the game's Proton prefix or Proton itself was not found")
-    for tool in ("bwrap", "gamescope", "socat"):
-        if not shutil.which(tool):
-            raise SystemExit(f"{tool} is not installed")
-    if not steam_running():
-        raise SystemExit("the Steam client is not running (the game needs it to start)")
     replays = [Path(r) for r in opts.replays]
     missing = [r for r in replays if not r.is_file()]
     if missing:
         raise SystemExit(f"no such replay: {missing[0]}")
     out_dir = Path(opts.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    jobs: queue.Queue[tuple[Path, Path]] = queue.Queue()
+    todo = []
     for replay in replays:
         target = out_dir / (replay.stem + ".vrec")
         if target.exists() and not opts.force:
             print(f"skip (exists): {target.name}")
             continue
-        jobs.put((replay, target))
-    if jobs.empty():
+        todo.append((replay, target))
+    if not todo:
         return 0
-    count = max(1, min(opts.jobs, jobs.qsize()))
-    env = instance_env(opts, farm, game, proton)
-    print(
-        f"farm: {count} game copies, clock x{opts.clock_scale}, "
-        f"{'integrated' if env['FARM_GS_DEV'] else 'discrete'} GPU, "
-        f"fast clock {'on' if 'LD_PRELOAD' in env else 'off'}",
-        flush=True,
-    )
-    instances = [Instance(farm, i, opts, env) for i in range(count)]
     results: list[dict[str, Any]] = []
-    lock = threading.Lock()
-    started = time.monotonic()
 
-    def worker(inst: Instance) -> None:
-        make_prefix(compat, inst.dir)
-        failures = 0
-        while failures < 3:
-            if not inst.alive() or inst.conversions >= opts.recycle:
-                inst.conversions = 0
-                inst.start()
-                if not inst.wait_ready(opts.start_timeout):
-                    failures += 1
-                    print(f"[{inst.index}] game did not start (see {inst.dir}/log)", flush=True)
-                    continue
-                time.sleep(3)  # the menu settles
-            try:
-                replay, target = jobs.get_nowait()
-            except queue.Empty:
-                break
-            cmd = [
-                sys.executable,
-                __file__,
-                "_convert",
-                "--port",
-                str(inst.port),
-                "--replay",
-                str(stage(replay, farm)),
-                "--out",
-                str(target),
-                "--resolution-ms",
-                str(opts.resolution_ms),
-                "--particles",
-                opts.particles,
-                "--quiet-seconds",
-                str(opts.quiet_seconds),
-            ] + (["--full"] if opts.full else [])
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            inst.conversions += 1
-            try:
-                row = json.loads(proc.stdout.strip().splitlines()[-1])
-            except (IndexError, ValueError):
-                row = {"load": "ERROR", "error": proc.stderr.strip()[-300:]}
-            row.update(replay=replay.name, ok=proc.returncode == 0, instance=inst.index)
-            with lock:
-                results.append(row)
-            if row["ok"]:
-                failures = 0
-                print(
-                    f"[{inst.index}] {replay.name}: {row['game_s'] / 60:.1f} game-min in "
-                    f"{row['total_s']:.0f} s ({row['rate']}x)",
-                    flush=True,
-                )
-            else:
-                failures += 1
-                print(
-                    f"[{inst.index}] FAILED {replay.name}: {row.get('load')} "
-                    f"{row.get('error', '')}",
-                    flush=True,
-                )
-                inst.stop()  # a fresh game for the next one
-        inst.stop()
+    def report(row: dict[str, Any]) -> None:
+        results.append(row)
+        if row["ok"]:
+            print(
+                f"[{row['instance']}] {row['replay']}: {row['game_s'] / 60:.1f} game-min in "
+                f"{row['total_s']:.0f} s ({row['rate']}x)",
+                flush=True,
+            )
+        else:
+            print(
+                f"[{row['instance']}] FAILED {row['replay']}: {row.get('load')} "
+                f"{row.get('error', '')}",
+                flush=True,
+            )
 
-    threads = []
-    for inst in instances:
-        thread = threading.Thread(target=worker, args=(inst,), daemon=True)
-        thread.start()
-        threads.append(thread)
-        time.sleep(opts.stagger)
+    opts.jobs = max(1, min(opts.jobs, len(todo)))
     try:
-        for thread in threads:
-            while thread.is_alive():
-                thread.join(0.5)
+        pool = Pool(opts, report, log=lambda text: print(text, flush=True))
+    except FarmError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"farm: {opts.jobs} game copies, {pool.describe()}", flush=True)
+    started = time.monotonic()
+    try:
+        for replay, target in todo:
+            pool.submit(replay, target)
+        pool.join()
     except KeyboardInterrupt:
         print("stopping...", flush=True)
     finally:
-        for inst in instances:
-            inst.stop()
+        pool.close()
     wall = time.monotonic() - started
     done = [r for r in results if r["ok"]]
     game_s = sum(r["game_s"] for r in done)
     print(
-        f"converted {len(done)}/{len(results)} replays, {game_s / 60:.0f} game-min in "
+        f"converted {len(done)}/{len(todo)} replays, {game_s / 60:.0f} game-min in "
         f"{wall:.0f} s: {game_s / wall if wall else 0:.0f}x real time overall"
     )
     if opts.report:
         Path(opts.report).write_text(json.dumps({"wall_s": wall, "results": results}, indent=1))
-    return 0 if len(done) == len(results) and jobs.empty() else 1
+    return 0 if len(done) == len(todo) else 1
 
 
 def cmd_down(_: argparse.Namespace) -> int:
@@ -664,7 +752,7 @@ def cmd_doctor(_: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("convert", help="convert replays to .vrec recordings")
@@ -704,7 +792,11 @@ def main() -> int:
     one.set_defaults(func=convert_one)
     sub.add_parser("down", help="stop every farm process").set_defaults(func=cmd_down)
     sub.add_parser("doctor", help="what this machine can use").set_defaults(func=cmd_doctor)
-    opts = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    opts = build_parser().parse_args()
     sys.path.insert(0, str(ROOT / "src"))
     return int(opts.func(opts))
 

@@ -76,14 +76,12 @@ def test_prefix_copy_leaves_out_saves_mods_and_logs(farm, tmp_path):
     farm.make_prefix(source, target)  # a second call keeps the existing copy
 
 
-def test_replays_under_tmp_are_staged(farm, tmp_path):
-    home = tmp_path / "elsewhere.aoe2record"
-    home.write_bytes(b"r")
-    staged = farm.stage(home, tmp_path / "farm")
-    if str(home.resolve()).startswith("/tmp/"):
-        assert staged.parent == tmp_path / "farm/staging" and staged.read_bytes() == b"r"
-    else:
-        assert staged == home.resolve()
+def test_replays_are_staged_into_the_farm_folder(farm, tmp_path):
+    replay = tmp_path / "elsewhere.aoe2record"
+    replay.write_bytes(b"r")
+    staged = farm.stage(replay, tmp_path / "farm")
+    assert staged.parent == tmp_path / "farm/staging"
+    assert staged.name.endswith("-elsewhere.aoe2record") and staged.read_bytes() == b"r"
 
 
 def test_marked_finds_only_processes_naming_a_farm_instance(farm, tmp_path):
