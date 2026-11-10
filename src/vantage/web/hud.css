@@ -1,0 +1,227 @@
+/* Vantage: hud styles (split from style.css so parallel work does not collide). */
+
+/* -- panel offsets (settings.panelOffsets [up, right] → CSS
+   variables set by panels.js). `translate` composes with each panel's own
+   transform (the dashboard and tech tree centre themselves with one). -- */
+#scoreboard, #victory { translate: var(--score-right, 0px) calc(-1 * var(--score-up, 0px)); }
+#leftcol { padding-top: var(--ov-top, 0px); }
+/* overviewTop also shifts the end-game panel */
+#overlay-endgame { top: calc(4vh + var(--ov-top, 0px)); }
+#dashboard { translate: var(--dash-right, 0px) calc(-1 * var(--dash-up, 0px)); }
+#minimap-wrap { translate: var(--mm-right, 0px) calc(-1 * var(--mm-up, 0px)); }
+#unitpanel { translate: var(--up-right, 0px) calc(-1 * var(--up-up, 0px)); }
+#events { translate: var(--ev-right, 0px) calc(-1 * var(--ev-up, 0px)); }
+
+/* -- scoreboard -- */
+#scoreboard .sb-side { display: flex; flex-direction: column; }
+#scoreboard .sb-side.right .sb-teamhead { flex-direction: row-reverse; }
+.sb-teamhead { display: flex; align-items: center; gap: 8px; padding: 2px 9px; font-size: 11px; background: rgba(0,0,0,.28); white-space: nowrap; }
+.sb-tname { font-weight: 700; color: var(--accent); cursor: pointer; letter-spacing: .02em; }
+.sb-tname:hover, .sb-pname:hover { text-decoration: underline; }
+.sb-pname { cursor: pointer; }
+.sb-seed { color: var(--muted); font-size: 10px; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+.sb-avg { color: var(--muted); font-family: var(--mono); }
+.sb-dots { display: inline-flex; gap: 3px; align-items: center; margin-left: 4px; vertical-align: middle; }
+.sb-dots i { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--accent); display: inline-block; }
+.sb-dots i.on { background: var(--accent); }
+.sb-series { font-size: 11px; color: var(--accent); white-space: nowrap; }
+.sb-series b { color: var(--text); }
+.sb-captain { color: var(--accent); margin-right: 3px; font-size: 11px; }
+.sb-rank { font: 700 11px var(--mono); color: var(--accent); min-width: 14px; text-align: center; }
+.sb-king { cursor: pointer; }
+.sb-king.dead { opacity: .4; cursor: default; }
+.sb-elo { white-space: nowrap; }
+#scoreboard .sb-ffa { display: grid; }
+#scoreboard .sb-ffa .sb-player { border-bottom-width: 3px; }
+.sb-br, .sb-empty { display: flex; align-items: center; padding: 4px 12px; color: var(--muted); font-size: 12px; }
+#scoreboard[data-layout="community"] { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
+#scoreboard[data-layout="community"] .sb-center { flex-direction: row; gap: 10px; padding: 3px 10px; }
+table.sb-community { border-collapse: collapse; font-size: 12px; }
+table.sb-community td { padding: 2px 6px; white-space: nowrap; }
+#scoreboard table.sb-community tr.sb-player { display: table-row; border: 0; padding: 0; }
+table.sb-community tr.dead { opacity: .45; text-decoration: line-through; }
+table.sb-community img.emblem { width: 20px; height: 20px; object-fit: contain; display: block; }
+table.sb-community .sb-swatch { display: inline-block; width: 4px; height: 18px; border-radius: 2px; vertical-align: middle; }
+table.sb-community .sb-age { width: 16px; height: 16px; display: block; }
+table.sb-community .num { font-family: var(--mono); text-align: right; color: var(--muted); }
+
+/* -- victory status (KotH, wonder / relic countdowns) -- */
+#victory { top: calc(6px + var(--score-bottom, 0px)); left: 50%; transform: translateX(-50%); padding: 4px 10px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; z-index: 2; }
+.vic-row { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.vic-row .num { font-family: var(--mono); color: var(--accent); }
+.vic-ico { font-size: 14px; }
+.vic-bar { width: 110px; height: 5px; background: rgba(255,255,255,.1); border-radius: 3px; overflow: hidden; }
+.vic-bar i { display: block; height: 100%; }
+
+/* -- overview: age shield, requirements, housed timer -- */
+.ov-row { grid-template-columns: 4px auto 1fr auto; }
+.ov-shield { display: flex; gap: 2px; align-items: center; min-width: 22px; }
+.ov-next { width: 16px; height: 16px; position: relative; overflow: hidden; border-radius: 2px; }
+.ov-next img { width: 16px; height: 16px; filter: grayscale(1); opacity: .45; display: block; }
+/* Researching style: antiquity civs' in-progress age icon is grayscale(80%) at .8 opacity
+   (the contain-fit 16px box needs no extra scaling). */
+.ov-next.antiq img { filter: grayscale(.8); opacity: .8; }
+.ov-next i { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(217,180,90,.45); }
+.ov-name[data-details] { cursor: pointer; }
+.ov-name[data-details]:hover { text-decoration: underline; }
+.ov-bld { display: inline-flex; gap: 2px; margin-left: 2px; }
+.ov-bld img { width: 14px; height: 14px; border-radius: 2px; filter: grayscale(1) brightness(.55); opacity: .7; }
+.ov-bld img.on { filter: none; opacity: 1; box-shadow: 0 0 0 1px var(--good); }
+.ov-bld b { display: inline-block; width: 6px; height: 6px; border-radius: 1px; background: rgba(255,255,255,.15); }
+.ov-bld b.on { background: var(--good); }
+.ov-have { font: 10px var(--mono); color: var(--muted); }
+.ov-have.ok { color: var(--good); }
+.ov-res .housed-t { color: var(--bad); }
+.ov-ages { display: flex; flex-wrap: wrap; gap: 1px; width: 36px; }
+.ov-ages img { width: 11px; height: 11px; }
+.ov-ages img.up { box-shadow: 0 0 0 1px var(--accent); border-radius: 2px; }
+
+/* -- techs: lingering finished techs, slide-outs -- */
+.tech { cursor: pointer; }
+.tech.linger { box-shadow: 0 0 0 1px var(--good); animation: tech-linger 5s linear forwards; }
+@keyframes tech-linger { 0% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: .35; } }
+.tech.big { width: 28px; height: 28px; }
+#slideout { top: calc(var(--sb-bottom, 114px) + 6px); right: 318px; width: min(760px, 52vw, calc(100vw - 318px - var(--left-panels, 0px))); max-height: calc(100vh - var(--sb-bottom, 114px) - 200px); overflow: auto; padding: 6px 8px; z-index: 3; animation: slide-in .18s ease-out; }
+@keyframes slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+#slideout[data-mode="graph"] { width: min(620px, 48vw, calc(100vw - 318px - var(--left-panels, 0px))); }
+.so-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.so-head .hint { margin-left: auto; }
+.so-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.so-name { min-width: 110px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; border-left: 3px solid; padding-left: 5px; }
+.so-group { display: flex; gap: 2px; padding-right: 6px; border-right: 1px solid var(--line); }
+#so-canvas { width: 100%; height: 220px; display: block; background: rgba(0,0,0,.25); border-radius: 4px; }
+.so-legend { font-size: 11px; margin-top: 4px; }
+
+/* -- hover tech tree: nine categories -- */
+.tt-cats { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+.tt-cat { display: flex; flex-direction: column; gap: 2px; }
+.tt-cat-h { font: 600 10px var(--font); color: var(--accent); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
+.tt-line { display: flex; gap: 2px; align-items: center; }
+.tt-cost { font: 9px var(--mono); color: var(--muted); margin-left: 4px; white-space: nowrap; }
+.tt-node.doing { outline: 2px solid var(--accent); }
+.tt-desc { font-size: 11px; color: var(--text); max-width: 760px; margin: 0 0 8px; line-height: 1.35; opacity: .9; }
+
+/* -- composition team totals -- */
+.prod-row.team-total { background: rgba(255,255,255,.03); }
+.prod-row .tt-label { font: 700 12px var(--mono); color: var(--accent); width: 8px; text-align: center; }
+
+/* -- dashboard: mini, mirrored, paired, FFA -- */
+#dashboard.mini { padding: 2px 6px 4px; }
+#dashboard.mini #dash-table { font-size: 11px; }
+#dashboard.mini .dash-head .hint { display: none; }
+#dash-table th.dash-gap, #dash-table td.dash-gap { width: 14px; padding: 0; }
+#dash-table th.r, #dash-table td.r { text-align: right; }
+#dash-table td.pname.r { border-left: 0; border-right: 3px solid; }
+#dash-table tr.dead td { opacity: .45; }
+#dash-table tr.pair-end td { border-bottom: 1px solid var(--line); }
+
+/* -- events: pinned high-priority area -- */
+#event-high { list-style: none; margin: 0; padding: 2px 0; border-bottom: 1px solid var(--accent); background: rgba(217,180,90,.08); }
+#event-high li { display: grid; grid-template-columns: 44px 4px 1fr; gap: 6px; padding: 2px 8px; align-items: center; cursor: pointer; font-size: 13px; }
+#event-high .et { font: 11px var(--mono); color: var(--muted); }
+#event-high .ec { width: 4px; height: 14px; border-radius: 2px; }
+#event-high img { width: 14px; height: 14px; vertical-align: -3px; }
+
+/* -- unit panel: bars, garrison HP, split selection -- */
+.up-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; margin: 2px 0 4px; }
+.up-bar i { display: block; height: 100%; }
+.up-garrison { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.up-gar { width: 30px; }
+.up-gar img { width: 30px; height: 30px; border-radius: 3px; background: #000; display: block; }
+.up-gar .hpbar { height: 3px; margin: 1px 0 0; }
+#unitpanel.split { width: 440px; }
+.up-sides { display: flex; gap: 8px; flex-wrap: wrap; }
+.up-side { flex: 1 1 180px; min-width: 0; }
+#unitpanel.split .up-side + .up-side { border-left: 1px solid var(--line); padding-left: 8px; }
+.up-side-h { font-weight: 600; font-size: 12px; color: var(--accent); margin-bottom: 2px; }
+#events .events-head { flex-wrap: wrap; gap: 2px; }
+#event-filters button { padding: 0 3px; margin-left: 1px; }
+.sb-victory { flex-basis: 100%; display: flex; justify-content: center; gap: 18px; padding: 3px 8px; font-size: 12px; background: rgba(0,0,0,.35); border-top: 1px solid var(--line); }
+#event-high { flex-shrink: 0; }
+
+/* -- unit panel deltas, aura, garrison slots -- */
+.up-delta { font-size: 10px; margin-left: 1px; }
+.up-delta.pos { color: var(--good); }
+.up-delta.neg { color: var(--bad); }
+.up-stats small, .up-aura b { font-family: var(--mono); }
+.up-aura { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; cursor: help; }
+.up-aura-ico { font-size: 14px; }
+.up-aura b { color: var(--accent); }
+.up-gar.empty { height: 30px; border: 1px dashed var(--line); border-radius: 3px; box-sizing: border-box; opacity: .6; }
+.ev-ico { opacity: .8; }
+
+/* -- dashboard header icons and two-line cells -- */
+.dash-ico { width: 14px; height: 14px; vertical-align: middle; object-fit: contain; }
+.dash-sub { display: block; font-size: 10px; color: var(--muted); line-height: 1.1; }
+
+/* -- scoreboard: RBW4 timer, Power Techs strip, allies header, king status -- */
+.sb-rbw4 { flex-basis: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 2px 8px; font: 700 12px var(--mono); color: var(--accent); background: rgba(0,0,0,.35); }
+.sb-rbw4-bar { width: 160px; height: 5px; background: rgba(255,255,255,.12); border-radius: 3px; overflow: hidden; }
+.sb-rbw4-bar i { display: block; height: 100%; background: var(--accent); }
+.sb-power-strip { display: flex; gap: 2px; flex-wrap: wrap; max-width: 360px; }
+.sb-power-strip .tech { width: 18px; height: 18px; }
+.sb-power-strip .tech.yes { box-shadow: 0 0 0 1px var(--good); }
+table.sb-community tr.sb-comm-head td { font: 600 10px var(--font); color: var(--accent); text-transform: uppercase; letter-spacing: .06em; }
+.sb-allies-h { color: var(--accent); }
+.sb-king.none { opacity: .5; cursor: help; }
+.sb-king.none { font-size: 13px; }
+
+/* -- King of the Hill: remaining / 550 years with a 100-year band centred on the bar -- */
+.vic-bar.koth { position: relative; width: 140px; overflow: visible; }
+.vic-bar.koth i { border-radius: 3px; }
+.vic-bar.koth .koth-band { position: absolute; top: -2px; bottom: -2px; left: 50%; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.55); border-radius: 2px; box-sizing: border-box; pointer-events: none; }
+
+/* -- hover tech tree: unique-unit icons -- */
+.tt-uu { display: flex; gap: 4px; margin: 0 0 8px; }
+.tt-uu .tt-node { cursor: help; }
+.tt-groups { display: flex; flex-direction: column; gap: 3px; }
+/* Compact tree: nine headed rows must fit a 1080p screen under the description. */
+#techtree .tt-node { width: 22px; height: 22px; }
+#techtree .tt-groups { gap: 2px; }
+#techtree .tt-desc { max-width: none; column-count: 2; column-gap: 24px; font-size: 10.5px; margin-bottom: 4px; line-height: 1.3; }
+#techtree .tt-cats { gap: 6px 14px; }
+#techtree .tt-uu { margin-bottom: 4px; }
+
+/* -- skin options: logo (showSkinLogo) and custom team icons (customPlayerInfos) -- */
+#skin-logo { position: fixed; left: 8px; top: 8px; max-width: 12vw; max-height: 52px; object-fit: contain; pointer-events: none; z-index: 5; }
+body.no-ui #skin-logo { display: none; }
+.sb-team-ico { height: 20px; width: auto; max-width: 48px; object-fit: contain; }
+.sb-age, .ov-age img, .ov-next img, .ov-shield img { object-fit: contain; } /* antiquity age images are portrait */
+/* Dashboard page arrows (Alt+X / Alt+C on screen). */
+.dash-nav { padding: 0 6px; line-height: 16px; font-size: 14px; margin: 0 4px; }
+
+/* -- unit panel: resources and groups -- */
+.up-res { font-size: 13px; margin-top: 6px; }
+.up-res b { font: 700 16px var(--mono); }
+.up-gsum { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; margin-top: 4px; color: var(--muted); }
+.up-gsum b { color: var(--text); font-family: var(--mono); }
+.up-acts { display: flex; flex-wrap: wrap; gap: 3px; margin: 2px 0 4px; }
+.up-act { font: 11px var(--mono); padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,.07); white-space: nowrap; }
+.up-act small { font-family: var(--font); color: var(--muted); }
+.up-act.idle { background: rgba(224,90,74,.22); }
+.up-act.fight { background: rgba(240,201,75,.18); }
+.up-types { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.up-trow { display: grid; grid-template-columns: 30px 1fr 30px 40px 30px; gap: 6px; align-items: center; font: 12px var(--mono); cursor: pointer; border-radius: 3px; }
+.up-trow:hover { background: rgba(255,255,255,.06); }
+.up-trow > span:nth-child(n+3) { text-align: right; }
+.up-thead { cursor: default; font-size: 10px; color: var(--muted); }
+.up-thead:hover { background: none; }
+.up-ticon { position: relative; width: 28px; height: 28px; border-radius: 3px; overflow: hidden; background: #000; }
+.up-ticon img { width: 100%; height: 100%; display: block; }
+.up-ticon b { position: absolute; right: 1px; bottom: 0; font: 700 11px var(--mono); text-shadow: 0 0 3px #000, 0 0 2px #000; }
+.up-tname { font-family: var(--font); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-thp { display: block; height: 3px; border-radius: 2px; background: #331; margin-top: 2px; overflow: hidden; }
+.up-thp i { display: block; height: 100%; background: var(--good); }
+/* group time spent (panels.js timeBar) */
+.up-time { display: grid; grid-template-columns: 74px 1fr; gap: 1px 6px; align-items: center; margin-top: 3px; font-size: 11px; }
+.up-tbar { display: flex; height: 7px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,.07); }
+.up-tbar i { display: block; height: 100%; }
+.up-tlegend { grid-column: 2; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.up-tlegend b { font-family: var(--mono); }
+#event-list li.quiet { color: var(--muted); font-size: 12px; }
+/* Event filters: eleven solid accent buttons outshouted the log beneath them.
+   Shown categories are plain; hidden ones recede. */
+#event-filters { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 1px; }
+#event-filters button { margin: 0; min-width: 20px; height: 20px; padding: 0 2px; border-color: transparent; background: none; color: var(--muted); opacity: .38; font-variant-emoji: text; filter: grayscale(1); }
+#event-filters button.on { opacity: 1; color: var(--text); background: rgba(255,255,255,.07); border-color: transparent; }
+#event-filters button:hover { opacity: 1; background: rgba(255,255,255,.14); }
