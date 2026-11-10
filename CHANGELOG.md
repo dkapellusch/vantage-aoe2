@@ -8,6 +8,9 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Added
 
+- Replay farm (`tools/farm`, Linux, experimental): converts many replays to recordings at once
+  with several isolated, headless copies of the installed game, next to a game being played.
+  Includes a fast clock for machines whose kernel clock source is HPET.
 - The recordings list says who played each recording, on what map and (once it has been opened)
   for how long, instead of only its file name. The match is read from each recording's first
   snapshot by a low-priority helper process and cached per file, so the list appears at once and
