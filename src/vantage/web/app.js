@@ -2163,6 +2163,8 @@ async function boot() {
   await probing;
   S.version = (serverConfig && serverConfig.version) || '';
   applyServerConfig(serverConfig);
+  // The replay-conversion page exists only when a server plugin provides it.
+  document.getElementById('btn-native').hidden = !(serverConfig && serverConfig.native_page);
   document.body.dataset.tooltips = tooltipLevel();
   await setLanguage(settings.language || detectLanguage());
   const conflicts = rebuildKeys();

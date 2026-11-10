@@ -2904,7 +2904,7 @@ def terrain_tiles(world: Node) -> bytes:
     for i, t in enumerate(tiles[: w * h]):
         if isinstance(t, Node):
             base[i] = int(t.fields.get(TILE_TERRAIN, 0) or 0) & 0xFF
-            # Native14188a3b0 omits layer0 on fresh export; -1 is explicit.
+            # Some recordings omit layer0 on a fresh export; -1 is explicit.
             # Evidence: world-envelope/terrain-layer-rebuild/README.md.
             lt = t.fields.get(TILE_LAYER, 0)
             if lt is not None and 0 <= int(lt) < NO_LAYER:

@@ -460,7 +460,9 @@ def test_the_last_moments_of_a_game_that_ended_become_viewable(
     assert tl is not None
     assert _wait(lambda: session.source.get("status") == "ended")
     assert _wait(lambda: tl.keyframes and tl.keyframes[-1].time == 1450)
-    assert tl.time == 1450 and not tl.complete  # viewable, yet the session is still following the game
+    assert (
+        tl.time == 1450 and not tl.complete
+    )  # viewable, yet the session is still following the game
     session.stop()
 
 

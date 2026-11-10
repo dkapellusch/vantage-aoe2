@@ -73,13 +73,3 @@ exclude = ['src/vantage/rpc/cade_pb2\.py$']
 module = ["grpc.*", "google.protobuf.*", "vantage.rpc.cade_pb2"]
 ignore_missing_imports = true
 follow_imports = "skip"
-
-[tool.ruff.lint.per-file-ignores]
-# Native-replay research modules from the development copy: long report prose
-# and embedded C++ source in string literals (the C++ is compiled and hashed, so
-# its exact text is part of the conversion's identity).
-"src/vantage/native_engine_manifest.py" = ["E501"]
-"src/vantage/native_engine_package.py" = ["E501"]
-"src/vantage/native_engine_update.py" = ["E501"]
-"src/vantage/native_player_attributes.py" = ["E501"]
-"tools/native_replay_benchmark.py" = ["E501"]

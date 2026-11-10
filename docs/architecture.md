@@ -146,22 +146,9 @@ The game install is found from `$VANTAGE_GAME_DIR`, the folder the running game 
 | `launcher.py` | `GameLauncher`: starting the game through Steam and tracking its status |
 | `combat_review.py`, `healing_review.py`, `resource_review.py`, `economy_benefits.py`, `review_moments.py` | The review panels' per-entity and per-player histories (military pressure, healing, resource income and bonuses), and saved review moments |
 
-### Local replay playback (experimental)
+### Plugins
 
-Ported from the development copy: a replay converted on this machine, without the running game, with a pinned conversion profile (`vantage serve --native-replay FILE --native-profile … --native-profile-sha256 … --native-cache-dir …`, or `vantage-native.py` / `vantage-v32.py` at the repository root). `NativeSession` (`native_session.py`) replaces `Session` in `cli.py`. With no native option given it behaves exactly as `Session`.
-
-| Modules | Role |
-|---|---|
-| `native_session.py`, `native_jobs.py` | The session and job coordinator: one conversion at a time, cancellable, then the recording opens as usual |
-| `native_conversion.py`, `native_isolated.py`, `native_isolated_launch.py` | The converter (pinned inputs, a private Wine prefix, a Bubblewrap sandbox) and the isolated launcher `vantage-native.py` runs |
-| `native_engine_*.py`, `native_v32_*.py`, `native_bootstrap_*.py`, `native_sdk_admission.py` | Engine packages and registry, the V32 backend and its pipeline, and the admission checks of a conversion's result |
-| `native_input.py`, `native_player_attributes.py`, `native_compare.py`, `native_reference_*.py`, `native_corpus.py`, `native_update_workflow.py` | Research instruments: replay input decoding, attribute capture, comparison against reference recordings, corpus runs |
-| `replay_*.py` | A reimplementation of the game's replay simulation, checked against research captures |
-| `playback_index.py`, `playback_data.py`, `chat_playback.py`, `recorded_chat.py` | A completed timeline cached on disk (it reopens without replaying frames), and recorded chat |
-
-The conversion's renderer and encoder are pinned research scripts that import the development copy's modules. That copy's `forge.spectate` package is now an alias of this `vantage` package (the AoeAI repository installs Vantage from `../vantage`), so those imports run this code; a profile pinned before the alias must be re-pinned. They run in the repository holding the profile's or encoder's `artifacts/` folder (`native_conversion.profile_repository`, `native_v32_encode.research_repository`), so the code they were pinned with is the code they run. A replay, a profile or a cache under `/tmp` is not visible inside the conversion sandbox, which mounts a private `/tmp`.
-
-These modules are type-checked in strict mode like the rest of the package, though many of their signatures use `Any` because they handle untyped JSON from native captures. Some of their tests read research captures from `artifacts/game-internals/` (the development copy's folder, linked as `artifacts/` and not committed); without it those tests are skipped (`tests/conftest.py`).
+`cli.main(argv, plugin=...)` and `server.App(..., plugins=[...])` let code outside this package add another way to open a match: `serve` options, a session class, and routes of its own. A server plugin may define `get(app, handler, path, query)` and `post(app, handler, path, body)`, each returning true once it has answered, `config(app, config)` to add to `/api/config`, and `config_keys`, names only the server may set there. The interface shows a "converted replays" mode when the server's configuration says `native_replays`; nothing in this repository sets it.
 
 ### Browser (`src/vantage/web/`)
 

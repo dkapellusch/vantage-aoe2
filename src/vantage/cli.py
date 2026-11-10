@@ -31,7 +31,8 @@ CLASSES_KEY = "Software\\Classes"
 RECORDING_PROGID = "Vantage.Recording"
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(plugin: Any = None) -> argparse.ArgumentParser:
+    """The command's parser. ``plugin`` (see :func:`main`) may add ``serve`` options."""
     from vantage import __version__
 
     p = argparse.ArgumentParser(
@@ -50,25 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--recording", "--start-file", type=Path, dest="recording", help="open a .vrec recording"
     )
     src.add_argument("--live", action="store_true", help="connect to the running game")
-    # Local replay playback (experimental, from the development copy): a replay is
-    # converted on this machine with a pinned profile, without the running game.
-    src.add_argument(
-        "--native-replay", type=Path, help="convert and watch a local replay (experimental)"
-    )
-    s.add_argument("--native-profile", type=Path, help="local conversion profile")
-    s.add_argument("--native-profile-sha256", help="expected SHA256 of the conversion profile")
-    s.add_argument("--native-cache-dir", type=Path, help="local conversion cache folder")
-    s.add_argument(
-        "--native-replay-root",
-        type=Path,
-        action="append",
-        help="replay folder for local playback (repeatable)",
-    )
-    s.add_argument(
-        "--native-timeout",
-        type=float,
-        help="local conversion limit per phase in seconds (default: 900)",
-    )
+    if plugin is not None:
+        plugin.add_arguments(s, src)
     s.add_argument(
         "start_file",
         nargs="?",
@@ -115,13 +99,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="open recordings without launching or discovering the game or using its API; "
         "--game-dir still supplies graphics from an explicit local directory",
-    )
-    s.add_argument("--native-worker", type=Path, help="imported native engine client descriptor")
-    s.add_argument("--native-worker-sha256", help="expected native engine descriptor SHA256")
-    s.add_argument(
-        "--experimental-native",
-        action="store_true",
-        help="enable experimental native replay conversion",
     )
 
     o = ss.add_parser(
@@ -200,20 +177,31 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Entry point of the ``vantage`` command."""
-    parser = build_parser()
+def main(argv: list[str] | None = None, plugin: Any = None) -> int:
+    """Entry point of the ``vantage`` command.
+
+    ``plugin`` extends ``serve`` from outside this package (another way to open a
+    match, say). It provides ``session_class`` (a ``server.Session`` subclass),
+    ``source_flags`` (the names of its source options) and the methods
+    ``add_arguments(serve_parser, source_group)``, ``has_source(args)``,
+    ``prepare(args, recordings_dir)`` (an error message or None, before anything
+    is opened), ``configure(args, session)``, ``replay_dirs(session)`` (folders,
+    or None for the usual ones), ``server_plugins()`` (for ``server.App``),
+    ``open(args, session)`` (True when it opened its source) and
+    ``close(session)``.
+    """
+    parser = build_parser(plugin)
     args = parser.parse_args(argv)
     if args.command is None:
         parser.print_help()
         return 2
-    return run(args)
+    return run(args, plugin)
 
 
-def run(args: argparse.Namespace) -> int:
+def run(args: argparse.Namespace, plugin: Any = None) -> int:
     cmd: str = args.command
     if cmd == "serve":
-        return _serve(args)
+        return _serve(args, plugin)
     if cmd == "record":
         return _record(args)
     if cmd == "info":
@@ -350,49 +338,32 @@ def replay_game(path: str) -> int | None:
     return GAME_AOE2 if "\\savegame\\" in low else None
 
 
-def _serve(args: argparse.Namespace) -> int:
+def _serve(args: argparse.Namespace, plugin: Any = None) -> int:
     from vantage.gamedata import GameData
-    from vantage.native_jobs import NativeConfig
-    from vantage.native_session import NativeSession as Session
-    from vantage.server import GAME_AOE2, GAME_ROR, default_replay_dirs, serve
+    from vantage.server import GAME_AOE2, GAME_ROR, Session, default_replay_dirs, serve
 
+    session_class = Session if plugin is None else plugin.session_class
     recording = args.recording
-    native_replay = getattr(args, "native_replay", None)
     if args.start_file is not None:
-        if recording is not None or args.live or native_replay is not None:
-            print(
-                "give one source: a FILE, --recording, --native-replay or --live", file=sys.stderr
-            )
+        if recording is not None or args.live or (plugin is not None and plugin.has_source(args)):
+            flags = ["--recording", *(() if plugin is None else plugin.source_flags)]
+            print(f"give one source: a FILE, {', '.join(flags)} or --live", file=sys.stderr)
             return 2
         recording = args.start_file
     recording_only = bool(getattr(args, "recording_only", False))
     if recording_only and (args.live or args.replay or args.lobby):
         print("--recording-only cannot open a live game", file=sys.stderr)
         return 2
-    native_jobs = None
-    native_descriptor = getattr(args, "native_worker", None)
-    if native_descriptor is not None:
-        if not getattr(args, "experimental_native", False) or not getattr(
-            args, "native_worker_sha256", None
-        ):
-            print(
-                "native conversion needs --experimental-native and --native-worker-sha256",
-                file=sys.stderr,
-            )
-            return 2
-        from vantage.native import NativeJobs, NativeWorker
-
-        try:
-            worker = NativeWorker(native_descriptor.expanduser(), args.native_worker_sha256)
-            native_jobs = NativeJobs(worker, args.recordings_dir.expanduser() / "native-cache")
-        except (ValueError, OSError) as exc:
-            print(f"Cannot import native engine: {exc}", file=sys.stderr)
+    if plugin is not None:
+        problem = plugin.prepare(args, args.recordings_dir.expanduser())
+        if problem:
+            print(problem, file=sys.stderr)
             return 2
     game_dir = resolve_game_dir(args.game_dir, recording_only=recording_only)
     data = GameData(game_dir)
     rec_dir = args.recordings_dir.expanduser()
     rec_dir.mkdir(parents=True, exist_ok=True)
-    session = Session(data, rec_dir)
+    session = session_class(data, rec_dir)
     # The recordings list names who played: read in the background, cached per file.
     summaries = getattr(session, "summaries", None)  # a substitute session may have none
     if summaries is not None:
@@ -401,35 +372,8 @@ def _serve(args: argparse.Namespace) -> int:
     # Every exit below closes what was opened, in this order: a failure before
     # the server is bound submits no conversion and leaves no socket behind.
     try:
-        native_options = (
-            getattr(args, "native_profile", None),
-            getattr(args, "native_profile_sha256", None),
-            getattr(args, "native_cache_dir", None),
-        )
-        native_roots = tuple(getattr(args, "native_replay_root", None) or ())
-        native_timeout = getattr(args, "native_timeout", None)
-        if (
-            any(value is not None for value in native_options)
-            or native_replay is not None
-            or native_roots
-            or native_timeout is not None
-        ):
-            if not all(value is not None for value in native_options):
-                raise ValueError(
-                    "local replay playback needs --native-profile, "
-                    "--native-profile-sha256 and --native-cache-dir"
-                )
-            profile, profile_sha256, cache_dir = native_options
-            assert profile is not None and profile_sha256 is not None and cache_dir is not None
-            session.configure_native(
-                NativeConfig(
-                    profile,
-                    profile_sha256,
-                    cache_dir,
-                    native_roots,
-                    900 if native_timeout is None else native_timeout,
-                )
-            )
+        if plugin is not None:
+            plugin.configure(args, session)
         config = {
             "patch": json.loads(args.patch_config) if args.patch_config else {},
             "force_default": bool(args.force_default_config),
@@ -437,27 +381,23 @@ def _serve(args: argparse.Namespace) -> int:
             "exit_on_stream_end": bool(args.exit_on_stream_end),
         }
         override = [d.expanduser() for d in args.replay_dir or ()]
-        native_config = getattr(session, "native_config", None)
-        dirs = (
-            list(native_config.replay_roots)
-            if getattr(session, "native", None) is not None and native_config is not None
-            else (override or default_replay_dirs())
-        )
+        # A plugin with replay folders of its own has no live game to follow either.
+        own_dirs = None if plugin is None else plugin.replay_dirs(session)
+        dirs = own_dirs if own_dirs is not None else (override or default_replay_dirs())
         server = serve(
             args.host,
             args.port,
             session,
             dirs,
             config,
-            follow_live=not override and not recording_only,
-            native_jobs=native_jobs,
+            follow_live=not override and not recording_only and own_dirs is None,
+            plugins=[] if plugin is None else plugin.server_plugins(),
             recording_only=recording_only,
         )
         if recording:
             session.open_recording(str(recording))
-        elif native_replay is not None:
-            # The conversion starts once the server is bound.
-            session.open_native_replay(native_replay)
+        elif plugin is not None and plugin.open(args, session):
+            pass  # the plugin opened its own source, now that the server is bound
         elif args.live:
             session.open_live(
                 replay=args.replay,
@@ -502,9 +442,8 @@ def _serve(args: argparse.Namespace) -> int:
     finally:
         if browser_timer is not None:
             browser_timer.cancel()
-        if native_jobs is not None:
-            native_jobs.close()
-        session.close_native()
+        if plugin is not None:
+            plugin.close(session)
         session.stop()
         if server is not None:
             server.server_close()

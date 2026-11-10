@@ -126,7 +126,7 @@ Click a unit's name in the panel to give it a name of your own, such as a hero's
 
 The minimap shows terrain, players' units and buildings, and the camera's view. Click or drag on it to move the camera. <kbd>Alt+M</kbd> (or the button beside it) cycles **standard**, **military** and **resource** modes.
 
-The buttons beside the minimap are: the menu (a shield), home (replays and recordings), open a replay without the game, statistics, the fog mode, the minimap mode, resources left, panels, settings and the quick reference. A button is highlighted while its mode is on.
+The buttons beside the minimap are: the menu (a shield), home (replays and recordings), statistics, the fog mode, the minimap mode, resources left, panels, settings and the quick reference. A button is highlighted while its mode is on.
 
 ## Resources left
 

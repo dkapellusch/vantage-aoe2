@@ -27,6 +27,7 @@ import threading
 import time
 import traceback
 import weakref
+from collections.abc import Sequence
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -875,12 +876,6 @@ def _error(
     handler.wfile.write(body)
 
 
-def _native_jobs(app: Any) -> Any:
-    """The App's native conversion jobs (vantage.native), or None: read with a
-    default, so code that builds an App by hand without them still works."""
-    return getattr(app, "native_jobs", None)
-
-
 def paired_origin_headers(handler: BaseHTTPRequestHandler) -> dict[str, str]:
     """CORS headers for the browser's second loopback origin.
 
@@ -914,20 +909,20 @@ class App:
         session: Session,
         replay_dirs: list[Path],
         follow_live: bool = True,
-        native_jobs: Any = None,
+        plugins: Sequence[Any] = (),
         recording_only: bool = False,
     ) -> None:
         self.session = session
-        # Local replay playback (native_session.NativeSession): its replay roots
-        # are the replay browser's folders, and there is no live game to follow.
-        native = getattr(session, "native_config", None)
-        if native is not None:
-            replay_dirs, follow_live = list(native.replay_roots), False
+        #: Extensions from outside this package. A plugin may define
+        #: ``get(app, handler, path, query)`` and ``post(app, handler, path, body)``,
+        #: each returning True once it has answered the request; ``config(app,
+        #: config)`` to add to ``/api/config``; and ``config_keys``, names only the
+        #: server may set there.
+        self.plugins = list(plugins)
         #: Replay folders given at start (``--replay-dir``, or detected).
         self.replay_dirs = replay_dirs
         #: Also list the replay folders of the profile the live game reports.
         self.follow_live = follow_live
-        self.native_jobs = native_jobs
         self.recording_only = recording_only
         self._sprites: SpriteStore | None = None
         self._sprites_key: tuple[Any, ...] = ()
@@ -965,10 +960,12 @@ class App:
         tl = s.timeline
         if path in ("/", "/index.html"):
             return self._static(h, "index.html")
-        if path == "/native":
-            return self._static(h, "native.html")
         if path.startswith("/static/"):
             return self._static(h, path[len("/static/") :])
+        for plugin in getattr(self, "plugins", ()):
+            answer = getattr(plugin, "get", None)
+            if answer is not None and answer(self, h, path, q):
+                return None
         if path == "/api/session":
             desc = s.describe()
             if q.get("probe"):
@@ -979,18 +976,6 @@ class App:
                     else s.live_connected() or port_open()
                 )
             return _json(h, desc)
-        if path == "/api/native":
-            if _native_jobs(self) is None:
-                return _json(h, {"available": False, "experimental": True})
-            try:
-                value = (
-                    _native_jobs(self).get(q["id"])
-                    if q.get("id")
-                    else _native_jobs(self).describe()
-                )
-                return _json(h, value)
-            except ValueError as exc:
-                return _json(h, {"ok": False, "error": str(exc)}, 400)
         if getattr(self, "recording_only", False) and path == "/api/launch_game":
             return _json(
                 h, {"ok": False, "error": "This session opens recordings without the game."}, 400
@@ -1119,14 +1104,18 @@ class App:
             return _bytes(h, f.read_bytes(), ctype, cache=True)
         if path == "/api/config":
             # Also the browser's probe of the second loopback origin (CORS).
-            # native_replays is the server's to say (a forced config cannot claim it).
+            # Some keys are the server's to say (a forced config cannot claim them).
+            plugins = getattr(self, "plugins", ())
+            reserved = {key for plugin in plugins for key in getattr(plugin, "config_keys", ())}
             config = {
-                **{k: v for k, v in self.client_config.items() if k != "native_replays"},
+                **{k: v for k, v in self.client_config.items() if k not in reserved},
                 "version": __version__,
             }
             config["asset_version"] = self.asset_version()
-            if getattr(s, "native", None) is not None:
-                config["native_replays"] = True
+            for plugin in plugins:
+                extend = getattr(plugin, "config", None)
+                if extend is not None:
+                    extend(self, config)
             return _json(h, config, headers=paired_origin_headers(h))
         m = re.match(r"^/audio/(event|taunt|notify)/([\w-]+)\.ogg$", path)
         if m:
@@ -1201,8 +1190,6 @@ class App:
     def _launch_status(self) -> dict[str, Any]:
         """The launcher status with the live gRPC stream state fed in, so the game
         running as a player account / needing a newer app are reachable statuses."""
-        if getattr(self.session, "native", None) is not None:
-            return {"status": "disabled", "detail": "Local replay playback is configured."}
         stream = self.session.stream_state()
         connected = stream in ("connected", "connected-hiccup")
         return self.launcher.status(connected, stream)
@@ -1448,22 +1435,10 @@ class App:
                         {"ok": False, "error": "This session opens recordings without the game."},
                         400,
                     )
-            if path in {"/api/native/convert", "/api/native/cancel", "/api/native/open"}:
-                if _native_jobs(self) is None:
-                    raise ValueError("No native engine has been imported for this session")
-                if path == "/api/native/convert":
-                    return _json(
-                        h,
-                        _native_jobs(self).start(
-                            str(body["path"]), experimental=body.get("experimental") is True
-                        ),
-                        202,
-                    )
-                if path == "/api/native/cancel":
-                    return _json(h, _native_jobs(self).cancel(str(body["id"])))
-                s.open_recording(str(_native_jobs(self).ready_path(str(body["id"]))))
-                s.source["native_conversion"] = str(body["id"])
-                return _json(h, {"ok": True})
+            for plugin in getattr(self, "plugins", ()):
+                answer = getattr(plugin, "post", None)
+                if answer is not None and answer(self, h, path, body):
+                    return None
             if path == "/api/open":
                 s.open_recording(str(body["path"]))
                 return _json(h, {"ok": True})
@@ -1483,15 +1458,7 @@ class App:
                 if body.get("replay") or body.get("lobby") or game is not None:
                     return _json(h, self._await_load())
                 return _json(h, {"ok": True})
-            if path == "/api/native_cancel":
-                from vantage.native_session import cancel_replay
-
-                return _json(h, cancel_replay(s, body))
             if path == "/api/play_replay":
-                if getattr(s, "native", None) is not None:
-                    from vantage.native_session import play_replay
-
-                    return _json(h, play_replay(s, body))
                 name, where = str(body["name"]), body.get("dir")
                 win = self._windows_replay_path(name, where)
                 found = next(
@@ -1514,10 +1481,6 @@ class App:
             if path == "/api/skins/remove":
                 return _json(h, self.skins.remove(str(body["name"])))
             if path == "/api/launch_game":
-                if getattr(s, "native", None) is not None:
-                    raise ValueError(
-                        "game launch is unavailable with local replay playback configured"
-                    )
                 return _json(h, self.launcher.launch(self.session.live_connected()))
             if path == "/api/record":
                 return _json(h, s.set_recording(bool(body.get("on", True))))
@@ -2157,7 +2120,7 @@ def serve(
     replay_dirs: list[Path],
     client_config: dict[str, Any] | None = None,
     follow_live: bool = True,
-    native_jobs: Any = None,
+    plugins: Sequence[Any] = (),
     recording_only: bool = False,
 ) -> ThreadingHTTPServer:
     # Request threads share the GIL with the thread ingesting the stream. At the
@@ -2169,7 +2132,7 @@ def serve(
         session,
         replay_dirs,
         follow_live=follow_live,
-        native_jobs=native_jobs,
+        plugins=plugins,
         recording_only=recording_only,
     )
     if client_config is not None:
@@ -2184,11 +2147,17 @@ def unquote_path(p: str) -> str:
     return unquote(p)
 
 
+#: For plugins: answer a request the way the server's own routes do.
+json_response = _json
+bytes_response = _bytes
+
 __all__ = [
     "App",
     "Session",
+    "bytes_response",
     "data_dir",
     "default_replay_dirs",
+    "json_response",
     "load_recording",
     "mode_from_path",
     "serve",

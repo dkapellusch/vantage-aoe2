@@ -25,20 +25,8 @@ All notable changes to Vantage are documented here. The format follows
 - The Caster layout, now the default: the scoreboard across the top, the team overview bottom
   left, the minimap and time controls bottom right. Classic stays in the Panels menu.
 
-- Experimental local replay playback from the development copy (`--native-replay`,
-  `--native-profile`, `--native-profile-sha256`, `--native-cache-dir`, `--native-replay-root`,
-  `--native-timeout`; `vantage-native.py`, `vantage-v32.py`). It converts a replay on this machine
-  with a pinned profile, without the running game. Alongside it: the native engine tools
-  (`tools/native_*.py`) and the replay-simulation modules, with their tests.
-- `native_v32_pipeline --preview-on-checksum-failure`: when a conversion stops at a failing original
-  checksum, it converts the part of the match up to the last passing checksum as an incomplete
-  preview.
 - `tools/audit_resource_sources.py`, the resource-income inventory scanner, from the development
   copy, and a `py.typed` marker so projects importing `vantage` type-check against it.
-- Approximate-checksum conversion (`native_v32_pipeline --approximate-checksums`, or
-  `--approximate-on-checksum-failure` to rerun after a checksum stop): the derived host sets the
-  game's ignore-checksum byte and runs to the end of the replay. The recording is labelled
-  approximate (`native_v32_approximate.py`).
 
 ### Fixed
 
@@ -65,6 +53,10 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Changed
 
+- Local replay playback (the experimental `--native-*` options, `vantage-native.py`,
+  `vantage-v32.py`, the `/native` page and their modules) is no longer part of this package.
+  `vantage serve` and the server take plugins instead (`cli.main(argv, plugin=...)`,
+  `server.App(..., plugins=[...])`), which is how that code now attaches from outside.
 - Statistics opens on the whole game for every player. It used to narrow the chart to the last
   minute and two players on every open, and switch the selection panel to its "fight" scope;
   that now happens only when you investigate an interval or click a dashboard value. Totals are
