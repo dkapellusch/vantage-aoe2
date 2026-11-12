@@ -2243,7 +2243,16 @@ function wire() {
   window.addEventListener('keydown', (e) => {
     // Let focused inspect controls use native Tab, Enter and Space instead
     // of triggering replay shortcuts (including Tab's map fog preview).
-    if (e.target.closest?.('input, textarea, select, button, a[href], summary, #unitpanel')) return;
+    // Text fields and the selection panel keep every key. A focused button,
+    // link or checkbox keeps only the keys it uses itself (Tab, Enter, Space,
+    // plain arrows), so shortcuts still work after a button was pressed, and
+    // Esc closes the top layer from wherever the focus is.
+    const control = e.target.closest?.('input, textarea, select, button, a[href], summary, #unitpanel');
+    if (control) {
+      const typing = control.matches('textarea, select, #unitpanel, input:not([type=checkbox]):not([type=radio]):not([type=range])');
+      const own = ['Tab', 'Enter', ' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey;
+      if (typing || own) return;
+    }
     if (omniOpen() && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
       const items = [...$('omni-menu').querySelectorAll('button')];
@@ -2252,9 +2261,12 @@ function wire() {
       return;
     }
     if (e.key === 'Tab') {
-      // Hold Tab: peek at the fog of the selection's owner.
-      e.preventDefault();
+      // Hold Tab: peek at the fog of the selection's owner. With nothing
+      // selected there is nothing to peek at, and Tab moves the focus into
+      // the HUD as in any page (Shift+Tab always does).
       const o = selectionOwner();
+      if (e.shiftKey || (!o && !S._peek)) return;
+      e.preventDefault();
       if (!S._peek && o) { S._peek = { perspective: S.perspective, fogMode: S.fogMode }; S.perspective = o; S.fogMode = 'standard'; }
       return;
     }

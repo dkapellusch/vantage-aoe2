@@ -9,6 +9,9 @@
 .panel-fade { animation: hud-fade-in var(--hud-fade) ease-out; }
 @keyframes hud-fade-in { from { opacity: 0; } to { opacity: 1; } }
 .hud-custom-size { opacity: var(--panel-opacity, 1); }
+/* A natural-size panel anchored to the bottom or right edge is placed from that edge. */
+.hud-custom-size.hud-auto-size.hud-edge-b { top: auto !important; bottom: var(--panel-bottom) !important; max-height: calc(100vh - var(--panel-bottom) - 8px) !important; }
+.hud-custom-size.hud-auto-size.hud-edge-r { left: auto !important; right: var(--panel-right) !important; }
 @media (prefers-reduced-motion: reduce) { .panel-fade { animation: none; } }
 
 /* Visible keyboard focus on every HUD control. */
@@ -69,7 +72,9 @@ body:not([data-hud-layout="caster"]) #pulse { left: 50%; right: auto; transform:
 body.hud-reveal-bottom #hud .panel-auto, body.hud-paused #hud .panel-auto, #hud .panel-auto:focus-within, #hud .panel-auto:hover { opacity: 1; pointer-events: auto; }
 @media (prefers-reduced-motion: reduce) { #hud .panel-auto { transition: none; } }
 /* Caster: the minimap's button row returns on hover or focus. */
-body[data-hud-preset="caster"] #minimap-wrap:not(:hover):not(:focus-within) #minimap-tools { visibility: hidden; }
+/* (opacity, not visibility: its buttons must stay focusable so the keyboard can bring the row back.) */
+body[data-hud-preset="caster"] #minimap-wrap:not(:hover):not(:focus-within) #minimap-tools { opacity: 0; }
+#minimap-tools { transition: opacity var(--hud-fade) ease-out; }
 
 /* -- hover toolbar and resize handles -------------------------------------------------------------- */
 #panel-tools .pt-name { padding: 0 6px 0 5px; font-size: 11px; line-height: 18px; color: var(--muted); white-space: nowrap; cursor: default; }

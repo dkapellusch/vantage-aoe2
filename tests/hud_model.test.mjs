@@ -119,6 +119,10 @@ test('layout schema v2: anchors and fractions survive a window of another size',
   assert.equal(M.nearestAnchor({ left: 0, top: 0, width: 100, height: 100 }, obs), 'tl');
   assert.equal(M.nearestAnchor({ left: 900, top: 500, width: 100, height: 100 }, obs), 'c');
   assert.equal(M.nearestAnchor({ left: 900, top: 0, width: 100, height: 60 }, obs), 't');
+  // A panel that keeps its natural size holds its anchored edge, whatever that size is.
+  const natural = M.fromAnchored(a, obs, { width: 400, height: 120 });
+  assert.equal(natural.left + natural.width, 1920 - 6); assert.equal(natural.top + natural.height, 1080 - 6);
+  assert.equal(natural.width, 400);
   // Scale and opacity travel; the defaults are left out.
   const extra = M.toAnchored({ ...rect, scale: 1.25, opacity: 0.9, auto: true }, big);
   assert.equal(extra.scale, 1.25); assert.equal(extra.opacity, 0.9); assert.equal(extra.auto, true);

@@ -43,7 +43,9 @@ export function installLayoutEditor(ctx) {
   const bar = $('le-bar'), lib = $('le-lib'), insp = $('le-insp'), zone = $('le-zone');
 
   // -- undo ---------------------------------------------------------------------------------
-  const snapshot = () => JSON.stringify(Object.fromEntries(UNDO_KEYS.map((k) => [k, settings[k]])));
+  // A key the settings do not hold yet (no panel was ever placed) is stored empty, so undo can clear it again.
+  const EMPTY = { panelSizes: {}, panelOrder: [], hiddenPanels: [], collapsedPanels: [] };
+  const snapshot = () => JSON.stringify(Object.fromEntries(UNDO_KEYS.map((k) => [k, settings[k] ?? EMPTY[k] ?? null])));
   const remember = () => { const s = snapshot(); if (history[history.length - 1] !== s) { history.push(s); if (history.length > 60) history.shift(); } };
   function undo() {
     // Drop snapshots equal to the present (a press that changed nothing), then go back one.

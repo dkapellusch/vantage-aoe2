@@ -495,6 +495,9 @@ function syncDock() {
   if (on) document.documentElement.style.setProperty('--dock-w', `${Math.round(statsRect(true).width + 8)}px`);
   else document.documentElement.style.removeProperty('--dock-w');
   if (el) el.classList.toggle('docked', on);
+  // The title bar's button says what it will do.
+  const dock = el && el.querySelector('[data-win="dock"]');
+  if (dock) { dock.textContent = statsState().docked ? t('Float') : t('Dock right'); dock.setAttribute('aria-pressed', String(!!statsState().docked)); }
 }
 
 function placeStatsWindow() {
@@ -533,7 +536,7 @@ export function toggleStatsDock(seek) {
   if (!docking && statsState().floating) setPanelRect(STATS, { ...statsState().floating, moved: true, auto: false }, { save: false });
   saveSettings();
   if (!isOpen(STATS)) { open(STATS); return renderStats(seek); }
-  placeStatsWindow(); wireStatsBar(el); drawStatsChart();
+  placeStatsWindow(); drawStatsChart();
   return null;
 }
 
@@ -556,9 +559,8 @@ function wireStatsBar(el) {
   const bar = el.querySelector('[data-win-bar]');
   if (!bar || bar._wired) return;
   bar._wired = true;
-  const dock = bar.querySelector('[data-win="dock"]');
-  if (dock) { dock.textContent = statsState().docked ? t('Float') : t('Dock right'); dock.setAttribute('aria-pressed', String(!!statsState().docked)); }
-  const undock = () => { if (statsState().docked) { settings.statsWindow = { ...statsState(), docked: false }; el.classList.remove('docked'); if (dock) { dock.textContent = t('Dock right'); dock.setAttribute('aria-pressed', 'false'); } } };
+  // Moving a docked window by hand floats it.
+  const undock = () => { if (statsState().docked) { settings.statsWindow = { ...statsState(), docked: false }; syncDock(); } };
   bar.addEventListener('pointerdown', (e) => {
     if (e.target.closest('button')) return;
     undock();
@@ -574,8 +576,8 @@ function wireStatsBar(el) {
   bar.addEventListener('click', (e) => {
     const b = e.target.closest('[data-win]');
     if (!b) return;
-    if (b.dataset.win === 'dock') { bar._wired = false; toggleStatsDock(statsSeek); }
-    else { settings.statsWindow = { ...statsState(), docked: false, floating: null }; resetPanel(STATS); placeStatsWindow(); saveSettings(); bar._wired = false; wireStatsBar(el); drawStatsChart(); }
+    if (b.dataset.win === 'dock') toggleStatsDock(statsSeek);
+    else { settings.statsWindow = { ...statsState(), docked: false, floating: null }; resetPanel(STATS); placeStatsWindow(); saveSettings(); drawStatsChart(); }
   });
   if (!statsResize) {
     // The chart follows the window's size (a resize observer, not a per-frame redraw).

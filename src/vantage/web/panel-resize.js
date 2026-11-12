@@ -122,6 +122,9 @@ function setRect(el, rect) {
   const z = typeof rect.scale === 'number' && rect.scale > 0 ? rect.scale : 1;
   for (const key of ['left', 'top', 'width', 'height']) el.style.setProperty(`--panel-${key}`, `${rect[key] / z}px`);
   el.style.zoom = z === 1 ? '' : String(z);
+  el.classList.toggle('hud-edge-b', !!rect.edgeB); el.classList.toggle('hud-edge-r', !!rect.edgeR);
+  if (rect.edgeB) el.style.setProperty('--panel-bottom', `${Math.max(8, window.innerHeight - rect.top - rect.height) / z}px`);
+  if (rect.edgeR) el.style.setProperty('--panel-right', `${Math.max(8, window.innerWidth - rect.left - rect.width) / z}px`);
   if (typeof rect.opacity === 'number' && rect.opacity < 1) el.style.setProperty('--panel-opacity', String(rect.opacity));
   else el.style.removeProperty('--panel-opacity');
   el.style.zIndex = rect.moved ? (topmost() === el.id ? '2' : '1') : '';
@@ -129,15 +132,24 @@ function setRect(el, rect) {
 }
 
 function clearRect(el) {
-  el.classList.remove('hud-custom-size', 'hud-auto-size');
+  el.classList.remove('hud-custom-size', 'hud-auto-size', 'hud-edge-b', 'hud-edge-r');
   el.style.zIndex = ''; el.style.zoom = '';
-  for (const key of ['left', 'top', 'width', 'height', 'opacity']) el.style.removeProperty(`--panel-${key}`);
+  for (const key of ['left', 'top', 'width', 'height', 'opacity', 'bottom', 'right']) el.style.removeProperty(`--panel-${key}`);
 }
 
 // Flags (moved, auto) and the scale and opacity survive fitting to a smaller window.
 const extrasOf = (rect) => ({ ...(rect.moved ? { moved: true } : {}), ...(rect.auto ? { auto: true } : {}), ...(rect.fixed ? { fixed: true } : {}),
   ...(typeof rect.scale === 'number' ? { scale: rect.scale } : {}), ...(typeof rect.opacity === 'number' ? { opacity: rect.opacity } : {}) });
-const fitted = (saved) => { const rect = fromAnchored(saved, viewport()); return { ...extrasOf(rect), ...fitRect(rect, viewport()) }; };
+// el: a panel that keeps its natural size (auto) is placed by that size, so a
+// bottom- or right-anchored one keeps its gap to that edge in any window.
+const fitted = (saved, el = null) => {
+  const natural = el && saved.auto && el.offsetWidth ? { width: el.offsetWidth * (saved.scale || 1), height: el.offsetHeight * (saved.scale || 1) } : null;
+  const rect = fromAnchored(saved, viewport(), natural);
+  // Such a panel anchored to the bottom or the right is placed from that edge
+  // (CSS bottom / right), so it grows away from it when its content changes.
+  const edges = natural ? { edgeB: String(saved.anchor).includes('b'), edgeR: String(saved.anchor).includes('r') } : {};
+  return { ...extrasOf(rect), ...fitRect(rect, viewport()), ...edges };
+};
 
 /** The saved rectangle of a panel in pixels for this window (undefined when it sits in its default place). */
 export function savedRect(id) {
@@ -176,7 +188,7 @@ export function applyPanelSizes() {
   }
   for (const [id, rect] of Object.entries(settings.panelSizes || {})) {
     const el = document.getElementById(id);
-    if (el && rect && typeof rect === 'object') setRect(el, fitted(rect));
+    if (el && rect && typeof rect === 'object') setRect(el, fitted(rect, el));
   }
   for (const [id] of slots) {
     const el = document.getElementById(id);

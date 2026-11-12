@@ -266,10 +266,12 @@ export function toAnchored(rect, viewport, anchor = null) {
 }
 
 /** An anchored rectangle in pixels for a window size (a legacy pixel rectangle passes through). */
-export function fromAnchored(rect, viewport) {
+export function fromAnchored(rect, viewport, size = null) {
   if (!isAnchored(rect)) return rect;
   const W = viewport.width, H = viewport.height, a = rect.anchor;
-  const width = rect.w * W, height = rect.h * H;
+  // size: the panel's own size when it keeps its natural one (auto), so its
+  // anchored edge, not its top-left corner, is what stays put.
+  const width = size ? size.width : rect.w * W, height = size ? size.height : rect.h * H;
   const left = a.includes('l') ? rect.x * W : a.includes('r') ? W - rect.x * W - width : W / 2 + rect.x * W - width / 2;
   const top = a.includes('t') ? rect.y * H : a.includes('b') ? H - rect.y * H - height : H / 2 + rect.y * H - height / 2;
   return { left: Math.round(left), top: Math.round(top), width: Math.round(width), height: Math.round(height), ...extras(rect) };

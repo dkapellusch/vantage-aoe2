@@ -149,7 +149,10 @@ export function isVisible(id) {
 /** A panel that appears by itself in this preset (the time controls near the bottom edge). */
 export function isAuto(id) {
   const preset = activePreset(), stock = STOCK[preset];
-  return !!stock && (stock.auto || []).includes(id) && !wanted(id, preset);
+  if (preset === 'full' || phoneOn || wanted(id, preset)) return false;
+  // A custom HUD (a shared link) without time controls or the Match story gets them the same way.
+  const auto = stock ? stock.auto || [] : wanted('story', preset) ? [] : ['timebar'];
+  return auto.includes(id);
 }
 
 export function isCollapsed(id) { return list('collapsedPanels').includes(id); }
