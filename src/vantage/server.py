@@ -1251,6 +1251,7 @@ class App:
         mods = (data.mod_roots("graphics"), data.mod_roots("sprites"), data.mod_roots("terrain"))
         parts = (
             __version__,
+            self.session.viewer_build,
             RENDER_VERSION,
             data.build,
             data.game_dir,
@@ -1376,6 +1377,23 @@ class App:
             return _error(h)
         ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
         if name == "index.html":
+            # Fetch the actual initial module graph in parallel, without
+            # downloading optional editors/workers that boot does not import.
+            found, pending = set(), ["app.js"]
+            while pending:
+                module = pending.pop()
+                if module in found or module not in self.web_assets:
+                    continue
+                found.add(module)
+                for relative in re.findall(
+                    rb"(?:from\s*|import\s*)['\"](\./[^'\"]+\.js)['\"]", self.web_assets[module]
+                ):
+                    pending.append(str(Path(module).parent / relative.decode()))
+            links = b"".join(
+                f'<link rel="modulepreload" href="/static/{module}">'.encode()
+                for module in sorted(found)
+            )
+            body = body.replace(b"</head>", links + b"</head>")
             body = body.replace(b"/static/", f"/static/{self.session.viewer_build}/".encode())
         _bytes(h, body, ctype, cache=ASSET_IMMUTABLE if versioned else False)
 
@@ -2154,6 +2172,9 @@ SWITCH_INTERVAL_S = 0.0005
 
 
 class _HTTPServer(ThreadingHTTPServer):
+    # Browsers burst dozens of module/icon requests; the default five pending
+    # connections causes TCP retry delays under concurrent viewers.
+    request_queue_size = 128
     #: On Windows SO_REUSEADDR lets a second server bind a port that is in use,
     #: and two Vantages would split the requests; elsewhere it only skips TIME_WAIT.
     allow_reuse_address = sys.platform != "win32"
