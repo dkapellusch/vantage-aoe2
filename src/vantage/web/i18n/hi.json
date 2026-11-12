@@ -1651,5 +1651,9 @@
  "Working": "कार्यरत",
  "Building activity": "इमारत की गतिविधि",
  "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "इमारत केवल उत्पादन और शोध की कतार खाली होने पर निष्क्रिय है। 1 सेकंड से कम का अंतर काम में गिना जाता है। आवास या जनसंख्या सीमा से रुकी कतार अलग गिनी जाती है। जीवन पूरे देखे गए जीवनकाल को और 60s तथा लड़ाई चुने गए अंतराल को दिखाते हैं।",
- "unit·min": "unit·min"
+ "unit·min": "unit·min",
+ "None researched yet": "अभी कोई शोध पूरा नहीं हुआ",
+ "+{n} more": "+{n} और",
+ "Hide {n} upgrades": "{n} उन्नयन छिपाएँ",
+ "Research progress": "शोध की प्रगति"
 }

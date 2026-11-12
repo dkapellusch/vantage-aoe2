@@ -26,6 +26,10 @@ import { ownerIdentity, selectionHeader, militaryCard, isProductionBuilding, hea
 import { resourceTotalsHtml } from './resource-review.js';
 import { farmReviewHtml } from './farm-review.js';
 import { renderTeamBoard, toggleTeamBoardView } from './team-board.js';
+import { readUpgradeOverflow, writeUpgradeOverflow } from './upgrade-overflow.js';
+
+let upgradeOverflowExpanded = readUpgradeOverflow();
+const upgradeOverflowLabel = n => upgradeOverflowExpanded ? t('Hide {n} upgrades', { n }) : t('+{n} more', { n });
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -2007,10 +2011,12 @@ export function relevantUpgrades(rows) {
   const tids = new Set(rows.flatMap(r => tree.relevant_upgrades?.[r[2]] || []));
   const order = stage => [rows.some(r => stage.line_units?.includes(r[2])) ? 0 : stage.order[0], stage.order[1]];
   const stages = [...tids].map(tid => [tid, tree.upgrade_techs?.[tid]])
-    .filter(([, stage]) => stage?.status === 'available')
+    .filter(([, stage]) => stage && stage.status !== 'hidden')
     .sort((a, b) => order(a[1])[0] - order(b[1])[0] || order(a[1])[1] - order(b[1])[1]);
-  return `<section class="review-upgrades"><div class="review-upgrades-head"><span>${t('Relevant upgrades')}</span><button data-full-tree="${pid}">${t('Full tree')} ↗</button></div><div class="review-upgrade-list">${stages.map(([tid, stage]) => {
-    const a = active.get(tid), unavailable = nodeStatus(stage) === 'struck';
+  const visible = [], overflow = [];
+  let researched = false;
+  for (const [tid, stage] of stages) {
+    const a = active.get(tid), unavailable = nodeStatus(stage) === 'struck' || stage.status === 'unavailable';
     const status = done.has(tid) ? 'done' : a ? 'doing' : unavailable ? 'unavailable' : (stage.age || 1) - 1 > (stats.age || 0) ? 'later' : 'available';
     const info = S.catalog.techs[tid] ? techInfoFor(tid, pid) : stage;
     const icon = techIconFor(tid, pid) || (stage.icon >= 0 ? `/icon/tech/${stage.icon}.png?g=${S.game}` : '');
@@ -2018,8 +2024,14 @@ export function relevantUpgrades(rows) {
     const textOnly = S.gameArt === false;
     const label = textOnly ? `<span class="review-upgrade-name">${esc(info.name || stage.name)}</span>`
       : `<img src="${icon}" alt="${esc(info.name || stage.name)}">`;
-    return `<button class="review-upgrade ${textOnly ? 'review-upgrade-text ' : ''}${status}" data-tech="${tid}" data-pid="${pid}" data-building="${a?.building || ''}" ${unavailable ? 'disabled' : ''} ${tip(info.name || stage.name, `${t(status)}${a?.remaining != null ? ' · ' + Math.ceil(a.remaining) + 's' : ''}${detail ? ' · ' + detail : ''}`)}>${label}<small>${done.has(tid) ? '✓' : a?.remaining != null ? Math.ceil(a.remaining) + 's' : unavailable ? '×' : ''}</small></button>`;
-  }).join('')}</div></section>`;
+    const progress = a?.progress != null ? `<progress class="review-upgrade-progress" max="1" value="${clamp(a.progress, 0, 1)}" aria-label="${esc(t('Research progress'))}"></progress>` : '';
+    const chip = `<button class="review-upgrade ${textOnly ? 'review-upgrade-text ' : ''}${status}" data-tech="${tid}" data-pid="${pid}" data-building="${a?.building || ''}" ${unavailable ? 'disabled' : ''} ${tip(info.name || stage.name, `${t(status)}${a?.remaining != null ? ' · ' + Math.ceil(a.remaining) + 's' : ''}${detail ? ' · ' + detail : ''}`)}>${label}${progress}<small>${done.has(tid) ? '✓' : a?.remaining != null ? Math.ceil(a.remaining) + 's' : unavailable ? '×' : ''}</small></button>`;
+    if (status === 'done') researched = true;
+    (status === 'done' || status === 'doing' ? visible : overflow).push(chip);
+  }
+  const overflowId = `relevant-upgrades-overflow-${pid}`;
+  const control = overflow.length ? `<button type="button" data-upgrades-toggle data-upgrades-count="${overflow.length}" aria-expanded="${upgradeOverflowExpanded}" aria-controls="${overflowId}">${esc(upgradeOverflowLabel(overflow.length))}</button>` : '';
+  return `<section class="review-upgrades"><div class="review-upgrades-head"><span>${t('Relevant upgrades')}</span><button data-full-tree="${pid}">${t('Full tree')} ↗</button></div>${visible.length ? `<div class="review-upgrade-list" data-upgrades-visible>${visible.join('')}</div>` : ''}${!researched || control ? `<div class="review-upgrade-summary">${!researched ? `<span class="hint">${t('None researched yet')}</span>` : ''}${control}</div>` : ''}${overflow.length ? `<div class="review-upgrade-list review-upgrade-overflow" id="${overflowId}" ${upgradeOverflowExpanded ? '' : 'hidden'}>${overflow.join('')}</div>` : ''}</section>`;
 }
 
 function singlePanel(el, r) {
@@ -2348,6 +2360,18 @@ export function renderUnitPanel() {
   wireReviewControls(el);
   delegate(el, 'click', '[data-full-tree]', (d) => { pinnedTree = true; showTechTree(+d.dataset.fullTree); });
   delegate(el, 'click', '.review-upgrade', techClick);
+  delegate(el, 'click', '[data-upgrades-toggle]', () => {
+    upgradeOverflowExpanded = !upgradeOverflowExpanded;
+    writeUpgradeOverflow(upgradeOverflowExpanded);
+    // Respond immediately even while fresh entity statistics are pending.
+    for (const button of el.querySelectorAll('[data-upgrades-toggle]')) {
+      button.setAttribute('aria-expanded', String(upgradeOverflowExpanded));
+      button.textContent = upgradeOverflowLabel(Number(button.dataset.upgradesCount));
+      const list = document.getElementById(button.getAttribute('aria-controls'));
+      if (list) list.hidden = !upgradeOverflowExpanded;
+    }
+    renderUnitPanel();
+  });
   delegate(el, 'click', '[data-inspect]', (d) => {
     const id = +d.dataset.inspect, row = rowForEntityId(id);
     if (row) { S.selection = new Set([row[0]]); centerOn(row[3], row[4]); }

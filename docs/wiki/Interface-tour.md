@@ -254,3 +254,14 @@ researched, researching, available and later-age states. Research offered by a
 building is shown in its full tree; it is not automatically an upgrade to that
 building. Monastery resource-flag research is included for converters, and
 Faith/Heresy for units whose game help recommends resistance to Monks.
+
+
+### Relevant upgrades in inspect panels
+
+Unit, building and group inspect panels show researched upgrades in green and
+currently researching upgrades with progress. **+N more** expands the remaining
+relevant upgrades, preserving their order and available, later-age or unavailable
+status. Use the same button to collapse them. If none are researched, the panel
+says **None researched yet**. **Full tree** stays available. The toggle works
+with Enter or Space and remembers its state across selections and reloads in
+this viewer's browser storage; a new viewer origin starts collapsed.

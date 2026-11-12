@@ -2117,7 +2117,9 @@ function wire() {
     }
   });
   window.addEventListener('keydown', (e) => {
-    if (e.target.matches('input, textarea, select')) return;
+    // Let focused inspect controls use native Tab, Enter and Space instead
+    // of triggering replay shortcuts (including Tab's map fog preview).
+    if (e.target.closest?.('input, textarea, select, button, a[href], summary, #unitpanel')) return;
     if (omniOpen() && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
       const items = [...$('omni-menu').querySelectorAll('button')];

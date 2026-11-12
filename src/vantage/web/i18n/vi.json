@@ -1651,5 +1651,9 @@
  "Working": "Đang làm việc",
  "Building activity": "Hoạt động công trình",
  "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "Công trình chỉ nhàn rỗi khi hàng đợi sản xuất và nghiên cứu trống. Khoảng chuyển dưới 1 giây được tính là làm việc. Hàng đợi bị chặn do nhà ở hoặc giới hạn dân số được tính riêng. Cả đời tính toàn bộ thời gian quan sát; 60s và Giao tranh tính khoảng đã chọn.",
- "unit·min": "unit·min"
+ "unit·min": "unit·min",
+ "None researched yet": "Chưa nghiên cứu xong nâng cấp nào",
+ "+{n} more": "+{n} mục nữa",
+ "Hide {n} upgrades": "Ẩn {n} nâng cấp",
+ "Research progress": "Tiến độ nghiên cứu"
 }

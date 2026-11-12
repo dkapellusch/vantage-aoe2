@@ -1669,5 +1669,9 @@
  "Working": "En activité",
  "Building activity": "Activité du bâtiment",
  "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "Un bâtiment est inactif uniquement si sa file de production et de recherche est vide. Les transitions de moins d’une seconde comptent comme activité. Les unités bloquées par le logement ou la limite de population sont comptées séparément. Vie couvre toute la durée observée du bâtiment ; 60s et Combat utilisent leur intervalle sélectionné.",
- "unit·min": "unit·min"
+ "unit·min": "unit·min",
+ "None researched yet": "Aucune recherche terminée",
+ "+{n} more": "+{n} autres",
+ "Hide {n} upgrades": "Masquer {n} améliorations",
+ "Research progress": "Progression de la recherche"
 }

@@ -1651,5 +1651,9 @@
  "Working": "稼働",
  "Building activity": "建物の活動",
  "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "生産と研究のキューが空のときだけ建物を待機として数えます。1秒未満の切り替えは稼働に含みます。住宅不足や人口上限で停止したキューは別集計です。全期間は観測された建物の生涯、60sと戦闘は選択区間です。",
- "unit·min": "unit·min"
+ "unit·min": "unit·min",
+ "None researched yet": "研究済みのものはありません",
+ "+{n} more": "ほか{n}件",
+ "Hide {n} upgrades": "強化{n}件を隠す",
+ "Research progress": "研究の進捗"
 }

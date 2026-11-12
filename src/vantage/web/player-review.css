@@ -175,3 +175,9 @@
 .review-building-work b{color:#dce2e8;font-variant-numeric:tabular-nums;font-weight:500}
 
 .review-production{display:flex}.review-production .review-metric{flex-direction:row;gap:8px;padding:8px 4px}
+
+.review-upgrade-list[hidden]{display:none}
+.review-upgrade-summary{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:7px;font-size:11px}
+.review-upgrade-summary button{font-size:11px;min-height:28px}
+.review-upgrade-overflow{padding-top:6px;border-top:1px solid #ffffff18}
+.review-upgrade-progress{position:absolute;left:0;bottom:0;width:100%;height:3px;border:0;accent-color:#e5bb65}

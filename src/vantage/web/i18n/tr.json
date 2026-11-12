@@ -1651,5 +1651,9 @@
  "Working": "Çalışıyor",
  "Building activity": "Bina etkinliği",
  "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "Bina yalnızca üretim ve araştırma kuyruğu boşken boşta sayılır. 1 saniyeden kısa geçişler çalışma sayılır. Konut veya nüfus sınırında bekleyen birimler ayrı sayılır. Yaşam tüm gözlemlenen bina ömrünü; 60s ve Savaş seçilen aralığı kapsar.",
- "unit·min": "unit·min"
+ "unit·min": "unit·min",
+ "None researched yet": "Henüz araştırılmadı",
+ "+{n} more": "+{n} tane daha",
+ "Hide {n} upgrades": "{n} yükseltmeyi gizle",
+ "Research progress": "Araştırma ilerlemesi"
 }

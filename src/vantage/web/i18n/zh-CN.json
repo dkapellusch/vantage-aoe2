@@ -1651,5 +1651,9 @@
  "Working": "工作中",
  "Building activity": "建筑活动",
  "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "仅当生产和研究队列为空时才计为建筑空闲。不到1秒的队列切换计为工作。因住房或人口上限而停滞的队列单独统计，不算空闲。全程涵盖建筑的全部已观测寿命；60秒和战斗使用选定时段。",
- "unit·min": "unit·min"
+ "unit·min": "unit·min",
+ "None researched yet": "尚未完成任何研究",
+ "+{n} more": "另有{n}项",
+ "Hide {n} upgrades": "隐藏{n}项升级",
+ "Research progress": "研究进度"
 }

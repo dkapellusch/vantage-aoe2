@@ -1651,5 +1651,9 @@
  "Working": "작업 중",
  "Building activity": "건물 활동",
  "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "생산 및 연구 대기열이 비어 있을 때만 건물이 유휴 상태입니다. 1초 미만의 전환은 작업으로 계산합니다. 주택이나 인구 한도에 막힌 대기열은 별도로 계산합니다. 전체는 관측된 건물 수명 전체이며 60s와 전투는 선택한 구간입니다.",
- "unit·min": "unit·min"
+ "unit·min": "unit·min",
+ "None researched yet": "아직 연구 완료 없음",
+ "+{n} more": "+{n}개 더",
+ "Hide {n} upgrades": "업그레이드 {n}개 숨기기",
+ "Research progress": "연구 진행률"
 }

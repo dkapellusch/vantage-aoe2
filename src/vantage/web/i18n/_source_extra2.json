@@ -1252,5 +1252,9 @@
  "Working",
  "Building activity",
  "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.",
- "unit·min"
+ "unit·min",
+ "None researched yet",
+ "+{n} more",
+ "Hide {n} upgrades",
+ "Research progress"
 ]
