@@ -20,7 +20,8 @@ export function panelTexts(el, limit = 300) {
     if (style.visibility === 'hidden' || +style.opacity === 0) continue;
     // zoom (the editor's Scale) multiplies what is drawn.
     const zoom = +getComputedStyle(el).zoom || 1;
-    out.push({ px: parseFloat(style.fontSize) * zoom, kind: NUMERIC.test(text) ? 'value' : 'label' });
+    // A value is a bold numeral (what the eye reads first); units, caps and deltas count as labels.
+    out.push({ px: parseFloat(style.fontSize) * zoom, kind: NUMERIC.test(text) && (parseInt(style.fontWeight, 10) || 400) >= 700 ? 'value' : 'label' });
   }
   return out;
 }

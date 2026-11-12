@@ -43,7 +43,7 @@ body:not([data-hud-layout="caster"]) #pulse { left: 50%; right: auto; transform:
 .pulse .pm-l { color: var(--muted); font-size: var(--pl); font-weight: 600; letter-spacing: .02em; }
 .pulse .pm-v { font: 700 var(--pv)/1.15 var(--mono); }
 .pulse .pm-v small { font-size: var(--pl); font-weight: 600; color: var(--muted); }
-.pulse .pm em { font: 700 var(--pl)/1 var(--mono); font-style: normal; }
+.pulse .pm em { font: 600 var(--pl)/1 var(--mono); font-style: normal; }
 .pulse .pm.warn .pm-v, .pulse .pm.warn .pm-l { color: var(--warn); }
 .pulse .pm.housed .pm-v { color: var(--bad); animation: pulse-housed 1s steps(2, jump-none) infinite; }
 @keyframes pulse-housed { 50% { opacity: .45; } }
@@ -93,7 +93,7 @@ body[data-hud-preset="caster"] #minimap-wrap:not(:hover):not(:focus-within) #min
 .overlay.stats-window .win-grip { margin: 0; font-size: 16px; cursor: grab; border-radius: 4px; padding: 0 4px; }
 .overlay.stats-window .win-buttons { display: flex; gap: 6px; align-items: center; cursor: default; }
 .overlay.stats-window .win-buttons .close { position: static; float: none; margin: 0; }
-.overlay.stats-window .chart-wrap { flex: 1 1 auto; min-height: 180px; display: flex; }
+.overlay.stats-window .chart-wrap { flex: 1 1 auto; min-height: max(200px, calc(var(--panel-height, 600px) * 0.42)); display: flex; }
 .overlay.stats-window .chart-wrap canvas { height: auto; min-height: 180px; flex: 1 1 auto; }
 .overlay.stats-window.docked { border-radius: 8px 0 0 8px; }
 /* The window is not a page: the HUD beside it keeps its tools and handles. */
@@ -247,7 +247,7 @@ body:has(#story:not(.panel-off):not(.hud-custom-size)) :is(#reviewcards, #focus)
 .wm-side b { font: 700 clamp(18px, 1.15vw, 24px)/1.15 var(--mono); }
 .wm-side small { font-size: .65em; color: var(--muted); font-weight: 600; }
 .wm-name { font-size: 14px; color: var(--muted); }
-.wm-delta { font: 700 clamp(14px, .85vw, 17px) var(--mono); font-style: normal; }
+.wm-delta { font: 600 clamp(14px, .85vw, 17px) var(--mono); font-style: normal; }
 .wm:not(.two) .wm-values { flex-direction: column; gap: 2px; }
 .hud-chart { width: 360px; height: 190px; display: flex; flex-direction: column; }
 .hud-chart .wc-title { font-weight: 700; font-size: 14px; color: var(--accent); margin-bottom: 3px; }
@@ -328,3 +328,67 @@ body.hud-phone #story [data-st="slower"] { display: none; }
 #phone-sheet .ctable tbody th { white-space: normal; font-size: 14px; }
 #phone-sheet .ctable thead th { overflow: hidden; text-overflow: ellipsis; }
 #phone-sheet .ctable td { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* -- layout editor (layout-editor.js) ------------------------------------------------------------------ */
+#layout-editor.hidden, #layout-editor .hidden { display: none; }
+#layout-editor > * { position: fixed; }
+#le-grid { inset: 0; z-index: 3; pointer-events: none; opacity: .5;
+  background-image: linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px); background-size: 40px 40px; }
+#le-safe { z-index: 3; pointer-events: none; border: 1px dashed rgba(111,179,210,.9); border-radius: 2px; }
+#le-safe span, #le-zone span { position: absolute; left: 6px; top: 4px; font-size: 11px; color: var(--accent-2); background: rgba(0,0,0,.55); padding: 0 5px; border-radius: 3px; white-space: nowrap; }
+#le-zone { z-index: 23; border: 2px dashed #ff3df2; background: repeating-linear-gradient(45deg, rgba(255,61,242,.10) 0 10px, rgba(255,61,242,.03) 10px 20px); cursor: grab; touch-action: none; border-radius: 4px; }
+#le-zone span { color: #ff9cf7; }
+#le-zone [data-zone-size] { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; border: solid #ff3df2; border-width: 0 3px 3px 0; }
+#le-bar { z-index: 27; top: 8px; left: 0; right: 0; margin: 0 auto; width: max-content; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 16px);
+  padding: 6px 10px; font-size: 13px; background: var(--panel-solid); border: 1px solid var(--accent); }
+#le-bar .le-title { color: var(--accent); letter-spacing: .06em; font-size: 12px; }
+#le-bar label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+#le-bar .le-scenes { display: inline-flex; gap: 2px; }
+#le-bar .le-scenes button[aria-checked="true"], #le-lib button[aria-pressed="true"] { background: rgba(217,180,90,.16); color: var(--accent); border-color: var(--accent); }
+#le-bar .le-size { color: var(--muted); font: 12px var(--mono); }
+#le-bar .le-done { background: var(--accent); color: #1a1407; border-color: var(--accent); font-weight: 700; }
+#le-bar button:disabled { opacity: .45; cursor: default; }
+#le-lib, #le-insp { z-index: 26; top: 58px; bottom: 8px; width: 250px; overflow: auto; padding: 8px 10px 12px; font-size: 13px; background: var(--panel-solid); transition: opacity .12s; }
+#le-lib { left: 8px; }
+#le-insp { right: 8px; }
+#layout-editor h2 { margin: 0 0 4px; font-size: 15px; color: var(--accent); }
+#layout-editor h3 { margin: 12px 0 5px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+#layout-editor .hint { color: var(--muted); font-size: 12px; margin: 2px 0 6px; }
+#le-lib .le-items { display: flex; flex-direction: column; gap: 3px; }
+#le-lib .le-item { display: flex; gap: 3px; }
+#le-lib .le-item > button:first-child { flex: 1 1 auto; text-align: left; padding: 4px 8px; }
+#le-lib .le-item > [data-le-remove] { flex: none; width: 28px; }
+#le-lib .le-item.on > button:first-child::after { content: '✓'; float: right; }
+#le-lib .le-item.sel > button:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+#layout-editor .le-pane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#layout-editor .le-pane-head button { flex: none; }
+#le-lib-tab, #le-insp-tab { z-index: 26; top: 58px; display: none; padding: 5px 9px; background: var(--panel-solid); border-color: var(--accent); }
+#le-lib-tab { left: 8px; } #le-insp-tab { right: 8px; }
+#layout-editor.fold-lib #le-lib, #layout-editor.fold-insp #le-insp { display: none; }
+#layout-editor.fold-lib #le-lib-tab, #layout-editor.fold-insp #le-insp-tab { display: block; }
+#le-insp .le-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+#le-insp label { display: flex; align-items: center; gap: 5px; justify-content: space-between; }
+#le-insp .le-fields input { width: 54px; }
+#le-insp .le-fields span { color: var(--muted); }
+#le-insp .le-anchors { display: grid; grid-template-columns: repeat(3, 28px); gap: 4px; }
+#le-insp .le-anchors button { width: 28px; height: 28px; padding: 0; position: relative; }
+#le-insp .le-anchors button::after { content: ''; position: absolute; inset: 9px; border-radius: 50%; background: var(--muted); }
+#le-insp .le-anchors button[aria-checked="true"] { border-color: var(--accent); }
+#le-insp .le-anchors button[aria-checked="true"]::after { background: var(--accent); inset: 6px; }
+#le-insp .le-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; }
+#le-insp .le-checks label { justify-content: flex-start; cursor: pointer; }
+#le-insp .le-stream { list-style: none; margin: 0; padding: 0; }
+#le-insp .le-stream li { padding: 2px 0; }
+#le-insp .le-stream .ok { color: var(--good); }
+#le-insp .le-stream .warn { color: var(--warn); }
+#le-insp .le-content label { flex-direction: column; align-items: stretch; gap: 3px; margin-bottom: 6px; }
+#le-insp .le-content input, #le-insp .le-content select { width: 100%; }
+#le-insp .le-actions { display: flex; gap: 6px; margin-top: 12px; }
+/* While a panel is being dragged the editor's own panes get out of the way. */
+body.hud-moving #le-lib, body.hud-moving #le-insp, body.hud-moving #le-bar, body.hud-resizing #le-lib, body.hud-resizing #le-insp { opacity: .15; pointer-events: none; }
+body.hud-editor #panel-guides i { background: #ff3df2; }
+body.hud-editor #hud .le-selected { outline: 2px solid var(--accent) !important; outline-offset: 2px; }
+body.hud-editor #hud .panel[id]:focus-visible { outline: 2px solid #fff !important; outline-offset: 3px; }
+body.hud-arrange #hud .panel-auto { opacity: 1; pointer-events: auto; }
+body.hud-arrange #hud :is(#ticker, #selchip, #focus).empty { display: block; opacity: 1; min-width: 160px; min-height: 30px; }
+body.hud-editor #hud-hint { display: none; }

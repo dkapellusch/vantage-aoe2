@@ -216,12 +216,11 @@ export function parseHash(hash) {
   return out;
 }
 
-/** hud with a decoded link applied (the link's preset becomes the active one). */
+/** hud with a decoded link applied (the link's preset becomes the active one; its scene is the caller's to hold, never saved). */
 export function applyDecoded(hud, decoded) {
   if (!decoded) return hud;
   let next = { ...hud, preset: decoded.preset };
   if (decoded.preset === CUSTOM) next = { ...next, edits: { ...(hud.edits || {}), [CUSTOM]: { panels: decoded.panels, metrics: decoded.metrics } } };
-  if (decoded.scene) next.scene = decoded.scene;
   return next;
 }
 
@@ -354,7 +353,7 @@ export function safeFrame(viewport, inset = 0.025) {
 export function streamChecks(rect, viewport, texts = []) {
   const min = minTextPx(viewport.height), out = [];
   const small = texts.filter((x) => x.px < (x.kind === 'value' ? min.value : min.label) - 0.01);
-  const smallest = texts.length ? Math.min(...texts.map((x) => x.px)) : null;
+  const smallest = small.length ? Math.min(...small.map((x) => x.px)) : null;
   out.push(small.length
     ? { ok: false, text: 'Text down to {px} px: values need {v} px, labels {l} px', args: { px: Math.round(smallest * 10) / 10, v: min.value, l: min.label } }
     : { ok: true, text: 'Text is at least {v} px (values) and {l} px (labels)', args: { v: min.value, l: min.label } });

@@ -80,7 +80,7 @@ export function snapRect(rect, others, viewport, mode = 'move', threshold = SNAP
 
 const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
 const minimum = id => ({ width: id === 'minimap-wrap' ? 180 : 220, height: id === 'scoreboard' ? 60 : 90 });
-let handleBox, guideBox, host = null, drag = null, move = null, changed = () => {};
+let handleBox, guideBox, host = null, pinned = null, drag = null, move = null, changed = () => {};
 const slots = new Map();
 
 function dropSlot(id) { const slot = slots.get(id); if (slot) { slot.remove(); slots.delete(id); } }
@@ -245,7 +245,7 @@ function placeHandles() {
 function commit(el, rect) {
   const before = savedRect(el.id);
   // Scale and opacity (set in the layout editor) stay through moves and resizes.
-  const next = { ...(before ? { ...(typeof before.scale === 'number' ? { scale: before.scale } : {}), ...(typeof before.opacity === 'number' ? { opacity: before.opacity } : {}) } : {}), ...rect };
+  const next = { ...(before ? { ...(typeof before.scale === 'number' ? { scale: before.scale } : {}), ...(typeof before.opacity === 'number' ? { opacity: before.opacity } : {}), ...(before.fixed ? { fixed: true } : {}) } : {}), ...rect };
   store(el.id, next);
   setRect(el, next); dockTimebar(); placeHandles();
 }
@@ -344,6 +344,9 @@ export function nudgePanel(el, dx, dy) {
   saveSettings(); changed();
 }
 
+/** Keep the handles on one panel (the layout editor's selection); null: back to the panel under the pointer. */
+export function pinHandles(el) { pinned = el || null; host = pinned; placeHandles(); }
+
 // -- arrange mode (Alt+L): drag any panel by its body ---------------------------------------
 
 export function arranging() { return document.body.classList.contains('hud-arrange'); }
@@ -377,7 +380,7 @@ export function installPanelResizing(onChange) {
     changed();
   });
   document.addEventListener('mouseover', e => {
-    if (drag || move || handleBox.contains(e.target)) return;
+    if (drag || move || pinned || handleBox.contains(e.target)) return;
     const target = e.target.closest?.(SELECTOR);
     host = target && !EXCLUDE.has(target.id) ? target : null;
     placeHandles();
@@ -388,7 +391,7 @@ export function installPanelResizing(onChange) {
   document.addEventListener('pointerdown', e => {
     if (!arranging() || e.button !== 0) return;
     const panel = e.target.closest?.('#hud .panel[id]');
-    if (panel && !EXCLUDE.has(panel.id)) startMove(panel, e);
+    if (panel && !EXCLUDE.has(panel.id)) { document.dispatchEvent(new CustomEvent('vantage:panel-press', { detail: { id: panel.id } })); startMove(panel, e); }
   }, true);
   window.addEventListener('pointermove', e => { if (move) { move.last = { x: e.clientX, y: e.clientY }; moveTo(e); } });
   window.addEventListener('pointerup', () => endMove());
@@ -399,6 +402,7 @@ export function installPanelResizing(onChange) {
     const corner = e.target.dataset.corner;
     if (!host || !corner || e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
+    document.dispatchEvent(new CustomEvent('vantage:panel-press', { detail: { id: host.id } }));
     const r = host.getBoundingClientRect();
     drag = { corner, x: e.clientX, y: e.clientY, others: otherRects(host),
       rect: { left: r.left, top: r.top, width: r.width, height: r.height },
