@@ -187,7 +187,7 @@ def test_kings_are_not_army_and_are_listed(data: GameData) -> None:
     assert W.is_king(9999, W.CLASS_KING) and W.is_king(KING, 0) and not W.is_king(1, 4)
 
 
-def test_housed_is_false_at_the_population_limit(data: GameData) -> None:
+def test_housed_needs_queued_units_and_is_false_at_the_population_limit(data: GameData) -> None:
     p = _patcher()
     b = PatchBuilder().push(fid("Root", "gameOptions"))
     b.assign(fid("GameOptions", "populationLimit"), "Int32", 4).pop()
@@ -198,7 +198,7 @@ def test_housed_is_false_at_the_population_limit(data: GameData) -> None:
     v = W.view(p.root, W.Catalog(data))
     assert v is not None
     assert v["players"]["1"]["housed"] is False  # 4/4 at a limit of 4
-    assert v["players"]["2"]["housed"] is True  # 3/3, below the limit
+    assert v["players"]["2"]["housed"] is False  # 3/3, but no unit queued
 
 
 def test_scene_construction_gates_bridges_and_charge(data: GameData) -> None:

@@ -401,6 +401,8 @@ ACT_OTHER = 12
 ACT_PACKING = 13  # trebuchets and other packed siege (PackAction)
 ACT_UNPACKING = 14  # (UnpackAction)
 ACT_HEALING = 15
+ACT_HOUSED = 16
+ACT_POP_LIMIT = 17
 ACTIVITY_NAMES = (
     "idle",
     "moving",
@@ -418,6 +420,8 @@ ACTIVITY_NAMES = (
     "packing",
     "unpacking",
     "healing",
+    "housed",
+    "population_limit",
 )
 _PACK_MODEL = SCHEMA.model_id("PackAction")
 _UNPACK_MODEL = SCHEMA.model_id("UnpackAction")
@@ -1964,37 +1968,51 @@ def research_time(cat: Catalog, tid: int, research: Any) -> float:
     return max(0.0, base + float(adj or 0)) if base else 0.0
 
 
-def _production(
-    e: Node, cat: Catalog, masters: dict[int, Node], research: Any = None
-) -> dict[str, Any] | None:
+def production_state(e: Node) -> dict[str, Any] | None:
+    """Raw queue identity, shared by the HUD and frame-resolution idle history.
+
+    A missing current action is meaningful: retain the queue without making up
+    a progress value. This occurs during queue handoffs and population blocks.
+    """
     f = e.fields
     queue = [
         {
             "unit": int(q.fields.get(Q_UNIT, -1)),
             "tech": int(q.fields.get(Q_TECH, -1)),
-            "count": int(q.fields.get(Q_COUNT, 1) or 1),
+            "count": int(q.fields.get(Q_COUNT, 1)),
         }
         for q in f.get(B_QUEUE) or ()
         if isinstance(q, Node)
     ]
     act = _action_node(e, B_QUEUE_ACTION)
-    current: dict[str, Any] | None = None
+    current = None
     if act is not None:
-        af = act.fields
         if act.model == MODEL_MAKE_TECH:
-            tid = int(af.get(MT_TECH, -1))
-            total = research_time(cat, tid, research)
-            done = float(af.get(MT_PROGRESS, 0.0) or 0.0)
-            current = {
-                "tech": tid,
-                "progress": min(1.0, done / total) if total else 0.0,
-                "remaining": max(0.0, total - done) if total else None,
-            }
+            current = {"tech": int(act.fields.get(MT_TECH, -1))}
         elif act.model == MODEL_MAKE_OBJECT:
-            uid = int(af.get(MO_OBJ, -1))
-            done = float(af.get(MO_WORK, 0.0) or 0.0)
-            info = cat.master(uid, masters.get(uid))
+            current = {"unit": int(act.fields.get(MO_OBJ, -1))}
+    if not queue and current is None:
+        return None
+    return {"id": int(f.get(E_ID, 0)), "current": current, "queue": queue}
+
+
+def _production(
+    e: Node, cat: Catalog, masters: dict[int, Node], research: Any = None
+) -> dict[str, Any] | None:
+    prod = production_state(e)
+    if prod is None:
+        return None
+    act = _action_node(e, B_QUEUE_ACTION)
+    current = prod["current"]
+    if act is not None and current is not None:
+        if "tech" in current:
+            total = research_time(cat, current["tech"], research)
+            done = float(act.fields.get(MT_PROGRESS, 0.0) or 0.0)
+        else:
+            uid = current["unit"]
+            done = float(act.fields.get(MO_WORK, 0.0) or 0.0)
             master = masters.get(uid)
+            info = cat.master(uid, master)
             total = (
                 float(master.fields.get(M_BUILD_TIME, 0) or 0)
                 if isinstance(master, Node)
@@ -2002,21 +2020,82 @@ def _production(
                 if info is not None
                 else 0.0
             )
-            current = {
-                "unit": uid,
+        current.update(
+            {
                 "progress": min(1.0, done / total) if total else 0.0,
                 "remaining": max(0.0, total - done) if total else None,
             }
-    if not queue and current is None:
-        return None
+        )
     return {
-        "id": int(f.get(E_ID, 0)),
-        "master": int(f.get(E_MASTER, -1)),
-        "x": f.get(E_X, 0.0),
-        "y": f.get(E_Y, 0.0),
-        "current": current,
-        "queue": queue,
+        **prod,
+        "master": int(e.fields.get(E_MASTER, -1)),
+        "x": e.fields.get(E_X, 0.0),
+        "y": e.fields.get(E_Y, 0.0),
     }
+
+
+def production_head(production: dict[str, Any]) -> dict[str, Any]:
+    """First real queue item; an empty transition slot is not queued work."""
+    return next(
+        (
+            q
+            for q in production.get("queue", ())
+            if int(q.get("count", 0)) > 0
+            and (int(q.get("unit", -1)) >= 0 or int(q.get("tech", -1)) >= 0)
+        ),
+        {},
+    )
+
+
+def building_activity(production: dict[str, Any] | None, population_status: int = 0) -> int:
+    """Queue intent survives the gap where the game removes its current action.
+
+    Do not invent progress for that gap. A queued technology is research; a
+    queued unit is production or a population block, never an empty building.
+    """
+    if not production:
+        return ACT_IDLE
+    current = production.get("current") or {}
+    if int(current.get("tech", -1)) >= 0:
+        return ACT_RESEARCHING
+    if int(current.get("unit", -1)) >= 0:
+        return ACT_PRODUCING
+    head = production_head(production)
+    if int(head.get("tech", -1)) >= 0:
+        return ACT_RESEARCHING
+    if int(head.get("unit", -1)) >= 0:
+        return (
+            ACT_HOUSED
+            if population_status == 1
+            else ACT_POP_LIMIT
+            if population_status == 2
+            else ACT_PRODUCING
+        )
+    return ACT_IDLE
+
+
+def population_state(
+    player: Node, production: Iterable[dict[str, Any]], limit: int = 0
+) -> tuple[bool, int]:
+    """Housing needs queued units, not merely zero headroom (which includes
+    units in training). The overall population limit is a separate state."""
+    pop = attr(player, "population")
+    headroom = attr(player, "maxPop")
+    cap = attr(player, "unitLimit") or float(limit or 0)
+    heads = 0
+    for b in production:
+        first = production_head(b)
+        if first:
+            heads += int(int(first.get("unit", -1)) >= 0)
+        elif (b.get("current") or {}).get("unit") is not None:
+            heads += 1
+    housed = bool(
+        player_status(player) == "playing"
+        and heads > 0
+        and (not cap or pop + heads <= cap)
+        and heads > headroom
+    )
+    return (True, 1) if housed else (False, 2 if cap and pop >= cap else 0)
 
 
 def _carry(f: dict[int, Any]) -> list[Any] | int:
@@ -2390,10 +2469,7 @@ def tally(
             )
             if prod is not None:
                 t.production.append(prod)
-                cur = prod.get("current") or {}
-                activity = ACT_RESEARCHING if "tech" in cur else ACT_PRODUCING if cur else ACT_IDLE
-            else:
-                activity = ACT_IDLE
+            activity = ACT_BUILDING if flags & 16 else building_activity(prod)
             if mid in TOWN_CENTER_MASTERS and activity == ACT_IDLE and not flags & 16:
                 t.idle_town_centers += 1
         elif info.type >= TYPE_COMBAT:  # type 60 is projectiles (negative ids), not units
@@ -2830,10 +2906,16 @@ def view(
     limit = pop_limit(root)
     elos = lobby_elos(root)
     players: dict[str, Any] = {}
+    building_states: dict[int, int] = {}
     for pid, p in players_of(world).items():
         if pid == 0:
             continue
         stats = player_stats(p, tallies[pid], limit)
+        stats["housed"], stats["population_status"] = population_state(
+            p, stats["production"], limit or 0
+        )
+        for prod in stats["production"]:
+            building_states[prod["id"]] = building_activity(prod, stats["population_status"])
         done, active = research(p, cat)
         # A building's MakeTechAction carries the live progress; ResearchState's
         # own counter is not advanced while the tech is queued in a building.
@@ -2850,6 +2932,9 @@ def view(
         stats.update(folwark(p))
         stats.update(elos.get(pid) or {"elo_rm": None, "elo_dm": None})
         players[str(pid)] = stats
+    for row in rows:
+        if row[0] in building_states:
+            row[9] = building_states[row[0]]
     wf = world.fields
     return {
         "time": int(wf.get(W_TIME, 0) or 0),

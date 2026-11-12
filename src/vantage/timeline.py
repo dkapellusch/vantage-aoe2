@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from vantage import world as W
+from vantage.building_activity import BuildingHistory
 from vantage.combat_review import PressureTracker, PressureWorker, military_review
 from vantage.frames import Frame
 from vantage.gamedata import GameData
@@ -346,7 +347,7 @@ class Timeline:
         self._act_window: dict[str, deque[tuple[int, dict[str, int], float]]] = defaultdict(deque)
         #: player -> (keyframe time, ``collected`` then) over the last APM_WINDOW_MS
         self._col_window: dict[str, deque[tuple[int, dict[str, int]]]] = defaultdict(deque)
-        self._tc_idle: dict[str, float] = defaultdict(float)
+        self.building_history = BuildingHistory()
         self._housed: dict[str, float] = defaultdict(float)
         self._housed_since: dict[str, int] = {}
         self._relics_max: dict[str, int] = defaultdict(int)
@@ -474,6 +475,12 @@ class Timeline:
                 self._pressure = PressureTracker()
             self._prev_frame_t = frame.time
             self.time = frame.time
+            self.building_history.sample(
+                W.world_of(self.patcher.root),
+                frame.time,
+                discontinuity=bool(frame.skipped) or (frame.is_snapshot and self.frames > 1),
+            )
+            self.activity_log.update(self.building_history.logs)
             self.resource_history.sample(
                 W.world_of(self.patcher.root),
                 frame.time,
@@ -633,8 +640,21 @@ class Timeline:
 
     def finish(self) -> None:
         with self._lock:
+            self.building_history.finish()
             if self.frames and (not self.keyframes or self.keyframes[-1].time != self.time):
                 self._keyframe()
+            elif self.keyframes:
+                # Resolve a trailing sub-second empty queue, which has no next
+                # item to bridge, without deriving the last frame's events twice.
+                v = json.loads(zlib.decompress(self.keyframes[-1].blob))
+                self._building_activity(v)
+                self.keyframes[-1].blob = zlib.compress(
+                    json.dumps(v, separators=(",", ":")).encode(), 3
+                )
+                self._last_view = v
+                with self._cache_lock:
+                    self._decoded_cache.clear()
+                    self._view_cache.clear()
             self.complete = True
             self.version += 1
             self.changed.notify_all()
@@ -703,8 +723,8 @@ class Timeline:
         self.resource_history.checkpoint(t)
         for pid, stats in v["players"].items():
             stats["resource_income"] = self.resource_history.player(int(pid), t)
-        self._activity(v)
         self._player_extras(v)
+        self._activity(v)
         kf = Keyframe(t, zlib.compress(json.dumps(v, separators=(",", ":")).encode(), 3))
         self._start_unit_track(t, v["entities"])
         self.keyframes.append(kf)
@@ -809,6 +829,7 @@ class Timeline:
         t = v["time"]
         dt = max(0, t - self._prev_key_t) / 1000.0 if self._prev_key_t >= 0 else 0.0
         self._prev_key_t = t
+        self._building_activity(v)
         for pid, s in v["players"].items():
             acc = self._act_total[pid]
             window = self._act_window[pid]
@@ -822,9 +843,6 @@ class Timeline:
             for _, smp, d in window:
                 for k, n in smp.items():
                     lm[k] += n * d
-            # Time with at least one idle town center (not summed over town centers:
-            # five idle TCs for a minute are a minute of idle TC time, not five).
-            self._tc_idle[pid] += (1 if s.get("idle_town_centers", 0) else 0) * dt
             if s.get("housed"):
                 self._housed[pid] += dt
                 s["housed_ms"] = t - self._housed_since.setdefault(pid, t)
@@ -841,13 +859,14 @@ class Timeline:
             rate = self._collected_rate(pid, t, s.get("collected"))
             if rate is not None:
                 s["collected_rate"] = rate
-            s["tc_idle_seconds"] = round(self._tc_idle[pid])
             s["housed_seconds"] = round(self._housed[pid])
             # The "Idle TC / Housed Time" dashboard column: both totals, seconds.
             s["idle_tc_housed"] = [s["tc_idle_seconds"], s["housed_seconds"]]
         for row in v["entities"]:
             if row[1] <= 0 or len(row) < 10:
                 continue
+            if row[0] in self.building_history.logs:
+                continue  # buildings use the same frame-resolution history as Idle TC
             log = self.activity_log[row[0]]
             if not log or log[-1][1] != row[9]:
                 log.append((t, row[9]))
@@ -858,6 +877,21 @@ class Timeline:
                     if not log or log[-1][1] != W.ACT_GARRISONED:
                         log.append((t, W.ACT_GARRISONED))
         self._sample_pressure(t)
+
+    def _building_activity(self, v: dict[str, Any]) -> None:
+        """One definition for the dashboard and every per-building activity bar."""
+        t = v["time"]
+        idle: dict[str, int] = defaultdict(int)
+        for row in v["entities"]:
+            state = self.building_history.states.get(row[0])
+            if state is not None:
+                row[9] = state.activity
+                if state.master in W.TOWN_CENTER_MASTERS and state.activity == W.ACT_IDLE:
+                    idle[str(state.owner)] += 1
+        for pid, s in v["players"].items():
+            s["idle_town_centers"] = idle[pid]
+            s["tc_idle_seconds"] = round(self.building_history.tc_idle(int(pid), t))
+            s["idle_tc_housed"] = [s["tc_idle_seconds"], s.get("housed_seconds", 0)]
 
     def _collected_rate(
         self, pid: str, t: int, collected: dict[str, int] | None
@@ -2282,6 +2316,8 @@ class Timeline:
         """Seconds per activity for one entity, over its life or the last window."""
         log = self.activity_log.get(eid, [])
         end = self.time if t is None else t
+        if eid in self.building_history.ended:
+            end = min(end, self.building_history.ended[eid])
         start = end - window if window is not None else -1
         deaths = [when for when, kind, _, _ in self.unit_log.get(eid, ()) if kind == "died"]
         if deaths:
@@ -2571,23 +2607,7 @@ def housed_state(
     the overall limit). Housed: the player is playing, ``n`` > 0 of its
     buildings have a *unit* at the production-queue head, ``pop + n <= unitLimit``
     and ``n > maxPop`` (the headroom)."""
-    pop = W.attr(p, "population")
-    head = W.attr(p, "maxPop")
-    cap = W.attr(p, "unitLimit") or float(limit or 0)
-    n = 0
-    for b in production:
-        q = b.get("queue") or ()
-        first = q[0] if q else None
-        if first is not None:
-            if int(first.get("unit", -1)) != -1 and int(first.get("count", 0) or 0) > 0:
-                n += 1
-        elif (b.get("current") or {}).get("unit") is not None:
-            n += 1
-    playing = W.player_status(p) == "playing"
-    housed = bool(playing and n > 0 and (not cap or pop + n <= cap) and n > head)
-    if housed:
-        return True, 1
-    return False, 2 if cap and pop >= cap else 0
+    return W.population_state(p, production, limit)
 
 
 def _track_json(

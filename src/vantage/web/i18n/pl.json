@@ -1632,5 +1632,7 @@
  "Rewind: play backwards; again for faster (2×, 4×, 8×)": "Przewiń wstecz: odtwarzaj do tyłu; ponownie, by przyspieszyć (2×, 4×, 8×)",
  "Fast forward; again for faster (2×, 4×, 8×)": "Przewiń do przodu; ponownie, by przyspieszyć (2×, 4×, 8×)",
  "Deaths": "Straty",
- "Kills per death of this selection (units that died while selected count)": "Zabicia na stratę tego zaznaczenia (liczą się jednostki, które zginęły zaznaczone)"
+ "Kills per death of this selection (units that died while selected count)": "Zabicia na stratę tego zaznaczenia (liczą się jednostki, które zginęły zaznaczone)",
+ "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Czas bezczynności centrum miasta: bez szkolenia i badań. Przerwy poniżej 1 s liczą się jako praca. Blokady z powodu braku domów lub limitu populacji są wyłączone; czas braku domów jest liczony oddzielnie.",
+ "Population limit": "Limit populacji"
 }

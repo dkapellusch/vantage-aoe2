@@ -1632,5 +1632,7 @@
  "Rewind: play backwards; again for faster (2×, 4×, 8×)": "巻き戻し: 逆再生。もう一度押すとさらに速く (2×、4×、8×)",
  "Fast forward; again for faster (2×, 4×, 8×)": "早送り。もう一度押すとさらに速く (2×、4×、8×)",
  "Deaths": "死亡",
- "Kills per death of this selection (units that died while selected count)": "この選択の死亡あたりの撃破数 (選択中に死んだユニットも数える)"
+ "Kills per death of this selection (units that died while selected count)": "この選択の死亡あたりの撃破数 (選択中に死んだユニットも数える)",
+ "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "町の中心が訓練も研究もしていない時間。1秒未満の切り替え時間は稼働として数えます。住居不足や人口上限による待機は除外し、住居不足の時間は別に数えます。",
+ "Population limit": "人口上限"
 }

@@ -1632,5 +1632,7 @@
  "Rewind: play backwards; again for faster (2×, 4×, 8×)": "Перемотка назад: воспроизведение в обратную сторону; ещё раз — быстрее (2×, 4×, 8×)",
  "Fast forward; again for faster (2×, 4×, 8×)": "Перемотка вперёд; ещё раз — быстрее (2×, 4×, 8×)",
  "Deaths": "Потери",
- "Kills per death of this selection (units that died while selected count)": "Убийства на одну потерю в этом выборе (учитываются погибшие выбранные юниты)"
+ "Kills per death of this selection (units that died while selected count)": "Убийства на одну потерю в этом выборе (учитываются погибшие выбранные юниты)",
+ "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Время простоя городского центра: без обучения и исследований. Паузы менее 1 с считаются работой. Блокировки из-за жилья или лимита населения исключены; нехватка жилья учитывается отдельно.",
+ "Population limit": "Лимит населения"
 }

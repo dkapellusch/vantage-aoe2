@@ -1214,5 +1214,7 @@
  "Coll.",
  "Eco K",
  "Eco D",
- "TC/C"
+ "TC/C",
+ "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.",
+ "Population limit"
 ]

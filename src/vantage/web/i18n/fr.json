@@ -1632,5 +1632,7 @@
  "Rewind: play backwards; again for faster (2×, 4×, 8×)": "Retour rapide : lecture à l’envers ; à nouveau pour accélérer (2×, 4×, 8×)",
  "Fast forward; again for faster (2×, 4×, 8×)": "Avance rapide ; à nouveau pour accélérer (2×, 4×, 8×)",
  "Deaths": "Morts",
- "Kills per death of this selection (units that died while selected count)": "Éliminations par mort de cette sélection (les unités mortes sélectionnées comptent)"
+ "Kills per death of this selection (units that died while selected count)": "Éliminations par mort de cette sélection (les unités mortes sélectionnées comptent)",
+ "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Temps avec un forum inactif : ni formation ni recherche. Les intervalles de moins de 1 s comptent comme du travail. Les blocages liés aux logements ou à la limite de population sont exclus ; le manque de logements est compté séparément.",
+ "Population limit": "Limite de population"
 }

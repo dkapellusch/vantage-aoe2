@@ -1632,5 +1632,7 @@
  "Rewind: play backwards; again for faster (2×, 4×, 8×)": "Undur: main ke belakang; tekan lagi untuk lebih pantas (2×, 4×, 8×)",
  "Fast forward; again for faster (2×, 4×, 8×)": "Mara laju; tekan lagi untuk lebih pantas (2×, 4×, 8×)",
  "Deaths": "Kematian",
- "Kills per death of this selection (units that died while selected count)": "Bunuhan per kematian pilihan ini (unit yang mati semasa dipilih dikira)"
+ "Kills per death of this selection (units that died while selected count)": "Bunuhan per kematian pilihan ini (unit yang mati semasa dipilih dikira)",
+ "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Masa pusat bandar tidak melatih atau menyelidik. Jeda di bawah 1 s dikira sebagai bekerja. Sekatan perumahan atau had penduduk dikecualikan; masa kekurangan rumah dikira berasingan.",
+ "Population limit": "Had penduduk"
 }

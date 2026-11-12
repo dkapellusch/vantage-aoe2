@@ -1632,5 +1632,7 @@
  "Rewind: play backwards; again for faster (2×, 4×, 8×)": "Geri sar: geriye oynat; daha hızlı için tekrar (2×, 4×, 8×)",
  "Fast forward; again for faster (2×, 4×, 8×)": "İleri sar; daha hızlı için tekrar (2×, 4×, 8×)",
  "Deaths": "Ölümler",
- "Kills per death of this selection (units that died while selected count)": "Bu seçimin ölüm başına öldürmesi (seçiliyken ölen birimler sayılır)"
+ "Kills per death of this selection (units that died while selected count)": "Bu seçimin ölüm başına öldürmesi (seçiliyken ölen birimler sayılır)",
+ "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Şehir merkezinin eğitim veya araştırma yapmadığı süre. 1 saniyeden kısa aralar çalışma sayılır. Konut veya nüfus sınırı nedeniyle beklemeler hariçtir; konut eksikliği süresi ayrı sayılır.",
+ "Population limit": "Nüfus sınırı"
 }

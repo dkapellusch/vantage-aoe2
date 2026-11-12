@@ -1193,6 +1193,8 @@ function effAll(s, keys) {
 }
 const effTotal = (s, k, keys) => (s.efficiency_all && has(s.efficiency_all[k]) ? s.efficiency_all[k] : effAll(s, keys));
 
+const TC_IDLE_TIP = 'Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.';
+
 // h: header (short), tip: what it measures. A value of null renders as '–'.
 const COL = {
   food: { h: 'Food', tip: 'Food in stockpile', v: (s) => Math.floor(s.resources.food) },
@@ -1263,10 +1265,10 @@ const COL = {
   gWoodLm: { h: 'W time LM', tip: 'Share of villager time on wood, last minute', v: (s) => lmSum(s, ['gather_wood']) },
   gGoldLm: { h: 'G time LM', tip: 'Share of villager time on gold, last minute', v: (s) => lmSum(s, ['gather_gold']) },
   gStoneLm: { h: 'S time LM', tip: 'Share of villager time on stone, last minute', v: (s) => lmSum(s, ['gather_stone']) },
-  tcIdle: { h: 'Idle TC', tip: 'Time with a town center idle (producing nothing), whole game', v: (s) => fmtTime((s.tc_idle_seconds || 0) * 1000) },
+  tcIdle: { h: 'Idle TC', tip: TC_IDLE_TIP, v: (s) => fmtTime((s.tc_idle_seconds || 0) * 1000) },
   housed: { h: 'Housed', tip: 'Time spent housed', v: (s) => fmtTime((s.housed_seconds || 0) * 1000) },
   // "Idle TC / Housed Time": idle TC time with the housed time on a second line.
-  idleTcHoused: { h: 'Idle TC / Housed', abbr: 'Idl TC/Hsd', tip: 'Town center idle time, and below it the time spent housed', icons: ['tc', 'pop'],
+  idleTcHoused: { h: 'Idle TC / Housed', abbr: 'Idl TC/Hsd', tip: TC_IDLE_TIP, icons: ['tc', 'pop'],
     v: (s) => { const a = Array.isArray(s.idle_tc_housed) ? s.idle_tc_housed : [s.tc_idle_seconds || 0, s.housed_seconds || 0];
       return { html: `${esc(fmtTime((a[0] || 0) * 1000))}<small class="dash-sub">${esc(fmtTime((a[1] || 0) * 1000))}</small>` }; } },
   tribute: { h: 'Tribute in', tip: 'Tribute received', v: (s) => s.tribute_received },
@@ -1876,7 +1878,7 @@ export function eventsPage(dir, toEdge) {
 
 // -- unit panel ------------------------------------------------------------------------------
 
-const ACT_NAMES = ['idle', 'moving', 'gathering food', 'gathering wood', 'gathering gold', 'gathering stone', 'building', 'repairing', 'fighting', 'garrisoned', 'producing', 'researching', '', 'packing', 'unpacking', 'healing'];
+const ACT_NAMES = ['idle', 'moving', 'gathering food', 'gathering wood', 'gathering gold', 'gathering stone', 'building', 'repairing', 'fighting', 'garrisoned', 'producing', 'researching', '', 'packing', 'unpacking', 'healing', 'Housed', 'Population limit'];
 
 export function rememberSelection() {
   // Keep what was selected so units that die stay listed (with a skull).
@@ -2204,19 +2206,19 @@ function singlePanel(el, r) {
 // A group of selected units (one team's half in a split panel): who and what,
 // the group's health and value, what it is doing, a row per unit type with the
 // owner's upgraded numbers, and its combat record (/api/group).
-const GROUP_ACTS = { 8: '⚔', 1: '➜', 0: '💤', 2: '🍖', 3: '🪵', 4: '🪙', 5: '🪨', 6: '🔨', 7: '🔧', 10: '⚙', 11: '⚗', 13: '📦', 14: '📦', 15: '✚' };
+const GROUP_ACTS = { 8: '⚔', 1: '➜', 0: '💤', 2: '🍖', 3: '🪵', 4: '🪙', 5: '🪨', 6: '🔨', 7: '🔧', 10: '⚙', 11: '⚗', 13: '📦', 14: '📦', 15: '✚', 16: '⌂', 17: '⌂' };
 // Activity colours for the group's time bars (server ACTIVITY_NAMES).
 const ACT_COLORS = {
   idle: 'var(--bad)', moving: '#6fb6ea', fighting: '#f0c94b', gather_food: 'var(--food)', gather_wood: 'var(--wood)',
   gather_gold: 'var(--gold)', gather_stone: 'var(--stone)', building: '#9d8cd6', repairing: '#9d8cd6', garrisoned: '#777',
-  producing: '#8fbf6a', researching: '#8fbf6a', other: '#555', packing: '#c08850', unpacking: '#c08850',
+  housed: '#d9b45a', population_limit: '#d9b45a', producing: '#8fbf6a', researching: '#8fbf6a', other: '#555', packing: '#c08850', unpacking: '#c08850',
 };
 // Where a group's time went: a stacked bar and its largest shares.
 function timeBar(acts, label) {
   const tot = Object.values(acts || {}).reduce((a, b) => a + b, 0);
   if (!tot) return '';
   const parts = Object.entries(acts).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-  const name = (k) => t(k.replace('_', ' '));
+  const name = (k) => t(k === 'housed' ? 'Housed' : k === 'population_limit' ? 'Population limit' : k.replace('_', ' '));
   const tipText = parts.map(([k, v]) => `${name(k)} ${Math.round(100 * v / tot)}%`).join('\n');
   return `<div class="up-time" ${tip(label, tipText)}><span class="hint">${label}</span><span class="up-tbar">${parts.map(([k, v]) => `<i style="width:${(100 * v / tot).toFixed(1)}%;background:${ACT_COLORS[k] || '#555'}"></i>`).join('')}</span>
     <span class="up-tlegend">${parts.slice(0, 3).map(([k, v]) => `<b style="color:${ACT_COLORS[k] || 'inherit'}">${Math.round(100 * v / tot)}%</b> ${esc(name(k))}`).join(' · ')}</span></div>`;

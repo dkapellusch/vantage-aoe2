@@ -1632,5 +1632,7 @@
  "Rewind: play backwards; again for faster (2×, 4×, 8×)": "Zurückspulen: rückwärts abspielen; erneut für schneller (2×, 4×, 8×)",
  "Fast forward; again for faster (2×, 4×, 8×)": "Vorspulen; erneut für schneller (2×, 4×, 8×)",
  "Deaths": "Tode",
- "Kills per death of this selection (units that died while selected count)": "Kills pro Tod dieser Auswahl (Einheiten, die ausgewählt starben, zählen)"
+ "Kills per death of this selection (units that died while selected count)": "Kills pro Tod dieser Auswahl (Einheiten, die ausgewählt starben, zählen)",
+ "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Zeit mit untätigem Dorfzentrum: weder Ausbildung noch Forschung. Lücken unter 1 s zählen als Arbeit. Warteschlangen wegen fehlendem Wohnraum oder Bevölkerungslimit zählen nicht als untätig; Wohnraummangel wird separat gezählt.",
+ "Population limit": "Bevölkerungslimit"
 }
