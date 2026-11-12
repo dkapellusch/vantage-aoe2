@@ -1,55 +1,185 @@
-// Panel layout: which HUD panels show and which are collapsed to their top
-// strip. Every panel gets a hover toolbar (collapse, hide), and the Panels menu
-// lists them all with presets, so a hidden panel is always one click from
-// coming back. Panels whose visibility already was a setting (scoreboard,
-// production, dashboard, events) keep that setting as the
-// source of truth; the others are listed in settings.hiddenPanels.
+// The HUD layout: which panels show, which are collapsed, the presets
+// (Minimal, Caster, Review, Analyst, Full), the scene in force and the
+// hold-to-peek state. hud-model.js holds the rules; this module applies them
+// to the page. Every panel gets a hover toolbar (name, move, collapse, hide),
+// and the Customize drawer (customize.js, loaded on first use) lists them all,
+// so a hidden panel is always one click from coming back.
+//
+// Full is the HUD exactly as the settings describe it: panels whose visibility
+// already was a setting (scoreboard, production, dashboard, events) keep that
+// setting as the source of truth, the others are listed in
+// settings.hiddenPanels. Every other preset has its own panel list
+// (settings.hud.edits holds what the viewer changed in it), so switching
+// presets never rewrites Full.
 
-import { settings, saveSettings, esc, tip } from './state.js';
+import { S, settings, saveSettings, tip } from './state.js';
 import { t } from './i18n.js';
 import { applyPanelSizes, resetPanelSizes, resetPanel, startMove, nudgePanel, arranging, setArranging } from './panel-resize.js';
+import {
+  PRESETS as STOCK, PRESET_ORDER, CUSTOM, presetPanels, presetMetrics, presetChanged, withPanels, withMetrics, restorePreset,
+  normalizeHud, defaultHud, initialPreset, applyDecoded, decodeHud, parseHash, encodeHud, activeScene, fightAt,
+} from './hud-model.js';
+import { hudEnvironment } from './state.js';
+import { binding } from './hotkeys.js';
 
 const $ = (id) => document.getElementById(id);
 
 // host: the element the toolbar sits on; el: what hiding hides (the minimap
-// keeps its button row, which holds the Panels button itself).
+// keeps its button row, which holds the Customize button itself).
+// extra: a panel newer than Full's flags; module: loaded when first shown.
 export const PANELS = [
-  { id: 'scoreboard', label: 'Scoreboard', setting: 'disableScoreboard', inverted: true },
-  { id: 'overview', label: 'Team overview', collapse: true },
-  { id: 'techs', label: 'Techs', collapse: true },
-  { id: 'production', label: 'Production & composition', setting: 'showProduction', collapse: true },
-  { id: 'dashboard', label: 'Dashboard', setting: 'showDashboard', collapse: true },
-  { id: 'events', label: 'Event log', setting: 'showEvents', collapse: true },
-  { id: 'unitpanel', label: 'Selection panel', collapse: true },
-  { id: 'timebar', label: 'Time controls', collapse: true },
+  { id: 'scoreboard', label: 'Scoreboard', setting: 'disableScoreboard', inverted: true, action: 'toggleScoreboard' },
+  { id: 'pulse', label: 'Pulse strip', extra: true, module: 'pulse', action: 'toggleScoreboard', detail: 'One row per side: age, villagers, military, army value, idle and the bank with its rate' },
+  { id: 'overview', label: 'Team board', collapse: true, action: 'toggleOverview' },
+  { id: 'techs', label: 'Techs', collapse: true, gate: 'showStaticTechs', action: 'toggleStaticTechnologies' },
+  { id: 'production', label: 'Production & composition', setting: 'showProduction', collapse: true, action: 'toggleProduction' },
+  { id: 'dashboard', label: 'Dashboard', setting: 'showDashboard', collapse: true, action: 'toggleDashboard' },
+  { id: 'events', label: 'Event log', setting: 'showEvents', collapse: true, action: 'toggleEvents' },
+  { id: 'unitpanel', label: 'Selection panel', collapse: true, action: 'toggleSelectionPanel' },
+  { id: 'timebar', label: 'Time controls', collapse: true, action: 'toggleScrubbingBar' },
   { id: 'minimap', host: 'minimap-wrap', label: 'Minimap' },
+  { id: 'focus', label: 'Focus slot', extra: true, module: 'focus-slot', action: 'toggleFocusSlot', detail: 'One card at a time: production, techs, economy or the last fight' },
+  { id: 'ticker', label: 'Event ticker', extra: true, module: 'focus-slot', detail: 'Key events only, two lines, fading after 8 seconds' },
+  { id: 'selchip', label: 'Selection chip', extra: true, module: 'focus-slot', detail: 'One line for the selection; opens the Selection panel' },
+  { id: 'reviewcards', label: 'Review cards', extra: true, module: 'story', detail: 'Six mistake metrics, side against side' },
+  { id: 'story', label: 'Match story timeline', extra: true, module: 'story', action: 'toggleStory', detail: 'Lead, age-ups, fights, idle town centres and bookmarks on one time axis, with the playback buttons' },
+  { id: 'w-army', label: 'Army value Δ', extra: true, module: 'widgets', widget: 'metric' },
+  { id: 'w-vil', label: 'Villagers', extra: true, module: 'widgets', widget: 'metric' },
+  { id: 'w-bank', label: 'Bank + rate', extra: true, module: 'widgets', widget: 'metric' },
+  { id: 'w-idletc', label: 'Idle TC', extra: true, module: 'widgets', widget: 'metric' },
+  { id: 'w-kd', label: 'Kills / Losses', extra: true, module: 'widgets', widget: 'metric' },
+  { id: 'w-eapm', label: 'eAPM', extra: true, module: 'widgets', widget: 'metric' },
+  { id: 'w-chart', label: 'Chart: any series', extra: true, module: 'widgets', widget: 'chart' },
+  { id: 'w-series', label: 'Series score', extra: true, module: 'widgets', widget: 'casting' },
+  { id: 'w-text', label: 'Text or image', extra: true, module: 'widgets', widget: 'casting' },
 ];
 
-export const PRESETS = {
-  // The map, who is winning, the clock and what you click on.
-  clean: ['scoreboard', 'unitpanel', 'timebar', 'minimap'],
-  all: PANELS.map((p) => p.id),
-};
+export { STOCK as PRESETS, PRESET_ORDER };
 
 const byId = new Map(PANELS.map((p) => [p.id, p]));
 const list = (k) => (Array.isArray(settings[k]) ? settings[k] : []);
+export function panelInfo(id) { return byId.get(id) || null; }
+
+// -- the HUD object: saved settings, plus a link's choice for this visit ---------------------------
+
+let link = null;        // a decoded #hud= / ?hud= link: applies until the viewer changes the HUD
+let linkScene = null;   // the scene a link asks for (an OBS scene's browser source)
+let peek = false;       // hold-to-peek: the Full HUD while the key is down
+let editorScene = null; // the scene being edited (layout editor)
+let selExpanded = false; // the Selection chip was opened into the full Selection panel
+
+/** The HUD in force: the saved one with this visit's link applied. */
+export function hud() {
+  const saved = settings.hud || defaultHud();
+  return link ? applyDecoded(saved, link) : saved;
+}
+
+/** Replace the HUD (immutably) and save it. A link's choice becomes the viewer's own once they edit. */
+export function setHud(next, { save = true } = {}) {
+  link = null;
+  settings.hud = normalizeHud(next);
+  if (save) saveSettings();
+  applyPanels();
+  document.dispatchEvent(new CustomEvent('vantage:hud-changed'));
+}
+
+/** Read #hud= (and ?hud=) once at start, and again when the hash changes. */
+export function readLink() {
+  const hash = parseHash(typeof location !== 'undefined' ? location.hash : '');
+  const decoded = decodeHud(hash.hud || hudEnvironment().requested || '');
+  link = decoded && !(decoded.preset === (settings.hud || {}).preset && !decoded.panels) ? decoded : null;
+  linkScene = decoded && decoded.scene ? decoded.scene : null;
+  return { decoded, layout: hash.layout || null };
+}
+
+export function activePreset() { return peek ? 'full' : hud().preset; }
+export function setPeek(on) { if (peek !== !!on) { peek = !!on; applyPanels(); } }
+export function peeking() { return peek; }
+
+// -- scenes --------------------------------------------------------------------------------------
+
+let killCache = { events: null, n: 0, times: [] };
+function killTimes() {
+  if (killCache.events !== S.events || killCache.n !== S.events.length) {
+    killCache = { events: S.events, n: S.events.length, times: S.events.filter((e) => e.kind === 'kill' && !e.friendly).map((e) => e.t) };
+  }
+  return killCache.times;
+}
+export function setEditorScene(scene) { editorScene = scene; applyPanels(); }
+export function scene() {
+  const h = hud();
+  const forced = editorScene || linkScene || h.scene;
+  if (forced && forced !== 'auto') return forced;
+  // Auto scenes only matter once a panel is tied to one.
+  if (!Object.keys(h.sceneHide || {}).length) return 'game';
+  return activeScene({ ended: !!(S.view && S.view.game_ended), idle: !S.session || S.session.mode === 'idle', fighting: fightAt(killTimes(), S.t) });
+}
+
+// -- visibility -------------------------------------------------------------------------------------
+
+function wanted(id, preset = activePreset()) {
+  const p = byId.get(id), h = hud();
+  if (preset === 'full') {
+    if (p.extra) return ((h.edits.full || {}).panels || []).includes(id);
+    if (p.gate && !settings[p.gate]) return false;
+    if (p.setting) return p.inverted ? !settings[p.setting] : !!settings[p.setting];
+    return !list('hiddenPanels').includes(id);
+  }
+  if (id === 'unitpanel' && selExpanded && S.selection.size) return true;
+  return (presetPanels(h, preset) || []).includes(id);
+}
 
 export function isVisible(id) {
   const p = byId.get(id);
   if (!p) return true;
-  if (p.setting) return p.inverted ? !settings[p.setting] : !!settings[p.setting];
-  return !list('hiddenPanels').includes(id);
+  const hide = (hud().sceneHide || {})[id];
+  if (hide && hide.includes(scene())) return false;
+  return wanted(id);
+}
+
+/** A panel that appears by itself in this preset (the time controls near the bottom edge). */
+export function isAuto(id) {
+  const preset = activePreset(), stock = STOCK[preset];
+  return !!stock && (stock.auto || []).includes(id) && !wanted(id, preset);
 }
 
 export function isCollapsed(id) { return list('collapsedPanels').includes(id); }
 
+/** The Selection chip opens the full Selection panel until the selection is cleared. */
+export function expandSelection(on) { if (selExpanded !== !!on) { selExpanded = !!on; applyPanels(); } }
+export function selectionExpanded() { return selExpanded; }
+
 export function setVisible(id, on) {
   const p = byId.get(id);
   if (!p) return;
-  if (p.setting) settings[p.setting] = p.inverted ? !on : on;
-  else settings.hiddenPanels = on ? list('hiddenPanels').filter((x) => x !== id) : [...new Set([...list('hiddenPanels'), id])];
-  saveSettings();
-  applyPanels();
+  const h = hud(), preset = h.preset;
+  if (preset === 'full') {
+    if (p.extra) {
+      const extras = ((h.edits.full || {}).panels || []).filter((x) => x !== id);
+      setHud(withPanels(h, 'full', on ? [...extras, id] : extras));
+      return;
+    }
+    if (p.gate) {
+      // The techs grid has its own switch (Alt+T): ticking the panel turns it on too.
+      settings[p.gate] = on;
+      if (on) settings.hiddenPanels = list('hiddenPanels').filter((x) => x !== id);
+    } else if (p.setting) settings[p.setting] = p.inverted ? !on : on;
+    else settings.hiddenPanels = on ? list('hiddenPanels').filter((x) => x !== id) : [...new Set([...list('hiddenPanels'), id])];
+    saveSettings();
+    applyPanels();
+    return;
+  }
+  const now = (presetPanels(h, preset) || []).filter((x) => x !== id);
+  if (id === 'unitpanel' && !on) selExpanded = false;
+  setHud(withPanels(h, preset, on ? [...now, id] : now));
+}
+
+export function toggleVisible(id) { setVisible(id, !isVisible(id)); }
+
+/** Alt+G: the Pulse strip where the preset uses it, the Scoreboard elsewhere. */
+export function headlinePanel() {
+  const h = hud();
+  return h.preset !== 'full' && !(presetPanels(h, h.preset) || []).includes('scoreboard') ? 'pulse' : 'scoreboard';
 }
 
 export function setCollapsed(id, on) {
@@ -58,15 +188,55 @@ export function setCollapsed(id, on) {
   applyPanels();
 }
 
+// -- presets -----------------------------------------------------------------------------------------
+
+let context = { onChange() {}, toast() {}, openStats() {}, closeStats() {} };
+/** app.js hands over what the layout needs from it: re-render, toast, the Statistics window. */
+export function setContext(ctx) { context = { ...context, ...ctx }; }
+export function layoutContext() { return context; }
+
 export function applyPreset(name) {
-  const keep = new Set(PRESETS[name] || PRESETS.all);
+  if (!STOCK[name] && name !== CUSTOM) return;
+  peek = false; selExpanded = false;
+  setHud({ ...hud(), preset: name });
+  if (STOCK[name] && STOCK[name].stats === 'dock' && window.innerWidth >= 1500) context.openStats({ dock: true });
+  maybeHint(true);
+}
+export function presetIsChanged(name) { return presetChanged(hud(), name); }
+export function restorePresetDefault(name) { setHud(restorePreset(hud(), name)); }
+
+/** Every Full panel on, none collapsed (the old "Everything" button). */
+export function showEverything() {
   for (const p of PANELS) {
-    if (p.setting) settings[p.setting] = p.inverted ? !keep.has(p.id) : keep.has(p.id);
+    if (p.extra) continue;
+    if (p.setting) settings[p.setting] = !p.inverted;
+    if (p.gate) settings[p.gate] = true;
   }
-  settings.hiddenPanels = PANELS.filter((p) => !p.setting && !keep.has(p.id)).map((p) => p.id);
+  settings.hiddenPanels = [];
   settings.collapsedPanels = [];
   saveSettings();
   applyPanels();
+}
+
+/** Back to the defaults for this environment: the first preset, stock presets, no scenes, panels in place. */
+export function resetHud() {
+  const keep = hud();
+  const preset = initialPreset({ ...hudEnvironment(), requested: null, hasSaved: false });
+  resetPanelSizes();
+  setHud({ ...defaultHud(), preset, hintSeen: keep.hintSeen, layouts: keep.layouts });
+}
+
+export function pulseMetrics() { const h = hud(); return presetMetrics(h, activePreset() === 'full' ? 'full' : h.preset); }
+export function setPulseMetric(id, on) {
+  const h = hud(), now = presetMetrics(h, h.preset).filter((x) => x !== id);
+  setHud(withMetrics(h, h.preset, on ? [...now, id] : now));
+}
+
+/** The share link's hash for the HUD on screen ('hud=caster', 'hud=c1.pu-mm.age-vil'). */
+export function shareHash() {
+  const h = hud();
+  const fullPanels = h.preset === 'full' ? PANELS.filter((p) => wanted(p.id, 'full')).map((p) => p.id) : null;
+  return `hud=${encodeHud(h, { fullPanels })}`;
 }
 
 // Default placements (hud-layout.css): caster puts the scoreboard across the top,
@@ -77,16 +247,106 @@ export function hudLayout() { return settings.hudLayout === 'classic' ? 'classic
 export function setHudLayout(name) { settings.hudLayout = name; saveSettings(); applyPanels(); }
 export function toggleArrange() { setArranging(!arranging()); }
 
+// -- newer panels: loaded when first shown, rendered only while visible -------------------------------
+
+const modules = new Map(); // module name -> { state: 'loading' | 'ready' | 'failed', panels }
+const LOADERS = {
+  pulse: () => import('./pulse.js'),
+  'focus-slot': () => import('./focus-slot.js'),
+  story: () => import('./story.js'),
+  widgets: () => import('./widgets.js'),
+};
+function ensureModule(name) {
+  let m = modules.get(name);
+  if (m) return m;
+  m = { state: 'loading', panels: {} };
+  modules.set(name, m);
+  LOADERS[name]().then((mod) => { m.panels = mod.PANEL_RENDERERS || {}; m.state = 'ready'; context.onChange(); })
+    .catch((error) => { m.state = 'failed'; console.error('Vantage: panel module failed to load', name, error); });
+  return m;
+}
+
+/** Render the newer panels that are visible (called with every HUD render). Hidden ones cost nothing. */
+export function renderExtras() {
+  for (const p of PANELS) {
+    if (!p.module) continue;
+    const visible = isVisible(p.id);
+    if (!visible && !modules.has(p.module)) continue;
+    const m = ensureModule(p.module), r = m.panels[p.id];
+    if (!r) continue;
+    let el = $(p.id);
+    if (!el && visible) { el = r.create(context); el.classList.add('panel-fade'); }
+    if (el && visible) r.render(el, context);
+  }
+}
+
+// -- applying ---------------------------------------------------------------------------------------
+
+const phoneQuery = typeof matchMedia === 'function' ? matchMedia('(max-width: 700px), (max-height: 500px) and (pointer: coarse)') : null;
+/** The phone layout: a narrow or short touch window, any preset but Full, not the OBS overlay. */
+export function isPhone() {
+  return !!phoneQuery && phoneQuery.matches && activePreset() !== 'full' && !document.body.classList.contains('overlay-mode');
+}
+let phoneModule = null;
+
 /** Mirror the settings onto the panels (cheap; called with every HUD render). */
 export function applyPanels() {
-  if (document.body.dataset.hudLayout !== hudLayout()) document.body.dataset.hudLayout = hudLayout();
+  const body = document.body, preset = activePreset();
+  // The presets are designed around the caster placement; Full keeps the viewer's own (caster or classic).
+  const placement = preset === 'full' ? hudLayout() : 'caster';
+  if (body.dataset.hudLayout !== placement) body.dataset.hudLayout = placement;
+  if (body.dataset.hudPreset !== preset) body.dataset.hudPreset = preset;
+  const sc = scene();
+  if (body.dataset.hudScene !== sc) body.dataset.hudScene = sc;
+  body.classList.toggle('hud-peek', peek);
+  body.classList.toggle('hud-paused', !S.playing);
+  body.classList.toggle('hud-locked', !!hud().lock || body.classList.contains('overlay-mode'));
+  const phone = isPhone();
+  if (body.classList.contains('hud-phone') !== phone) body.classList.toggle('hud-phone', phone);
+  if (phone && !phoneModule) phoneModule = import('./phone.js').then((m) => { phoneModule = m; m.installPhone(context); context.onChange(); }).catch(console.error);
+  if (phoneModule && phoneModule.syncPhone) phoneModule.syncPhone(phone);
   for (const p of PANELS) {
     const el = $(p.id);
     if (!el) continue;
-    el.classList.toggle('panel-off', !isVisible(p.id));
+    const auto = isAuto(p.id);
+    el.classList.toggle('panel-off', !isVisible(p.id) && !auto);
+    el.classList.toggle('panel-auto', auto);
     el.classList.toggle('collapsed', !!p.collapse && isCollapsed(p.id));
   }
   applyPanelSizes();
+}
+
+// The time controls of Minimal and Caster appear when the pointer nears the
+// bottom edge, while paused, and while one of their buttons has the focus.
+export function installAutoReveal() {
+  const set = (on) => document.body.classList.toggle('hud-reveal-bottom', on);
+  window.addEventListener('mousemove', (e) => set(e.clientY > window.innerHeight - 150), { passive: true });
+  document.documentElement.addEventListener('mouseleave', () => set(false));
+}
+
+// -- first-run hint ------------------------------------------------------------------------------------
+
+/** The presets hint: shown once, dismissible, never on the OBS overlay. `used`: a preset was just picked. */
+export function maybeHint(used = false) {
+  const h = hud();
+  if (h.hintSeen) { const old = $('hud-hint'); if (old) old.remove(); return; }
+  if (used) { settings.hud = { ...(settings.hud || defaultHud()), hintSeen: true }; saveSettings(); const old = $('hud-hint'); if (old) old.remove(); return; }
+  if (document.body.classList.contains('overlay-mode') || $('hud-hint')) return;
+  const el = document.createElement('div');
+  el.id = 'hud-hint'; el.className = 'panel'; el.setAttribute('role', 'status');
+  const keys = PRESET_ORDER.map((name) => `<span><kbd>${binding(STOCK[name].action)}</kbd> ${t(STOCK[name].label)}</span>`).join('');
+  el.innerHTML = `<b>${t('Pick how much HUD you want')}</b>
+    <span class="hint-keys">${keys}<span><kbd>${binding('peekFullHud')}</kbd> ${t('hold: peek at Full')}</span></span>
+    <span class="hint-phone">${t('The tabs below open the tables; More has Customize.')}</span>
+    <button type="button" data-hint="customize">${t('Customize…')}</button>
+    <button type="button" data-hint="dismiss" aria-label="${t('Dismiss this hint')}">${t('Got it')}</button>`;
+  document.body.appendChild(el);
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-hint]');
+    if (!b) return;
+    maybeHint(true);
+    if (b.dataset.hint === 'customize') togglePanelsMenu();
+  });
 }
 
 // -- hover toolbar -------------------------------------------------------------------------
@@ -106,7 +366,7 @@ function placeTools(p) {
   const r = host.getBoundingClientRect();
   if (!r.width || !r.height) { tools.classList.add('hidden'); return; }
   const coll = isCollapsed(p.id);
-  tools.innerHTML = `<button data-pt="move" ${tip(t('Move {p}', { p: t(p.label) }), t('Drag to move · Shift: no snapping · double-click: back to its place · arrow keys nudge · Alt+L: arrange every panel'))}>⠿</button>${p.collapse ? `<button data-pt="collapse" ${tip(coll ? t('Expand') : t('Collapse'))}>${coll ? '▾' : '▴'}</button>` : ''}<button data-pt="hide" ${tip(t('Hide {p}', { p: t(p.label) }), t('Bring it back from the Panels menu (▣ above the minimap, Alt+V)'))}>✕</button>`;
+  tools.innerHTML = `<span class="pt-name" aria-hidden="true">${t(p.label)}</span><button data-pt="move" aria-label="${t('Move {p}', { p: t(p.label) })}" ${tip(t('Move {p}', { p: t(p.label) }), t('Drag to move · Shift: no snapping · double-click: back to its place · arrow keys nudge · Alt+L: edit the whole layout'))}>⠿</button>${p.collapse ? `<button data-pt="collapse" aria-label="${coll ? t('Expand') : t('Collapse')}" ${tip(coll ? t('Expand') : t('Collapse'))}>${coll ? '▾' : '▴'}</button>` : ''}<button data-pt="hide" aria-label="${t('Hide {p}', { p: t(p.label) })}" ${tip(t('Hide {p}', { p: t(p.label) }), t('Bring it back from Customize (▣ above the minimap, Alt+V)'))}>✕</button>`;
   tools.classList.remove('hidden');
   const w = tools.offsetWidth;
   tools.style.left = `${Math.max(0, Math.min(window.innerWidth - w, r.right - w - 2))}px`;
@@ -118,15 +378,20 @@ function placeTools(p) {
   current = p;
 }
 
+// No hover tools where nothing may move: a locked layout, the OBS overlay, the
+// phone layout, and the layout editor (which has its own).
+const toolsOff = () => document.body.matches('.hud-locked, .hud-phone, .hud-arrange');
+
 export function installPanelTools(onChange, toast) {
+  context.onChange = onChange; context.toast = toast;
   tools = document.createElement('div');
   tools.id = 'panel-tools';
   tools.className = 'hidden';
   document.body.appendChild(tools);
   document.addEventListener('mouseover', (e) => {
     if (tools.contains(e.target)) { clearTimeout(hideTimer); return; }
-    const p = hostOf(e.target);
-    if (p && isVisible(p.id)) { clearTimeout(hideTimer); if (p !== current || tools.classList.contains('hidden')) placeTools(p); return; }
+    const p = toolsOff() ? null : hostOf(e.target);
+    if (p && (isVisible(p.id) || isAuto(p.id))) { clearTimeout(hideTimer); if (p !== current || tools.classList.contains('hidden')) placeTools(p); return; }
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => { tools.classList.add('hidden'); current = null; }, 250);
   });
@@ -156,60 +421,37 @@ export function installPanelTools(onChange, toast) {
     else {
       setVisible(p.id, false);
       tools.classList.add('hidden'); current = null;
-      toast(t('{p} hidden · ▣ Panels (Alt+V) brings it back', { p: t(p.label) }));
+      toast(t('{p} hidden · ▣ Customize (Alt+V) brings it back', { p: t(p.label) }));
     }
     if (current) placeTools(current);
     onChange();
   });
 }
 
-// -- the Panels menu -----------------------------------------------------------------------
+// -- the Customize drawer (customize.js) ---------------------------------------------------------------
 
-export function panelsMenuOpen() { return !$('panels-menu').classList.contains('hidden'); }
-export function closePanelsMenu() { $('panels-menu').classList.add('hidden'); }
+let drawer = null, drawerLoading = null;
+export function panelsMenuOpen() { const el = $('panels-menu'); return !!el && !el.classList.contains('hidden'); }
+export function closePanelsMenu() { if (drawer) drawer.close(); else if ($('panels-menu')) $('panels-menu').classList.add('hidden'); }
 
-function renderMenu() {
-  const el = $('panels-menu');
-  el.innerHTML = `<div class="omni-title">${t('Panels')}</div>
-    ${PANELS.map((p) => `<div class="pm-row"><label><input type="checkbox" data-pm-show="${p.id}" ${isVisible(p.id) ? 'checked' : ''}> ${esc(t(p.label))}</label>${p.collapse ? `<button data-pm-collapse="${p.id}" class="${isCollapsed(p.id) ? 'on' : ''}" ${tip(t('Collapse to its top strip'))}>${isCollapsed(p.id) ? '▾' : '▴'}</button>` : ''}</div>`).join('')}
-    <div class="pm-presets"><button data-pm-preset="clean" ${tip(t('Clean'), t('Scoreboard, selection, time controls and minimap'))}>${t('Clean')}</button><button data-pm-preset="all" ${tip(t('Everything'), t('Every panel, none collapsed'))}>${t('Everything')}</button><button data-pm-reset-sizes ${tip(t('Reset layout'), t('Every panel back to its place and size'))}>${t('Reset layout')}</button></div>
-    <div class="pm-presets pm-layouts"><span class="hint">${t('Layout')}</span>${LAYOUTS.map(([k, l]) => `<button data-pm-layout="${k}" class="${hudLayout() === k ? 'on' : ''}">${t(l)}</button>`).join('')}<button data-pm-arrange class="${arranging() ? 'on' : ''}" ${tip(t('Arrange panels (Alt+L)'), t('Drag any panel to move it'))}>${t('Arrange')}</button></div>`;
+export function togglePanelsMenu() {
+  if (drawer) { drawer.toggle(); return; }
+  if (!drawerLoading) {
+    drawerLoading = import('./customize.js').then((m) => { drawer = m.installCustomize(context); drawer.toggle(); })
+      .catch((error) => { drawerLoading = null; console.error(error); context.toast(t('failed')); });
+  }
 }
 
-export function togglePanelsMenu(anchor) {
-  const el = $('panels-menu');
-  if (panelsMenuOpen()) { closePanelsMenu(); return; }
-  renderMenu();
-  const r = (anchor || $('btn-panels')).getBoundingClientRect();
-  el.style.bottom = `${Math.max(8, window.innerHeight - r.top + 4)}px`;
-  el.classList.remove('hidden');
-  // Beside its button, but never past the window's edge (the button sits at the
-  // right edge in the caster layout).
-  el.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - el.offsetWidth - 8))}px`;
-}
+export function installPanelsMenu(onChange) { context.onChange = onChange; }
 
-export function installPanelsMenu(onChange) {
-  const el = $('panels-menu');
-  el.addEventListener('change', (e) => {
-    const id = e.target.dataset && e.target.dataset.pmShow;
-    if (!id) return;
-    setVisible(id, e.target.checked);
-    onChange();
-  });
-  el.addEventListener('click', (e) => {
-    if (e.target.closest('[data-pm-reset-sizes]')) { resetPanelSizes(); onChange(); return; }
-    const lay = e.target.closest('[data-pm-layout]');
-    if (lay) { setHudLayout(lay.dataset.pmLayout); renderMenu(); onChange(); return; }
-    if (e.target.closest('[data-pm-arrange]')) { toggleArrange(); closePanelsMenu(); onChange(); return; }
-    const c = e.target.closest('[data-pm-collapse]');
-    const pr = e.target.closest('[data-pm-preset]');
-    if (c) setCollapsed(c.dataset.pmCollapse, !isCollapsed(c.dataset.pmCollapse));
-    else if (pr) applyPreset(pr.dataset.pmPreset);
-    else return;
-    renderMenu();
-    onChange();
-  });
-  document.addEventListener('mousedown', (e) => {
-    if (panelsMenuOpen() && !e.target.closest('#panels-menu, #btn-panels')) closePanelsMenu();
-  });
+// -- the layout editor (layout-editor.js) ----------------------------------------------------------------
+
+let editor = null;
+/** Alt+L: edit the layout (the editor is loaded on first use). */
+export function toggleEditLayout() {
+  if (document.body.classList.contains('hud-phone')) { context.toast(t('The layout editor needs a wider window')); return; }
+  if (editor) { editor.toggle(); return; }
+  editor = { toggle() {} };
+  import('./layout-editor.js').then((m) => { editor = m.installLayoutEditor(context); editor.toggle(); })
+    .catch((error) => { editor = null; console.error(error); context.toast(t('failed')); });
 }

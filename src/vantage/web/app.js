@@ -123,8 +123,10 @@ function firstFrame(now) {
     const r = im.getBoundingClientRect();
     return r.width && r.height;
   });
-  const hud = !!S.view && !!$('scoreboard').textContent.trim()
-    && (!settings.showDashboard || !!$('dash-table').rows.length);
+  // Whichever headline panel the preset shows (Scoreboard or Pulse strip) has its text.
+  const filled = (id) => !layout.isVisible(id) || !!$(id)?.textContent.trim();
+  const hud = !!S.view && filled('scoreboard') && filled('pulse')
+    && (!layout.isVisible('dashboard') || !!$('dash-table').rows.length);
   const ready = initialLoad.update({
     data: idle || !!(S.map && S.view && S.catalog),
     graphics: idle || document.body.classList.contains('overlay-mode') || world.initialFrameReady(),
@@ -904,6 +906,9 @@ function placeDashboard() {
   if (m) {
     const gap = m.classList.contains('hidden') ? '8px' : `${Math.round(window.innerWidth - m.getBoundingClientRect().left + 8)}px`;
     if (document.documentElement.style.getPropertyValue('--mm-gap') !== gap) document.documentElement.style.setProperty('--mm-gap', gap);
+    // Panels that stack above the minimap (the Selection panel beside the Match story) read its height.
+    const above = m.classList.contains('hidden') ? '8px' : `${Math.round(window.innerHeight - m.getBoundingClientRect().top + 8)}px`;
+    if (document.documentElement.style.getPropertyValue('--mm-above') !== above) document.documentElement.style.setProperty('--mm-above', above);
   }
   // Caster: the time controls above the minimap can be wider than it; a selection panel
   // tall enough to reach them stands left of them instead of under them.
@@ -988,15 +993,24 @@ function layoutLeftColumn() {
   const col = $('leftcol'), sb = $('scoreboard'), tb = $('timebar');
   if (!col || !sb || !tb) return;
   const s = sb.getBoundingClientRect(), b = tb.getBoundingClientRect();
-  // Slide-outs and toasts open below the scoreboard, never over it.
-  document.documentElement.style.setProperty('--sb-bottom', `${!sb.classList.contains('hidden') && s.height > 0 ? Math.round(s.bottom) : 8}px`);
+  // The top bar is the Scoreboard, the Pulse strip, or both (the Pulse strip under the Scoreboard).
+  const sbOn = !sb.classList.contains('hidden') && s.height > 0;
+  const pulse = $('pulse');
+  let headBottom = sbOn ? s.bottom : 0;
+  if (pulse && !pulse.classList.contains('hud-custom-size')) {
+    const top = `${sbOn ? Math.round(s.bottom + 6) : 6}px`;
+    if (pulse.style.getPropertyValue('--pulse-top') !== top) pulse.style.setProperty('--pulse-top', top);
+    const pr = pulse.getBoundingClientRect();
+    if (!pulse.classList.contains('panel-off') && pr.height > 0) headBottom = Math.max(headBottom, pr.bottom);
+  }
+  // Slide-outs and toasts open below the top bar, never over it.
+  document.documentElement.style.setProperty('--sb-bottom', `${headBottom > 0 ? Math.round(headBottom) : 8}px`);
   const colRight = col.getBoundingClientRect().left + Math.max(col.scrollWidth, 340);
   const overlaps = !sb.classList.contains('hidden') && s.width > 0 && s.left < colRight;
   // Caster: the column fills the height under the scoreboard and its panels stack
   // from the bottom (hud-layout.css); the time controls are bottom right.
   const caster = document.body.dataset.hudLayout === 'caster';
-  const sbShown = !sb.classList.contains('hidden') && s.height > 0;
-  const top = caster ? Math.round((sbShown ? s.bottom : 2) + 6) : overlaps ? Math.max(64, Math.round(s.bottom + 6)) : 64;
+  const top = caster ? Math.round((headBottom > 0 ? headBottom : 2) + 6) : overlaps ? Math.max(64, Math.round(headBottom + 6)) : 64;
   const tbLeft = !tb.classList.contains('hidden') && b.height > 0 && b.left < colRight;
   const bottom = (caster ? tbLeft : !tb.classList.contains('hidden') && b.height > 0) ? b.top - 6 : window.innerHeight - 8;
   const maxH = `${Math.max(120, Math.round(bottom - top))}px`;
@@ -1049,6 +1063,7 @@ const noRoomNoted = new Set();
 const leftColObserver = new ResizeObserver(() => layoutLeftColumn());
 
 let hudTimer = null;
+let hintChecked = false;
 let tooltipMode = null;
 // While a mouse button is held on the UI, the 250 ms re-render waits: a panel
 // rebuilt between mousedown and mouseup loses the click.
@@ -1076,15 +1091,19 @@ function renderHud() {
   panels.renderProduction();
   panels.renderDashboard();
   if (placeDirty || performance.now() - placedAt > 1000) placeDashboard();
-  if (settings.showEvents) panels.renderEvents(seek);
-  $('events').classList.toggle('hidden', !settings.showEvents);
+  const eventsOn = layout.isVisible('events');
+  if (eventsOn) panels.renderEvents(seek);
+  $('events').classList.toggle('hidden', !eventsOn);
   panels.renderUnitPanel();
   panels.renderResourcesLeft(showResLeft);
   // A slide-out or the resources strip that just opened is placed in this frame.
   const floaters = `${S.slideout || ''}|${showResLeft}`;
   if (floaters !== placedFloaters) { placedFloaters = floaters; placeFloaters(); }
   panels.renderTimebar();
+  // The newer panels (Pulse strip, Focus slot, Match story, widgets): only the visible ones render.
+  layout.renderExtras();
   layout.applyPanels();
+  if (!hintChecked && document.body.dataset.startup === 'ready' && !document.querySelector('.overlay:not(.hidden)')) { hintChecked = true; layout.maybeHint(); }
   const pp = settings.post || {};
   const g = pp.gamma || 1;
   // Only on change: rewriting the SVG filter invalidates the CSS filter using it.
@@ -2011,11 +2030,25 @@ function escapeLayerOrOpenMenu() {
 
 // -- actions ------------------------------------------------------------------------------
 
+const FOCUS_CARDS = ['production', 'techs', 'eco', 'fight', 'none'];
+// Alt+C / Alt+X: the Focus slot's next card, when it is on screen and the dashboard is not.
+function cycleFocus(dir) {
+  if (layout.isVisible('dashboard') || !layout.isVisible('focus')) return false;
+  const h = layout.hud(), i = FOCUS_CARDS.indexOf(h.focus);
+  layout.setHud({ ...h, focus: FOCUS_CARDS[(i + dir + FOCUS_CARDS.length) % FOCUS_CARDS.length] });
+  return true;
+}
+function pickPreset(name) {
+  layout.applyPreset(name);
+  toast(t('HUD: {preset}', { preset: t(layout.PRESETS[name].label) }));
+}
+
 const BASE_COLOR_MODES = ['default', 'coldWarm', 'warmCold'];
 const BASE_COLOR_NAMES = { default: 'Game colours', coldWarm: 'Cold / warm colours', warmCold: 'Warm / cold colours' };
 
 const ACTIONS = {
-  toggleScrubbingBar: () => $('timebar').classList.toggle('compact'),
+  // Full: the scrub bar folds away (as before). Other presets: the time controls show or hide.
+  toggleScrubbingBar: () => { if (layout.activePreset() === 'full') $('timebar').classList.toggle('compact'); else layout.toggleVisible('timebar'); },
   pause: togglePause,
   playPause: togglePause,
   speedStepUp: () => setSpeed(S.speedIndex + 1),
@@ -2033,14 +2066,15 @@ const ACTIONS = {
     const rows = world.selectedRows();
     if (rows.length) world.centerOn(rows.reduce((a, r) => a + r[3], 0) / rows.length, rows.reduce((a, r) => a + r[4], 0) / rows.length);
   },
-  showAchievements: () => overlays.toggle('overlay-stats', () => overlays.renderStats(seek)),
-  cycleDashboardForward: () => { S.dashPage++; renderHud(); },
-  cycleDashboardBackward: () => { S.dashPage--; renderHud(); },
+  showAchievements: () => { if (overlays.isOpen('overlay-stats')) overlays.closeAll(); else overlays.openStats(seek); },
+  // With the dashboard hidden and the Focus slot shown, the same keys cycle its card.
+  cycleDashboardForward: () => { if (!cycleFocus(1)) S.dashPage++; renderHud(); },
+  cycleDashboardBackward: () => { if (!cycleFocus(-1)) S.dashPage--; renderHud(); },
   swapScoreboardTeamSides: () => { S.flipSides = !S.flipSides; },
-  toggleStaticTechnologies: () => { settings.showStaticTechs = !settings.showStaticTechs; saveSettings(); },
+  toggleStaticTechnologies: () => layout.toggleVisible('techs'),
   toggleSlideoutStaticTechs: () => { S.slideout = S.slideout === 'techs' ? null : 'techs'; },
   toggleSlideoutGraph: () => { S.slideout = S.slideout === 'graph' ? null : 'graph'; },
-  toggleProduction: () => { settings.showProduction = !settings.showProduction; saveSettings(); },
+  toggleProduction: () => layout.toggleVisible('production'),
   toggleResourcesLeft: () => { showResLeft = !showResLeft; },
   togglePlayerResources: () => { toggleTeamBoardView(); },
   cycleFogOfWar: cycleFog,
@@ -2083,9 +2117,21 @@ const ACTIONS = {
   gotoIdleMilitary: () => gotoNext((r) => r[1] > 0 && (r[6] & 2), 'idlem'),
   gotoKing: () => gotoNext((r) => r[2] === 434, 'king'),
   toggleCursorClip: () => world.toggleCursorLock(),
-  toggleOverview: () => layout.setVisible('overview', !layout.isVisible('overview')),
+  toggleOverview: () => layout.toggleVisible('overview'),
+  toggleDashboard: () => layout.toggleVisible('dashboard'),
+  toggleEvents: () => layout.toggleVisible('events'),
+  toggleSelectionPanel: () => layout.toggleVisible('unitpanel'),
+  toggleScoreboard: () => layout.toggleVisible(layout.headlinePanel()),
+  toggleFocusSlot: () => layout.toggleVisible('focus'),
+  toggleStory: () => layout.toggleVisible('story'),
+  toggleStatsDock: () => overlays.toggleStatsDock(seek),
+  hudPresetMinimal: () => pickPreset('minimal'),
+  hudPresetCaster: () => pickPreset('caster'),
+  hudPresetReview: () => pickPreset('review'),
+  hudPresetAnalyst: () => pickPreset('analyst'),
+  hudPresetFull: () => pickPreset('full'),
   togglePanelsMenu: () => layout.togglePanelsMenu(),
-  arrangePanels: () => layout.toggleArrange(),
+  arrangePanels: () => layout.toggleEditLayout(),
   toggleAutocast: () => { autocast.on = !autocast.on; if (!autocast.on) S.highlight.list = false; else { autocast.selection.resume(S.selection); autocast.nextMove = 0; } toast(t(autocast.on ? 'Autocast on' : 'Autocast off')); },
   showHighlights: () => { S.highlight.list = !S.highlight.list; },
   showTutorial: () => showTutorial(0),
@@ -2173,6 +2219,7 @@ function wireScrub() {
   scrub.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!seekLocked()) removeBookmarkNear(panels.scrubTime(e)); });
 }
 
+let peekCode = null;
 function wire() {
   window.addEventListener('resize', world.resize);
   new ResizeObserver(world.resizeMinimap).observe($('minimap'));
@@ -2183,7 +2230,11 @@ function wire() {
   });
   document.documentElement.addEventListener('mouseleave', () => { mouse = { x: null, y: null }; });
   window.addEventListener('blur', () => { mouse = { x: null, y: null }; });
+  // Hold-to-peek: the Full HUD while the key is down (released, or the window loses focus).
+  const endPeek = () => { if (layout.peeking()) { layout.setPeek(false); peekCode = null; renderHud(); } };
+  window.addEventListener('blur', endPeek);
   window.addEventListener('keyup', (e) => {
+    if (peekCode && e.code === peekCode) endPeek();
     if (e.key === 'Tab' && S._peek) {
       S.perspective = S._peek.perspective; S.fogMode = S._peek.fogMode; S._peek = null;
     }
@@ -2207,6 +2258,11 @@ function wire() {
       return;
     }
     const a = actionFor(e);
+    if (a === 'peekFullHud') {
+      e.preventDefault();
+      if (!e.repeat) { peekCode = e.code; layout.setPeek(true); renderHud(); }
+      return;
+    }
     if (a && ACTIONS[a]) { e.preventDefault(); ACTIONS[a](); renderHud(); return; }
     const pan = 28;
     if (e.key === 'ArrowLeft') world.pan(-pan, 0);
@@ -2241,7 +2297,7 @@ function wire() {
   $('tc-faster').onclick = () => { setSpeed(S.speedIndex + 1); renderHud(); };
   const reviewButton = document.createElement('button'); reviewButton.id = 'tc-review'; reviewButton.textContent = t('Review'); reviewButton.onclick = () => toggleReviewTimeline(seek); $('time-controls2').prepend(reviewButton);
   window.addEventListener('vantage-review-ready', () => panels.renderUnitPanel());
-  window.addEventListener('vantage-investigate', (event) => { S.investigatePlayer = event.detail?.pid; overlays.toggle('overlay-stats', () => overlays.renderStats(seek, event.detail?.metric)); });
+  window.addEventListener('vantage-investigate', (event) => { S.investigatePlayer = event.detail?.pid; if (overlays.isOpen('overlay-stats')) overlays.renderStats(seek, event.detail?.metric); else overlays.openStats(seek, { metric: event.detail?.metric }); });
   $('tc-bookmark').onclick = () => addBookmark(S.t - 30000);
   $('tc-bm-prev').onclick = () => { ACTIONS.bookmarkPrev(); renderHud(); };
   $('tc-bm-next').onclick = () => { ACTIONS.bookmarkNext(); renderHud(); };
@@ -2268,8 +2324,14 @@ function wire() {
   $('btn-res').onclick = () => { showResLeft = !showResLeft; renderHud(); };
   $('btn-settings').onclick = openSettings;
   $('btn-panels').onclick = () => layout.togglePanelsMenu();
+  layout.setContext({
+    onChange: renderHud, toast, seek, actions: ACTIONS,
+    openStats: (opts) => overlays.openStats(seek, opts),
+  });
   layout.installPanelsMenu(renderHud);
   layout.installPanelTools(renderHud, toast);
+  layout.installAutoReveal();
+  window.addEventListener('hashchange', () => { layout.readLink(); renderHud(); });
   installPanelResizing(renderHud);
   $('btn-help').onclick = ACTIONS.openHelp;
   $('highlight-bar').onclick = (e) => {
@@ -2301,8 +2363,20 @@ function wire() {
   document.addEventListener('vantage:autocast', (e) => autocastEntity(e.detail && e.detail.unitId));
   document.addEventListener('vantage:open-html-server', openHtmlServer);
   document.addEventListener('vantage:start-game', () => startGame());
+  document.addEventListener('vantage:hud-preset', (e) => { layout.applyPreset(e.detail.preset); renderHud(); });
   panels.renderEventFilters(() => renderHud());
   document.addEventListener('vantage:language', () => panels.renderEventFilters(() => renderHud()));
+}
+
+async function applyHudLink() {
+  const { layout: name } = layout.readLink();
+  if (!name) return;
+  const { layoutPatch } = await import('./hud-model.js');
+  const local = (settings.hud.layouts || {})[name];
+  const source = local || await api(`/api/profile/${encodeURIComponent(name)}`).catch(() => null);
+  const patch = layoutPatch(source, settings);
+  if (patch) { Object.assign(settings, patch); layout.readLink(); }
+  else console.warn('Vantage: no saved layout named', name);
 }
 
 async function boot() {
@@ -2334,6 +2408,8 @@ async function boot() {
   await probing;
   S.version = (serverConfig && serverConfig.version) || '';
   applyServerConfig(serverConfig);
+  // A link's HUD (#hud=caster, ?hud=minimal) and a saved layout by name (#layout=Cast) apply to this visit.
+  await applyHudLink();
   $('viewer-build').textContent = `Vantage ${S.version} · ${serverConfig?.viewer_build || 'unknown build'}`;
   // The replay-conversion page exists only when a server plugin provides it.
   document.getElementById('btn-native').hidden = !(serverConfig && serverConfig.native_page);
@@ -2357,6 +2433,8 @@ async function boot() {
   hudTimer = setInterval(() => { if (!document.hidden) renderHud(); }, 250);
   // The panels too: a caster column has a fixed height, so only they change size.
   for (const id of ['scoreboard', 'timebar', 'leftcol', 'overview', 'techs', 'production']) if ($(id)) leftColObserver.observe($(id));
+  // The Pulse strip is created when a preset first shows it.
+  new MutationObserver(() => { const p = $('pulse'); if (p && !p._observed) { p._observed = true; leftColObserver.observe(p); layoutLeftColumn(); } }).observe($('hud'), { childList: true });
   window.addEventListener('resize', layoutLeftColumn);
   renderHud(); layoutLeftColumn(); placeDashboard();
   // Starting font loads after the real HUD is present covers skin-provided fonts too.

@@ -9,6 +9,7 @@ import {
   refreshSeries,
 } from './state.js';
 import * as HK from './hotkeys.js';
+import { seriesMetricLabel } from './metrics.js';
 import { DASH_HISTORY } from './player-review.js';
 import { investigationHtml, wireInvestigation } from './review-workspace.js';
 import { t, LANGS, language, setLanguage, keyLabel } from './i18n.js';
@@ -16,6 +17,7 @@ import * as PN from './panels.js';
 import { patchHtml } from './dom.js';
 import { bonusIncomeHtml } from './resource-review.js';
 import { tcIdleTooltip } from './tc-idle.js';
+import { startMove, nudgePanel, setPanelRect, savedRect, resetPanel } from './panel-resize.js';
 
 const $ = (id) => document.getElementById(id);
 // app.js publishes its actions (pause, seek, speed, …) on window.vantage.
@@ -34,6 +36,8 @@ export function isOpen(id) { return openId === id; }
 export function closeAll() {
   document.querySelectorAll('.overlay').forEach((o) => o.classList.add('hidden'));
   openId = null;
+  document.body.classList.remove('stats-docked');
+  document.documentElement.style.removeProperty('--dock-w');
 }
 function open(id) {
   closeAll();
@@ -102,7 +106,7 @@ const TABS = {
 };
 export const SERIES_LABEL = {
   bonus_total: 'Bonus resources', bonus_food: 'Bonus food', bonus_wood: 'Bonus wood', bonus_gold: 'Bonus gold', bonus_stone: 'Bonus stone',
-  score: 'Score', col_total: 'Resources collected', army_value: 'Military value', military: 'Military units',
+  score: 'Score', col_total: 'Collected', army_value: 'Army value', military: 'Military',
   kills: 'Kills', deaths: 'Losses', razings: 'Buildings razed', villagers: 'Villagers', col_food: 'Food collected',
   col_wood: 'Wood collected', col_gold: 'Gold collected', col_stone: 'Stone collected', idle: 'Idle villagers',
   fishing_ships: 'Fishing ships', trade_units: 'Trade units', eco_units: 'Economy units', techs: 'Techs researched',
@@ -117,7 +121,8 @@ export const SERIES_LABEL = {
   mil_pop: 'Military population', eco_pop: 'Economy population',
   tc_idle: 'Idle TC (growth)', housed: 'Housed time',
 };
-export function seriesLabel(key) { return t(SERIES_LABEL[key] || key); }
+// Registered metrics (metrics.js) name their own series; the rest are named here.
+export function seriesLabel(key) { return t(seriesMetricLabel(key) || SERIES_LABEL[key] || key); }
 
 const chartState = {
   tab: 'score', key: 'score', type: 'line', transform: 'actual', hidden: new Set(), techMarks: true, ecoTechs: false, milTechs: false,
@@ -460,6 +465,125 @@ function statsTick() {
   refreshAggregates(false);
 }
 
+// -- the Statistics window ----------------------------------------------------------------------
+//
+// Statistics is a window, not a page: it does not dim the map, moves by its
+// title bar, resizes from every edge and corner (panel-resize.js), docks to the
+// right edge, and remembers its rectangle. On a phone it stays a full page.
+
+const STATS = 'overlay-stats';
+const statsWindowed = () => !document.body.classList.contains('hud-phone') && window.innerWidth > 700;
+const statsState = () => settings.statsWindow || {};
+
+function statsRect(dock) {
+  const W = window.innerWidth, H = window.innerHeight, saved = savedRect(STATS);
+  if (dock) {
+    // Under the top bar (Scoreboard or Pulse strip), down to the bottom edge; its width is kept.
+    const top = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sb-bottom')) || 8) + 6;
+    const width = Math.max(420, Math.min(W - 16, statsState().dockWidth || Math.round(W * 0.4)));
+    return { left: W - width - 8, top, width, height: H - top - 8 };
+  }
+  if (saved) return saved;
+  const width = Math.min(W - 16, Math.max(640, Math.round(W * 0.62))), height = Math.min(H - 16, Math.max(420, Math.round(H * 0.72)));
+  return { left: Math.round((W - width) / 2), top: Math.round((H - height) / 2), width, height };
+}
+
+// While the window is open and docked, the right-hand panels sit beside it (hud-custom.css).
+function syncDock() {
+  const el = $(STATS), on = isOpen(STATS) && statsWindowed() && !!statsState().docked;
+  document.body.classList.toggle('stats-docked', on);
+  if (on) document.documentElement.style.setProperty('--dock-w', `${Math.round(statsRect(true).width + 8)}px`);
+  else document.documentElement.style.removeProperty('--dock-w');
+  if (el) el.classList.toggle('docked', on);
+}
+
+function placeStatsWindow() {
+  const el = $(STATS);
+  el.classList.toggle('stats-window', statsWindowed());
+  el.classList.toggle('docked', statsWindowed() && !!statsState().docked);
+  syncDock();
+  if (!statsWindowed()) { if (el.classList.contains('hud-custom-size')) resetPanel(STATS); return; }
+  setPanelRect(STATS, { ...statsRect(!!statsState().docked), moved: true, auto: false }, { save: false });
+}
+
+/** Open Statistics (opts.dock: docked to the right edge; opts.metric: on that series). */
+export function openStats(seek, { dock = null, metric = null } = {}) {
+  if (dock != null) settings.statsWindow = { ...statsState(), docked: !!dock };
+  if (!isOpen(STATS)) open(STATS);
+  return renderStats(seek, metric);
+}
+
+/** Dock the Statistics window to the right edge, or float it again (opening it if needed). */
+export function toggleStatsDock(seek) {
+  const el = $(STATS), docking = !(isOpen(STATS) && statsState().docked);
+  if (isOpen(STATS) && docking) settings.statsWindow = { ...statsState(), floating: savedRect(STATS) };
+  settings.statsWindow = { ...statsState(), docked: docking };
+  if (!docking && statsState().floating) setPanelRect(STATS, { ...statsState().floating, moved: true, auto: false }, { save: false });
+  saveSettings();
+  if (!isOpen(STATS)) { open(STATS); return renderStats(seek); }
+  placeStatsWindow(); wireStatsBar(el); drawStatsChart();
+  return null;
+}
+
+function statsBar() {
+  if (!statsWindowed()) return `${closeBtn()}<h2>${t('Statistics')}</h2>`;
+  const docked = !!statsState().docked;
+  return `<div class="win-bar" data-win-bar>
+    <h2 id="stats-title" class="win-grip" tabindex="0" role="button" aria-roledescription="${t('window title bar')}" aria-label="${t('Statistics window: drag to move, arrow keys nudge it')}" ${tip(t('Statistics'), t('Drag to move · arrow keys nudge · edges and corners resize'))}>⠿ ${t('Statistics')}</h2>
+    <span class="win-buttons">
+      <button type="button" data-win="dock" aria-pressed="${docked}" ${tip(t('Dock right'), t('Fill the right edge beside the map (Ctrl+Alt+D); again: float'))}>${docked ? t('Float') : t('Dock right')}</button>
+      <button type="button" data-win="reset" ${tip(t('Reset size'), t('Back to the default size, centred'))}>${t('Reset size')}</button>
+      ${closeBtn()}
+    </span></div>`;
+}
+
+let statsResize = null;
+function wireStatsBar(el) {
+  el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'false');
+  el.setAttribute('aria-label', t('Statistics'));
+  const bar = el.querySelector('[data-win-bar]');
+  if (!bar || bar._wired) return;
+  bar._wired = true;
+  const dock = bar.querySelector('[data-win="dock"]');
+  if (dock) { dock.textContent = statsState().docked ? t('Float') : t('Dock right'); dock.setAttribute('aria-pressed', String(!!statsState().docked)); }
+  const undock = () => { if (statsState().docked) { settings.statsWindow = { ...statsState(), docked: false }; el.classList.remove('docked'); if (dock) { dock.textContent = t('Dock right'); dock.setAttribute('aria-pressed', 'false'); } } };
+  bar.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    undock();
+    startMove(el, e);
+  });
+  bar.addEventListener('keydown', (e) => {
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!d || !e.target.closest('.win-grip')) return;
+    e.preventDefault(); e.stopPropagation();
+    undock();
+    nudgePanel(el, d[0] * (e.shiftKey ? 1 : 10), d[1] * (e.shiftKey ? 1 : 10));
+  });
+  bar.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-win]');
+    if (!b) return;
+    if (b.dataset.win === 'dock') { bar._wired = false; toggleStatsDock(statsSeek); }
+    else { settings.statsWindow = { ...statsState(), docked: false, floating: null }; resetPanel(STATS); placeStatsWindow(); saveSettings(); bar._wired = false; wireStatsBar(el); drawStatsChart(); }
+  });
+  if (!statsResize) {
+    // The chart follows the window's size (a resize observer, not a per-frame redraw).
+    let queued = false;
+    statsResize = new ResizeObserver(() => {
+      if (queued || !isOpen(STATS)) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        if (!isOpen(STATS) || !$('chart')) return;
+        // A docked window resized by its edge keeps that width.
+        if (statsState().docked) { settings.statsWindow = { ...statsState(), dockWidth: Math.round(el.getBoundingClientRect().width) }; syncDock(); }
+        drawStatsChart();
+      });
+    });
+    statsResize.observe(el);
+    window.addEventListener('resize', () => { if (isOpen(STATS)) placeStatsWindow(); });
+  }
+}
+
 export async function renderStats(seek, metric = null) {
   const mapped = DASH_HISTORY[metric] || metric;
   const tab = mapped && Object.keys(TABS).find((key) => TABS[key].series.includes(mapped));
@@ -467,10 +591,11 @@ export async function renderStats(seek, metric = null) {
   if (seek) statsSeek = seek;
   const el = $('overlay-stats'), version = ++statsRenderVersion, generation = S.session?.generation;
   el.setAttribute('aria-busy', 'true');
+  placeStatsWindow();
   if (!el.querySelector('#chart') || el._statsGeneration !== generation) {
-    el.innerHTML = `${closeBtn()}<div role="status" class="review-loading" aria-label="${t('Loading')}">◌</div>`;
+    el.innerHTML = `${statsBar()}<div role="status" class="review-loading" aria-label="${t('Loading')}">◌</div>`;
   }
-  wireClose(el);
+  wireClose(el); wireStatsBar(el);
   const needSeries = !S.series || S.seriesAt < S.end - 5000 || !S.complete;
   const [series, summary] = await Promise.all([
     needSeries ? refreshSeries().catch(() => S.series) : Promise.resolve(S.series),
@@ -487,9 +612,9 @@ export async function renderStats(seek, metric = null) {
   // interval, two players) takes over the chart only when it was asked for: a
   // value clicked on the dashboard, or an interval already chosen.
   const investigating = !!metric || !!S.reviewRange;
-  el.innerHTML = `${closeBtn()}<h2>${t('Statistics')}</h2>
+  el.innerHTML = `${statsBar()}
     <div class="tabs">${Object.entries(TABS).map(([k, tab]) => `<button data-tab="${k}" class="${k === chartState.tab ? 'on' : ''}">${t(tab.title)}</button>`).join('')}</div>
-    ${settings.showStatsTimeControls ? timeStrip() : ''}
+    ${settings.showStatsTimeControls && !statsWindowed() ? timeStrip() : ''}
     <div class="chart-controls">
       <select id="ch-key" ${tip(t('Chart'), t('The value plotted for every player'))}>${keys.map((k) => `<option value="${k}" ${k === chartState.key ? 'selected' : ''}>${esc(seriesLabel(k))}</option>`).join('')}</select>
       <details class="review-chart-options"><summary>${t('Chart options')}</summary><div>
@@ -516,7 +641,7 @@ export async function renderStats(seek, metric = null) {
     ${chartState.tab === 'bonus' ? '' : `<details class="review-details review-investigate" ${investigating ? 'open' : ''}><summary>${t('Investigate')}</summary>${investigationHtml(chartState.key)}</details>
     <details class="review-details" open><summary>${t('Totals')}</summary><div id="stats-agg">${aggregates(chartState.tab)}</div></details>`}`;
   el.setAttribute('aria-busy', 'false');
-  wireClose(el);
+  wireClose(el); wireStatsBar(el);
   const investigateRange = (from, to, pids) => {
     chartState.from = from; chartState.span = Math.max(1, to - from);
     chartState.hidden = new Set(players().map((p) => p.id).filter((pid) => !pids.includes(pid)));
@@ -1489,7 +1614,8 @@ function interfaceTab() {
     ${chk('fullStaticTechs', 'Full static techs', 'Show every tech line in the static techs panel, not just the key ones')}
     ${chk('showProduction', 'Production & composition')}${chk('showDashboard', 'Dashboard')}
     ${chk('useMiniDashboard', 'Mini dashboard', 'A compact dashboard with fewer columns')}
-    ${chk('showEvents', 'Event log')}${chk('useMinimalUi', 'Minimal UI')}
+    ${chk('showEvents', 'Event log')}
+<div class="form-row">${lab('Minimal UI', 'The Minimal HUD preset (F6): the Pulse strip and the minimap. Off: the Full HUD. More presets in Customize (Alt+V).')}<input type="checkbox" id="set-minimal-ui" ${(settings.hud || {}).preset === 'minimal' ? 'checked' : ''}></div>
     ${chk('useCommunityGameSkin', 'Alternative FFA layout', 'The community scoreboard layout for free-for-all games')}
     ${chk('showUnitPanelWhenNothingSelected', 'Show map info when nothing is selected')}${chk('keepDeadInSelection', 'Keep dead units in selection')}
     ${chk('autocastHighlights', 'Autocast highlights', 'Let autocast replay the most exciting moments')}
@@ -1519,7 +1645,7 @@ function interfaceTab() {
     ${chk('clipCursorInGame', 'Lock the mouse to the window', 'Keeps edge scrolling working on multi-monitor setups (Alt+Shift+C)')}
     <h3>${t('Playback')}</h3>
     ${chk('disableScrubbing', 'Disable scrubbing', 'The time bar no longer seeks when clicked')}
-    ${chk('showStatsTimeControls', 'Time controls on the statistics screen')}
+    ${chk('showStatsTimeControls', 'Time controls on the statistics screen', 'Only where Statistics fills the screen (a phone). The Statistics window sits beside the map and uses the main time controls.')}
     ${sel('endgameAutoClose', 'Close the end-of-game screen', [['0', 'Manually'], ['10', 'After 10 s'], ['30', 'After 30 s'], ['60', 'After 1 min']])}
     ${chk('autoMinimizeGame', 'Minimise Age II automatically', 'Minimise the game while Vantage has focus')}
     ${sel('healthBars', 'Health bars', [['damaged', 'Damaged only'], ['always', 'Always'], ['never', 'Never']], 'As the game\'s own option')}
@@ -2310,6 +2436,11 @@ export function renderSettings(apply) {
       saveSettings(); doApply();
       if (next === 'rerender') rerender();
     });
+  });
+  // "Minimal UI" is the Minimal HUD preset (it used to write a flag nothing read).
+  const minimalUi = $('set-minimal-ui');
+  if (minimalUi) minimalUi.addEventListener('change', () => {
+    document.dispatchEvent(new CustomEvent('vantage:hud-preset', { detail: { preset: minimalUi.checked ? 'minimal' : 'full' } }));
   });
   const ls = $('lang-select');
   if (ls) ls.addEventListener('change', async (e) => {

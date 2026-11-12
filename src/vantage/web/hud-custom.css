@@ -1,0 +1,206 @@
+/* The customizable HUD: the Pulse strip, the preset layouts, the Statistics
+   window, the Customize drawer, the newer panels and the layout editor.
+   Colours come from the skin variables (--text, --muted, --panel, --accent),
+   so every skin, High contrast included, applies here too. */
+
+:root { --warn: #e0a030; --hud-fade: 120ms; }
+
+/* A toggled panel fades in and never moves its neighbours (they are placed independently). */
+.panel-fade { animation: hud-fade-in var(--hud-fade) ease-out; }
+@keyframes hud-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.hud-custom-size { opacity: var(--panel-opacity, 1); }
+@media (prefers-reduced-motion: reduce) { .panel-fade { animation: none; } }
+
+/* Visible keyboard focus on every HUD control. */
+#hud button:focus-visible, #panels-menu :focus-visible, #hud-hint :focus-visible, #layout-editor :focus-visible,
+#phone-tabs :focus-visible, #phone-sheet :focus-visible, .win-bar :focus-visible, #story [tabindex]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
+/* -- Pulse strip -------------------------------------------------------------------------- */
+#pulse { top: 6px; left: 8px; right: 8px; padding: 0; overflow: hidden; --pv: clamp(16px, 1.05vw, 22px); --pl: clamp(12px, .75vw, 15px); }
+body:not([data-hud-layout="caster"]) #pulse { left: 50%; right: auto; transform: translateX(-50%); max-width: calc(100vw - 16px); }
+/* Under the Scoreboard when both show. */
+#pulse { top: var(--pulse-top, 6px); }
+.pulse { display: flex; align-items: stretch; font-variant-numeric: tabular-nums; }
+.pulse.two > .pl-side { flex: 1 1 0; min-width: 0; }
+.pulse .pl-side { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 14px; padding: 5px 12px; }
+.pulse .pl-side.right { flex-direction: row-reverse; }
+.pulse .pl-side.dead { opacity: .5; }
+.pulse .pl-id { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.pulse .pl-side.right .pl-id { flex-direction: row-reverse; }
+.pulse .pl-color { width: 5px; align-self: stretch; min-height: 24px; border-radius: 2px; flex: none; }
+.pulse .pl-name { font: 700 var(--pv)/1.15 var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16ch; }
+.pulse .pl-age { display: inline-flex; gap: 3px; }
+.pulse .pl-age .ov-shield { display: inline-flex; }
+.pulse .pl-age .ov-age { width: 26px; height: 26px; cursor: default; }
+.pulse .pl-age img { width: 26px; height: 26px; object-fit: contain; display: block; }
+.pulse .pl-stats, .pulse .pl-bank { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 2px 14px; }
+.pulse .pl-side.right .pl-stats, .pulse .pl-side.right .pl-bank { flex-direction: row-reverse; }
+.pulse .pm { display: inline-flex; align-items: baseline; gap: 5px; padding: 1px 2px; border: 0; background: none; border-radius: 3px;
+  color: var(--text); font: inherit; white-space: nowrap; cursor: pointer; }
+.pulse .pm:hover { background: rgba(255,255,255,.08); }
+.pulse .pm-l { color: var(--muted); font-size: var(--pl); font-weight: 600; letter-spacing: .02em; }
+.pulse .pm-v { font: 700 var(--pv)/1.15 var(--mono); }
+.pulse .pm-v small { font-size: var(--pl); font-weight: 600; color: var(--muted); }
+.pulse .pm em { font: 700 var(--pl)/1 var(--mono); font-style: normal; }
+.pulse .pm.warn .pm-v, .pulse .pm.warn .pm-l { color: var(--warn); }
+.pulse .pm.housed .pm-v { color: var(--bad); animation: pulse-housed 1s steps(2, jump-none) infinite; }
+@keyframes pulse-housed { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .pulse .pm.housed .pm-v { animation: none; text-decoration: underline; } }
+.pulse .pm.res img { width: calc(var(--pv) * .95); height: calc(var(--pv) * .95); object-fit: contain; align-self: center; }
+.pulse .pm-rate { font: 600 var(--pl)/1 var(--mono); color: var(--muted); }
+.pulse .pl-center { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: none; min-width: 108px;
+  padding: 3px 14px; border: 0; border-radius: 0; background: rgba(0,0,0,.35); color: var(--text); cursor: pointer; }
+.pulse .pl-center:hover { background: rgba(255,255,255,.08); }
+.pulse .pl-clock { font: 700 calc(var(--pv) * 1.1)/1.15 var(--mono); }
+.pulse .pl-sub, .pulse .pl-series { color: var(--muted); font-size: var(--pl); white-space: nowrap; }
+.pulse .pl-series { color: var(--accent); }
+/* A free-for-all: the clock, then a row per player. */
+#pulse:has(.pulse.multi) { right: auto; max-width: calc(100vw - 16px); }
+.pulse.multi { flex-direction: column; }
+.pulse.multi .pl-center { flex-direction: row; gap: 10px; justify-content: flex-start; }
+.pulse.multi .pl-side { padding: 2px 12px; border-top: 1px solid var(--line); flex-wrap: nowrap; }
+.pulse.multi .pl-name { width: 14ch; }
+
+/* -- presets: where panels sit when the Pulse strip leads ---------------------------------------- */
+/* Time controls that appear by themselves (Minimal, Caster): near the bottom edge, paused, or focused. */
+#hud .panel-auto { opacity: 0; pointer-events: none; transition: opacity var(--hud-fade) ease-out; }
+body.hud-reveal-bottom #hud .panel-auto, body.hud-paused #hud .panel-auto, #hud .panel-auto:focus-within, #hud .panel-auto:hover { opacity: 1; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { #hud .panel-auto { transition: none; } }
+/* Caster: the minimap's button row returns on hover or focus. */
+body[data-hud-preset="caster"] #minimap-wrap:not(:hover):not(:focus-within) #minimap-tools { visibility: hidden; }
+
+/* -- hover toolbar and resize handles -------------------------------------------------------------- */
+#panel-tools .pt-name { padding: 0 6px 0 5px; font-size: 11px; line-height: 18px; color: var(--muted); white-space: nowrap; cursor: default; }
+#panel-resize-handles [data-corner=n], #panel-resize-handles [data-corner=s] { cursor: ns-resize; }
+#panel-resize-handles [data-corner=e], #panel-resize-handles [data-corner=w] { cursor: ew-resize; }
+#panel-resize-handles [data-corner=n]::after, #panel-resize-handles [data-corner=s]::after,
+#panel-resize-handles [data-corner=e]::after, #panel-resize-handles [data-corner=w]::after { display: none; }
+#panel-resize-handles [data-corner=n]:hover, #panel-resize-handles [data-corner=s]:hover,
+#panel-resize-handles [data-corner=e]:hover, #panel-resize-handles [data-corner=w]:hover,
+#panel-resize-handles [data-corner=n]:focus-visible, #panel-resize-handles [data-corner=s]:focus-visible,
+#panel-resize-handles [data-corner=e]:focus-visible, #panel-resize-handles [data-corner=w]:focus-visible { background: var(--accent); opacity: .7; border-radius: 3px; }
+/* The bottom-right corner is the visible grip. */
+#panel-resize-handles [data-corner=se] { opacity: .95; }
+#panel-resize-handles [data-corner=se]::after { width: 9px; height: 9px; right: 3px; bottom: 3px; border-width: 0 3px 3px 0; }
+
+/* -- Statistics window --------------------------------------------------------------------------- */
+.overlay.stats-window { inset: auto; box-shadow: 0 10px 40px rgba(0,0,0,.6); padding: 0 16px 14px; z-index: 12; display: flex; flex-direction: column; }
+.overlay.stats-window > * { flex: none; }
+.overlay.stats-window .win-bar { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 0 -16px 10px; padding: 8px 12px 8px 16px; background: var(--panel-solid); border-bottom: 1px solid var(--line); cursor: grab; touch-action: none; }
+.overlay.stats-window .win-grip { margin: 0; font-size: 16px; cursor: grab; border-radius: 4px; padding: 0 4px; }
+.overlay.stats-window .win-buttons { display: flex; gap: 6px; align-items: center; cursor: default; }
+.overlay.stats-window .win-buttons .close { position: static; float: none; margin: 0; }
+.overlay.stats-window .chart-wrap { flex: 1 1 auto; min-height: 180px; display: flex; }
+.overlay.stats-window .chart-wrap canvas { height: auto; min-height: 180px; flex: 1 1 auto; }
+.overlay.stats-window.docked { border-radius: 8px 0 0 8px; }
+/* The window is not a page: the HUD beside it keeps its tools and handles. */
+body:has(.overlay.stats-window:not(.hidden)):not(:has(.overlay:not(.hidden):not(.stats-window))) #panel-resize-handles.for-hud { display: block; }
+body:has(.overlay.stats-window:not(.hidden)):not(:has(.overlay:not(.hidden):not(.stats-window))) #panel-tools:not(.hidden) { display: flex; }
+
+/* -- first-run hint -------------------------------------------------------------------------------- */
+#hud-hint { position: fixed; left: 50%; top: calc(var(--sb-bottom, 58px) + 12px); transform: translateX(-50%); z-index: 27; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center;
+  max-width: min(880px, calc(100vw - 24px)); padding: 8px 10px 8px 14px; font-size: 13px; background: var(--panel-solid); border: 1px solid var(--accent); }
+#hud-hint b { color: var(--accent); }
+#hud-hint .hint-keys { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); }
+#hud-hint .hint-phone { display: none; color: var(--muted); }
+#hud-hint kbd, #panels-menu kbd, #layout-editor kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); border-radius: 3px; background: rgba(255,255,255,.06); color: var(--text); white-space: nowrap; }
+body.hud-phone #hud-hint { top: auto; bottom: 132px; }
+body.hud-phone #hud-hint .hint-keys { display: none; }
+body.hud-phone #hud-hint .hint-phone { display: inline; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The Statistics window docked right: the right-hand panels move in beside it. */
+body.stats-docked[data-hud-layout="caster"] :is(#minimap-wrap, #timebar, #events, #scoreboard, #pulse, #ticker, #resleft):not(.hud-custom-size) { right: calc(8px + var(--dock-w, 0px)); }
+
+/* -- side-against-side tables (Eco card, Review cards, phone Bank sheet) ----------------------- */
+.ctable { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.ctable th, .ctable td { padding: 3px 8px; text-align: right; white-space: nowrap; font-size: var(--ct-size, 14px); }
+.ctable thead th { font-weight: 700; font-size: 13px; }
+.ctable thead th i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+.ctable tbody th { text-align: left; font-weight: 500; color: var(--muted); }
+.ctable td { font: 700 var(--ct-size, 14px) var(--mono); }
+.ctable td.best { color: var(--good); }
+.ctable td.worst { color: var(--warn); }
+.ctable tbody tr + tr > * { border-top: 1px solid var(--line); }
+.ctable .ct-open { border: 0; background: none; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+
+/* -- Focus slot ------------------------------------------------------------------------------------ */
+#focus { left: 8px; bottom: 8px; min-width: 300px; max-width: min(620px, 44vw); padding: 5px 8px 7px; }
+#focus .fs-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#focus .fs-title { font-weight: 700; font-size: 14px; color: var(--accent); white-space: nowrap; }
+#focus .fs-tabs { display: flex; gap: 3px; }
+#focus .fs-tabs button { padding: 1px 8px; font-size: 12px; }
+#focus .fs-tabs button[aria-pressed="true"] { background: rgba(217,180,90,.16); color: var(--accent); border-color: var(--accent); }
+#focus .fs-body { margin-top: 5px; max-height: 38vh; overflow: auto; }
+#focus.empty { opacity: .35; min-width: 0; }
+#focus.empty:hover, #focus.empty:focus-within { opacity: 1; }
+body.overlay-mode #focus.empty { display: none; }
+#focus .fs-prod .prod-row:last-child, #focus .tech-row:last-child { border-bottom: 0; }
+#focus .fs-empty { margin: 6px 2px; font-size: 13px; }
+#focus .fs-fight-when { margin-bottom: 4px; font: 600 12px var(--mono); }
+#focus .fs-fight-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-top: 1px solid var(--line); font-size: 14px; }
+#focus .fs-fight-row > i { width: 5px; align-self: stretch; border-radius: 2px; }
+#focus .fs-who { font-weight: 700; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#focus .fs-lost { color: var(--muted); white-space: nowrap; }
+#focus .fs-lost b { color: var(--text); font-family: var(--mono); }
+#focus .fs-units { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.prod-who { width: 4px; align-self: stretch; min-height: 22px; border-radius: 2px; flex: none; }
+
+/* -- Event ticker ---------------------------------------------------------------------------------- */
+#ticker { right: 8px; top: calc(var(--sb-bottom, 58px) + 6px); width: min(460px, 36vw); padding: 4px 8px; }
+#ticker.empty { display: none; }
+#ticker ol { list-style: none; margin: 0; padding: 0; }
+#ticker li { display: flex; align-items: baseline; gap: 7px; padding: 2px 0; font-size: 15px; line-height: 1.3; transition: opacity .4s linear; }
+#ticker li button { border: 0; background: none; padding: 0; color: var(--muted); font: 600 13px var(--mono); cursor: pointer; }
+#ticker li > i { width: 4px; height: 14px; border-radius: 2px; flex: none; align-self: center; }
+#ticker li img { height: 16px; vertical-align: -3px; }
+@media (prefers-reduced-motion: reduce) { #ticker li { transition: none; } }
+
+/* -- Selection chip --------------------------------------------------------------------------------- */
+#selchip { right: var(--mm-gap, 326px); bottom: 8px; padding: 0; max-width: min(460px, 40vw); }
+#selchip.empty { display: none; }
+#selchip button { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border: 0; background: none; font-size: 14px; width: 100%; }
+#selchip img { width: 26px; height: 26px; object-fit: contain; }
+#selchip b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#selchip .sc-owner { font-weight: 600; white-space: nowrap; }
+#selchip .sc-hp { width: 54px; height: 6px; background: rgba(255,255,255,.14); border-radius: 3px; overflow: hidden; flex: none; }
+#selchip .sc-hp i { display: block; height: 100%; background: var(--good); }
+#selchip .sc-idle { color: var(--warn); font-weight: 600; }
+#selchip .sc-more { color: var(--accent); white-space: nowrap; margin-left: auto; }
+
+/* -- Customize drawer (customize.js; replaces the old Panels menu) ------------------------------- */
+#panels-menu { top: 8px; right: 8px; bottom: 8px; left: auto; width: min(380px, calc(100vw - 16px)); min-width: 0; padding: 10px 14px 12px; gap: 0;
+  overflow: auto; z-index: 26; border: 1px solid var(--line); font-size: 13px; display: block; }
+#panels-menu.hidden { display: none; }
+#panels-menu .cz-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: -10px; margin: -10px -14px 6px; padding: 10px 14px 8px;
+  background: var(--panel-solid); border-bottom: 1px solid var(--line); z-index: 2; }
+#panels-menu h2 { margin: 0; font-size: 17px; color: var(--accent); }
+#panels-menu h3 { margin: 12px 0 6px; font-size: 13px; font-weight: 700; display: inline-block; }
+#panels-menu details > summary { cursor: pointer; list-style-position: inside; }
+#panels-menu details > summary h3 { margin: 10px 0 6px; }
+#panels-menu .hint { color: var(--muted); font-size: 12px; margin: 4px 0; font-weight: 400; }
+#panels-menu .cz-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 5px; }
+#panels-menu .cz-presets button { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; min-height: 34px; font-weight: 600; }
+#panels-menu .cz-presets button[aria-checked="true"] { background: rgba(217,180,90,.16); color: var(--accent); border-color: var(--accent); }
+#panels-menu .cz-dot { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--accent-2); vertical-align: middle; }
+#panels-menu .cz-row { display: flex; align-items: center; gap: 8px; padding: 2px 6px; border-radius: 3px; min-height: 26px; }
+#panels-menu .cz-row:hover { background: rgba(255,255,255,.07); }
+#panels-menu label { display: flex; gap: 8px; align-items: center; cursor: pointer; flex: 1; min-width: 0; }
+#panels-menu .cz-row button { padding: 0 6px; font-size: 11px; }
+#panels-menu .cz-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
+#panels-menu .cz-grid label { padding: 2px 0; }
+#panels-menu .cz-line { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+#panels-menu .cz-line input:not([type]), #panels-menu .cz-line select { flex: 1 1 120px; min-width: 0; }
+#panels-menu .cz-line button[aria-pressed="true"] { background: rgba(217,180,90,.16); color: var(--accent); border-color: var(--accent); }
+#panels-menu .cz-check { margin: 4px 0; }
+#panels-menu .cz-primary { border-color: var(--accent); color: var(--accent); }
+#panels-menu .cz-more > summary { color: var(--muted); padding: 4px 6px; }
+#panels-menu .cz-checks { margin: 4px 0; padding-left: 18px; color: var(--warn); }
+#panels-menu .cz-checks b { color: var(--text); }
+#panels-menu .cz-ok { color: var(--good); }
+#panels-menu .cz-foot { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+#panels-menu .filebtn { flex: none; border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; background: rgba(255,255,255,.06); }

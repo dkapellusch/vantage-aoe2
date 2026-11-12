@@ -21,8 +21,8 @@ export const KEYMAP = {
   unFollowSelection: ['Ctrl+F', 'Stop following'],
   focusSelection: ['Space', 'Centre on selection'],
   showAchievements: ['Ctrl+Alt+S', 'Statistics'],
-  cycleDashboardForward: ['Alt+C', 'Next dashboard page'],
-  cycleDashboardBackward: ['Alt+X', 'Previous dashboard page'],
+  cycleDashboardForward: ['Alt+C', 'Next dashboard page (the Focus slot card when the dashboard is hidden)'],
+  cycleDashboardBackward: ['Alt+X', 'Previous dashboard page (or Focus slot card)'],
   swapScoreboardTeamSides: ['Alt+S', 'Flip team sides'],
   toggleStaticTechnologies: ['Alt+T', 'Static techs'],
   toggleSlideoutStaticTechs: ['Alt+P', 'Slide-out: all technologies'],
@@ -30,7 +30,7 @@ export const KEYMAP = {
   toggleProduction: ['Alt+Shift+P', 'Production & composition'],
   toggleResourcesLeft: ['Alt+R', 'Resources left'],
   togglePlayerResources: ['Ctrl+Alt+R', 'Team board: switch Teams / Players'],
-  toggleOverview: ['Alt+Shift+R', 'Show/hide team overview'],
+  toggleOverview: ['Alt+Shift+R', 'Show/hide Team board'],
   cycleFogOfWar: ['Alt+F', 'Cycle fog mode (off / spy / standard)'],
   toggleFogOfWar: ['Alt+Shift+F', 'Fog on/off'],
   toggleCombinedFogOfWar: ['Alt+D', 'Combined team fog'],
@@ -102,8 +102,23 @@ export const KEYMAP = {
   toggleAutocast: ['Alt+A', 'Autocast (automatic camera director)'],
   showHighlights: ['Alt+Shift+A', 'Autocast: show all heroes'],
   showTutorial: ['F1', 'Tutorial'],
-  togglePanelsMenu: ['Alt+V', 'Panels: show, hide and collapse HUD panels'],
-  arrangePanels: ['Alt+L', 'Arrange panels: drag any panel to move it'],
+  togglePanelsMenu: ['Alt+V', 'Customize: presets, panels and metrics'],
+  arrangePanels: ['Alt+L', 'Edit layout: move, resize and place panels'],
+  // HUD presets. F6-F9 are free in the browser and the game; Full sits on
+  // Shift+F6 (F10 shows the FPS). The peek key works while it is held.
+  hudPresetMinimal: ['F6', 'HUD preset: Minimal'],
+  hudPresetCaster: ['F7', 'HUD preset: Caster'],
+  hudPresetReview: ['F8', 'HUD preset: Review'],
+  hudPresetAnalyst: ['F9', 'HUD preset: Analyst'],
+  hudPresetFull: ['Shift+F6', 'HUD preset: Full'],
+  peekFullHud: ['`', 'Hold: peek at the Full HUD'],
+  toggleDashboard: ['Alt+B', 'Show/hide Dashboard'],
+  toggleEvents: ['Alt+E', 'Show/hide Event log'],
+  toggleSelectionPanel: ['Alt+U', 'Show/hide Selection panel'],
+  toggleScoreboard: ['Alt+G', 'Show/hide Scoreboard (the Pulse strip in presets that use it)'],
+  toggleFocusSlot: ['Alt+K', 'Show/hide Focus slot'],
+  toggleStory: ['Alt+Y', 'Show/hide Match story timeline'],
+  toggleStatsDock: ['Ctrl+Alt+D', 'Statistics window: dock right / float'],
   toggleCrossThreadProfiling: ['Ctrl+Alt+Shift+P', 'Performance view (frame times, data fetches, memory)'],
 };
 
@@ -153,6 +168,7 @@ function eventCombo(e) {
   if (e.code === 'Minus') key = '-';
   if (e.code === 'Comma') key = ',';
   if (e.code === 'Period') key = '.';
+  if (e.code === 'Backquote') key = '`';
   if (e.code === 'Enter' || e.code === 'NumpadEnter') key = 'Enter';
   if (/^Key[A-Z]$/.test(e.code)) key = e.code.slice(3);
   // '?' is typed with Shift on most layouts; match it without requiring the modifier.
@@ -217,6 +233,7 @@ export function actionFor(e) {
 // group whose test accepts it; "Panels" takes the rest.
 const KEY_GROUPS = [
   ['Time controls', /^(toggleScrubbingBar|pause|playPause|speedStep|skip|bookmark|jump)/],
+  ['HUD presets and layout', /^(hudPreset|peekFullHud|togglePanelsMenu|arrangePanels|toggleStatsDock)/],
   ['Selecting and following', /^(followSelection|unFollowSelection|focusSelection|setZoomLevel|updateZoomLevel|gotoIdle|gotoKing|toggleCursorClip)/],
   ['Fog of war and perspective', /FogOfWar|^setPerspective|^setPlayer\d/],
   ['Colours and display', /^(cycleMinimapMode|toggleRangeCircles|cycleBaseColorMode|cycleColorMode|toggleOverlayDisplay|toggleMinimapDisplayWhenNoOverlay|showGameSpeedAndFps|toggleFullScreen|toggleCrossThreadProfiling)$/],

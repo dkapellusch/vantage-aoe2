@@ -39,6 +39,7 @@ html.overlay-mode #initial-load > * { visibility: hidden; }
 <link rel="stylesheet" href="/static/team-board.css">
 <link rel="stylesheet" href="/static/hud-layout.css">
 <link rel="stylesheet" href="/static/player-review.css">
+<link rel="stylesheet" href="/static/hud-custom.css">
 </head>
 <body data-startup="loading">
 <div id="initial-load" role="status" aria-live="polite">
@@ -79,7 +80,7 @@ html.overlay-mode #initial-load > * { visibility: hidden; }
       <button id="btn-fog" title="Fog of war: click or right-click cycles off / spy / standard, middle-click combines team fog (Alt+F)" class="ico ico-fog" aria-label="Fog of war"></button>
       <button id="btn-mmmode" title="Minimap mode: click or right-click cycles (Alt+M)" class="ico ico-mmmode" aria-label="Minimap mode"></button>
       <button id="btn-res" class="ico ico-res" title="Resources left (Alt+R)" aria-label="Resources left"></button>
-      <button id="btn-panels" title="Panels: show, hide and collapse (Alt+V)" class="ico ico-panels" aria-label="Panels"></button>
+      <button id="btn-panels" title="Customize: presets, panels and metrics (Alt+V)" class="ico ico-panels" aria-label="Customize" aria-haspopup="dialog" aria-expanded="false" aria-controls="panels-menu"></button>
       <button id="btn-settings" class="ico ico-settings" title="Settings" aria-label="Settings"></button>
       <button id="btn-help" title="Quick reference (?)">?</button>
     </div>
@@ -122,7 +123,7 @@ html.overlay-mode #initial-load > * { visibility: hidden; }
 <div id="overlay-endgame" class="overlay hidden"></div>
 <div id="overlay-docs" class="overlay hidden"></div>
 <nav id="omni-menu" class="panel hidden"></nav>
-<nav id="panels-menu" class="panel hidden"></nav>
+<aside id="panels-menu" class="panel hidden" role="dialog" aria-modal="false" aria-labelledby="customize-title"></aside>
 <div id="launch-status" class="panel hidden"></div>
 <div id="highlight-list" class="panel hidden"></div>
 <div id="status-line"></div>

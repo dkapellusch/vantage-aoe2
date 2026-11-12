@@ -26,6 +26,8 @@ import { ownerIdentity, selectionHeader, militaryCard, isProductionBuilding, hea
 import { resourceTotalsHtml } from './resource-review.js';
 import { farmReviewHtml } from './farm-review.js';
 import { renderTeamBoard, toggleTeamBoardView } from './team-board.js';
+import { METRICS, KILLS_LOSSES } from './metrics.js';
+import { isVisible as panelOn, hud as hudOf } from './layout.js';
 import { readUpgradeOverflow, writeUpgradeOverflow } from './upgrade-overflow.js';
 
 let upgradeOverflowExpanded = readUpgradeOverflow();
@@ -538,8 +540,10 @@ export function renderScoreboard(speedLabel) {
   const victory = victoryHtml();
   renderVictory(victory);
   const el = $('scoreboard');
-  el.classList.toggle('hidden', !!settings.disableScoreboard);
-  if (settings.disableScoreboard) return;
+  // Hidden panels skip their render (layout.js decides: the preset, the scene, the old flags).
+  const off = !panelOn('scoreboard');
+  el.classList.toggle('hidden', off);
+  if (off) return;
   const kind = layoutKind();
   const ps = players();
   const sr = series();
@@ -719,7 +723,7 @@ function victoryHtml() {
 
 function renderVictory(html) {
   const el = hudEl('victory', 'panel hidden');
-  const show = settings.disableScoreboard ? html : '';
+  const show = !panelOn('scoreboard') ? html : '';
   el.classList.toggle('hidden', !show);
   if (el._html !== show) { el._html = show; patchHtml(el, show); }
 }
@@ -761,6 +765,7 @@ const boardCtx = {
 export function renderOverview() {
   const el = $('overview');
   ensureTrees();
+  if (!panelOn('overview')) return;
   if (isTwoTeamLayout() && orderedTeams().length === 2) {
     el.classList.add('team-board-host');
     renderTeamBoard(el, orderedTeams(), boardCtx);
@@ -905,12 +910,28 @@ function staticTechCell(tid, pid, done, active, big = false) {
   return `<div class="tech ${cls}${big ? ' big' : ''}" data-tech="${tid}" data-pid="${a && a.player ? a.player : pid}" data-building="${a && a.building ? a.building : ''}" ${tip(ti.name, `${state}${cost ? ' · ' + cost : ''} · ${t('click: go to its building')}`)}><img src="${techIconFor(tid, pid)}" alt="">${prog}</div>`;
 }
 
+// A technology being researched, and one just finished (it lingers a moment).
+function researchingCell(a, pid) { return `<div class="tech doing" data-tech="${a.tech}" data-pid="${a.player || pid}" data-building="${a.building || ''}" ${tip(techInfoFor(a.tech, a.player || pid).name, `${t('researching {p}%', { p: Math.round(a.progress * 100) })} · ${t('click: go to its building')}`)}><img src="${techIconFor(a.tech, a.player || pid)}" alt=""><div class="prog" style="width:${Math.round(a.progress * 100)}%"></div></div>`; }
+function lingerCell(e) { return `<div class="tech yes linger" data-tech="${e.tech}" data-pid="${e.player}" data-x="${e.x ?? ''}" data-y="${e.y ?? ''}" ${tip(techInfoFor(e.tech, e.player).name, t('researched'))}><img src="${techIconFor(e.tech, e.player)}" alt=""></div>`; }
+
+/** Research in progress and just finished, a row per player or team (the Focus slot's Techs card). */
+function researchRowsHtml() {
+  const rows = [];
+  for (const { pid, s, pids } of techRows()) {
+    if (!s) continue;
+    const active = s.research_active || [];
+    const cells = active.map((a) => researchingCell(a, pid)).join('') + lingering(pids, new Set(active.map((a) => a.tech))).map(lingerCell).join('');
+    rows.push(`<div class="tech-row${isDead(pid) ? ' dead' : ''}"><div class="who" style="background:${playerMarkColor(pid)}"></div><div class="dyn-techs">${cells || `<span class="hint">${t('No research')}</span>`}</div></div>`);
+  }
+  return rows.join('');
+}
+
 export function renderTechs() {
   renderSlideout();
   const el = $('techs');
   delegate(el, 'click', '.tech', techClick);
   delegate(el, 'contextmenu', '.tech', techClick);
-  if (!settings.showStaticTechs) { el.classList.add('hidden'); return; }
+  if (!panelOn('techs')) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
   const rows = [];
   let widest = 0;
@@ -923,8 +944,8 @@ export function renderTechs() {
     const utSet = new Set(ut.flat());
     const groups = [...staticGroups(pids || [pid]), ...ut].map((g) => g.map((tid) => staticTechCell(tid, pid, done, active)).join('')).join('<div class="tech-gap"></div>');
     const dynActive = (s.research_active || []).filter((a) => !isStatic(a.tech) && !utSet.has(a.tech));
-    const dyn = dynActive.map((a) => `<div class="tech doing" data-tech="${a.tech}" data-pid="${a.player || pid}" data-building="${a.building || ''}" ${tip(techInfoFor(a.tech, a.player || pid).name, `${t('researching {p}%', { p: Math.round(a.progress * 100) })} · ${t('click: go to its building')}`)}><img src="${techIconFor(a.tech, a.player || pid)}" alt=""><div class="prog" style="width:${Math.round(a.progress * 100)}%"></div></div>`).join('');
-    const linger = lingering(pids, new Set([...dynActive.map((a) => a.tech), ...utSet])).map((e) => `<div class="tech yes linger" data-tech="${e.tech}" data-pid="${e.player}" data-x="${e.x ?? ''}" data-y="${e.y ?? ''}" ${tip(techInfoFor(e.tech, e.player).name, t('researched'))}><img src="${techIconFor(e.tech, e.player)}" alt=""></div>`).join('');
+    const dyn = dynActive.map((a) => researchingCell(a, pid)).join('');
+    const linger = lingering(pids, new Set([...dynActive.map((a) => a.tech), ...utSet])).map(lingerCell).join('');
     rows.push(`<div class="tech-row${isDead(pid) ? ' dead' : ''}"><div class="who" style="background:${playerMarkColor(pid)}"></div>${groups}<div class="dyn-techs">${dyn}${linger}</div></div>`);
   }
   // Square icons, as large as fit a row (min 12 px): never squashed into slivers.
@@ -1149,9 +1170,8 @@ function productionHtml(prodList, pid) {
   }).join('');
 }
 
-export function renderProduction() {
-  const el = $('production');
-  delegate(el, 'click', '.icon-count', (d) => {
+// A composition icon selects that line's units; a production icon cycles its buildings.
+const productionClick = (d) => {
     if (d.dataset.where) {
       const spots = d.dataset.where.split(';').map((xy) => xy.split(',').map(Number));
       d._i = ((d._i ?? -1) + 1) % spots.length;
@@ -1168,9 +1188,18 @@ export function renderProduction() {
     if (d.dataset.team != null) { const tm = teams().find((x) => String(x.key) === d.dataset.team); owners = new Set(tm ? tm.players.map((p) => p.id) : []); }
     else owners = new Set([+d.dataset.pid]);
     S.selection = new Set(currentRows().filter((r) => owners.has(r[1]) && lineOf(r[2]) === line).map((r) => r[0]));
-  });
-  if (!settings.showProduction) { el.classList.add('hidden'); return; }
+  };
+
+export function renderProduction() {
+  const el = $('production');
+  delegate(el, 'click', '.icon-count', productionClick);
+  if (!panelOn('production')) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
+  setHtml(el, productionRowsHtml());
+}
+
+/** The composition and production rows, one per player (and a team total). */
+function productionRowsHtml() {
   const rows = [];
   for (const team of orderedTeams()) {
     const total = {};
@@ -1178,13 +1207,13 @@ export function renderProduction() {
       const s = playerStats(p.id);
       if (!s) continue;
       for (const [mid, n] of Object.entries(s.units || {})) total[mid] = (total[mid] || 0) + n;
-      rows.push(`<div class="prod-row${isDead(p.id) ? ' dead' : ''}" data-ui-key="player-${p.id}"><span class="dot" style="background:${playerMarkColor(p.id)}"></span>${compIcons(s.units || {}, p.id)}<span class="tech-gap"></span>${productionHtml(s.production || [], p.id)}</div>`);
+      rows.push(`<div class="prod-row${isDead(p.id) ? ' dead' : ''}" data-ui-key="player-${p.id}"><span class="prod-who" style="background:${playerMarkColor(p.id)}" ${tip(playerName(p.id))}></span>${compIcons(s.units || {}, p.id)}<span class="tech-gap"></span>${productionHtml(s.production || [], p.id)}</div>`);
     }
     if (team.players.length > 1 && Object.keys(total).length) {
       rows.push(`<div class="prod-row team-total" data-ui-key="team-${esc(team.key)}"><span class="tt-label" ${tip(t('Team composition'), teamName(team))}>Σ</span>${compIcons(total, 0, String(team.key))}</div>`);
     }
   }
-  setHtml(el, rows.join(''));
+  return rows.join('');
 }
 
 // -- dashboard --------------------------------------------------------------------------
@@ -1212,19 +1241,19 @@ const COL = {
   wGold: { h: 'G wkr', tip: 'Workers on gold', v: (s) => s.tasks.gold || 0 },
   wStone: { h: 'S wkr', tip: 'Workers on stone', v: (s) => s.tasks.stone || 0 },
   build: { h: 'Build', tip: 'Villagers building or repairing', v: (s) => (s.tasks.build || 0) + (s.tasks.repair || 0) },
-  idle: { h: 'Idle', tip: 'Idle villagers', v: (s) => s.idle_villagers },
+  idle: { h: METRICS.idle_villagers.label, abbr: METRICS.idle_villagers.short, tip: 'Idle villagers', v: (s) => s.idle_villagers },
   pop: { h: 'Pop/Cap', tip: 'Population and population cap', v: (s) => `${s.pop}/${s.pop_cap}` },
   popOnly: { h: 'Pop', tip: 'Population', v: (s) => s.pop },
-  vils: { h: 'Vils', tip: 'Villagers', v: (s) => s.villagers },
+  vils: { h: METRICS.villagers.label, abbr: METRICS.villagers.short, tip: 'Villagers', v: (s) => s.villagers },
   eco: { h: 'Eco', tip: 'Economy units: villagers, fishing ships and trade units', v: (s) => s.eco_units },
-  mil: { h: 'Mil', tip: 'Military units', v: (s) => s.military },
-  milValue: { h: 'Mil value', tip: 'Resources spent on the living army', v: (s) => s.army_value },
+  mil: { h: METRICS.military.label, abbr: METRICS.military.short, tip: 'Military units', v: (s) => s.military },
+  milValue: { h: METRICS.army_value.label, abbr: METRICS.army_value.short, tip: 'Resources spent on the living army', v: (s) => s.army_value },
   milGold: { h: '% gold', tip: 'Share of the army value paid in gold', v: (s) => s.army_value ? Math.round(100 * s.army_gold / s.army_value) + '%' : '–' },
   peakArmy: { h: 'Peak army', tip: 'Highest army value so far', v: (s) => s.peak_army_value },
-  kd: { h: 'K / D', tip: 'Units killed / units lost (losses include those to animals and other non-player causes)', v: (s) => `${s.kills} / ${s.deaths}` },
+  kd: { h: KILLS_LOSSES.label, abbr: KILLS_LOSSES.short, tip: 'Units killed / units lost (losses include those to animals and other non-player causes)', v: (s) => `${s.kills} / ${s.deaths}` },
   ecoKills: { h: 'Eco kills', tip: 'Enemy villagers, fishing ships and trade units killed', v: (s) => s.eco_kills },
   ecoDeaths: { h: 'Eco deaths', tip: 'Own villagers, fishing ships and trade units lost', v: (s) => s.eco_deaths },
-  ecoKD: { h: 'Eco K / D', tip: 'Economy units killed / lost', v: (s) => (has(s.eco_kills) ? `${s.eco_kills} / ${s.eco_deaths ?? 0}` : null) },
+  ecoKD: { h: 'Eco kills / losses', abbr: 'Eco K / L', tip: 'Economy units killed / lost', v: (s) => (has(s.eco_kills) ? `${s.eco_kills} / ${s.eco_deaths ?? 0}` : null) },
   killsTotal: { h: 'Total kills', tip: 'Units and buildings destroyed', v: (s) => s.kills_total },
   deathsTotal: { h: 'Total deaths', tip: 'Units and buildings lost', v: (s) => s.deaths_total },
   razings: { h: 'Razed', tip: 'Buildings razed / buildings lost', v: (s) => `${s.razings} / ${s.buildings_lost}` },
@@ -1458,7 +1487,7 @@ function cellHtml(c, s, pid, combine) {
 
 export function renderDashboard() {
   const el = $('dashboard');
-  if (!settings.showDashboard || !S.view) { el.classList.add('hidden'); return; }
+  if (!panelOn('dashboard') || !S.view) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
   const layout = dashLayout();
   el.dataset.dashLayout = layout;
@@ -1493,6 +1522,12 @@ export function renderDashboard() {
   // The truce column only appears in games that had a truce (D3 mode).
   const hadTruce = players().some((p) => has((playerStats(p.id) || {}).d3_resource_aggregate));
   let cols = (legacy && legacy.length ? legacy : base.cols).filter((c) => COL[c] && (c !== 'd3Agg' || hadTruce));
+  // Customize → "Hide dashboard columns the Team board shows": with the board on
+  // screen, the built-in Overview pages drop the four numbers it already carries.
+  if (hudOf().dedupe && !base.custom && /^overview/.test(base.key) && panelOn('overview') && isTwoTeamLayout()) {
+    const dup = new Set(['vils', 'idle', 'mil', 'milValue']);
+    if (cols.some((c) => !dup.has(c))) cols = cols.filter((c) => !dup.has(c));
+  }
   const title = base.custom ? `${t('Page')} ${base.num}` : t(base.title);
   setText($('dash-title'), `${title}${pages.length > 1 ? ` · ${index + 1}/${pages.length}` : ''}`);
   let tabs = el.querySelector('.review-dash-tabs');
@@ -2298,7 +2333,7 @@ function groupHtml(rows, deadIds, compact = false) {
   // K/D: kills per death; with none lost yet, the kills themselves.
   const kd = tot && (tot.kills || deaths) ? (deaths ? (tot.kills / deaths).toFixed(tot.kills / deaths < 10 ? 2 : 1) : `${fmtNum(tot.kills)} : 0`) : '';
   const combat = tot && (tot.kills || deaths || tot.dealt || tot.taken || tot.conversions)
-    ? `<div class="up-stats" style="margin-top:4px"><div><span>${t('Kills')}</span> ${fmtNum(tot.kills)}${tot.eco_kills ? ` <small>(${fmtNum(tot.eco_kills)} ${t('eco')})</small>` : ''}</div><div><span>${t('Deaths')}</span> ${fmtNum(deaths)}</div><div ${tip(t('K/D'), t('Kills per death of this selection (units that died while selected count)'))}><span>${t('K/D')}</span> ${kd || '–'}</div><div><span>${t('Dealt')}</span> ${fmtNum(tot.dealt)}</div><div><span>${t('Taken')}</span> ${fmtNum(tot.taken)}</div>${tot.conversions ? `<div><span>${t('Conversions')}</span> ${tot.conversions}</div>` : ''}</div>`
+    ? `<div class="up-stats" style="margin-top:4px"><div><span>${t('Kills')}</span> ${fmtNum(tot.kills)}${tot.eco_kills ? ` <small>(${fmtNum(tot.eco_kills)} ${t('eco')})</small>` : ''}</div><div><span>${t('Losses')}</span> ${fmtNum(deaths)}</div><div ${tip(t('K/D'), t('Kills per death of this selection (units that died while selected count)'))}><span>${t('K/D')}</span> ${kd || '–'}</div><div><span>${t('Dealt')}</span> ${fmtNum(tot.dealt)}</div><div><span>${t('Taken')}</span> ${fmtNum(tot.taken)}</div>${tot.conversions ? `<div><span>${t('Conversions')}</span> ${tot.conversions}</div>` : ''}</div>`
     : '';
   const timeHtml = gs ? `${timeBar(gs.activity_lm, t('Last minute'))}${timeBar(gs.activity, t('Lifetime'))}` : '';
   const carriedHtml = Object.keys(carried).length ? `<div class="hint">${t('Carrying')}: ${resList(carried)}</div>` : '';
@@ -2357,6 +2392,7 @@ function groupStats(ids, rows = []) {
 let unitRows = [];
 export function renderUnitPanel() {
   const el = $('unitpanel');
+  if (!panelOn('unitpanel')) { el.classList.add('hidden'); return; }
   wireReviewControls(el);
   delegate(el, 'click', '[data-full-tree]', (d) => { pinnedTree = true; showTechTree(+d.dataset.fullTree); });
   delegate(el, 'click', '.review-upgrade', techClick);
@@ -2533,4 +2569,9 @@ export function scrubTime(ev) {
   return S.start + f * (S.end - S.start);
 }
 
+/** What the newer panels (pulse.js, focus-slot.js, story.js, widgets.js) reuse from here. */
+export const HUD_PARTS = {
+  setHtml, delegate, hudEl, ageShield, series, orderedTeams, isDead, productionRowsHtml, productionClick, researchRowsHtml, techClick,
+  eventLi, isHigh, eventText, eventCat, goToBuilding, miniChart, unitRows: () => unitRows,
+};
 export { player, setText };
