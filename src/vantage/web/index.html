@@ -9,7 +9,7 @@
 <style>
 html, body { margin: 0; background: #0d0f12; }
 body[data-startup="loading"] > :not(#initial-load):not(script),
-body[data-startup="error"] > :not(#initial-load):not(script) { visibility: hidden; }
+body[data-startup="prepared"] > :not(#initial-load):not(script) { visibility: hidden; }
 #initial-load { position: fixed; inset: 0; z-index: 10000; display: grid; place-content: center;
   gap: 14px; text-align: center; background: #0d0f12; color: #9a958a;
   font: 14px/1.4 system-ui, sans-serif; }
@@ -48,6 +48,7 @@ html.overlay-mode #initial-load > * { visibility: hidden; }
   <noscript>JavaScript is needed to open this match.</noscript>
 </div>
 <canvas id="world"></canvas>
+<span id="viewer-build" title="Viewer build" style="position:fixed;right:8px;bottom:3px;font:10px system-ui;color:#9a958a;z-index:20"></span>
 
 <div id="hud">
   <header id="scoreboard" class="panel"></header>

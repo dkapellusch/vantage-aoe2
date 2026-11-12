@@ -37,6 +37,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from vantage import __version__, recording_summary
 from vantage.certs import cert_status, certs_dir, missing_cert_files
+from vantage.deployment import deployment_revision
 from vantage.frames import RecordingWriter, read_header
 from vantage.gamedata import (
     GameData,
@@ -108,6 +109,7 @@ class Session:
 
     def __init__(self, data: GameData, recordings_dir: Path) -> None:
         self.data = data
+        self.viewer_build = deployment_revision()
         self.recordings_dir = recordings_dir
         self.timeline: Timeline | None = None
         self.tc_idle_villagers = 120
@@ -760,6 +762,7 @@ class Session:
             self.source["game_details"] = details
         return {
             "mode": self.mode,
+            "viewer_build": self.viewer_build,
             "source": self.source,
             "error": self.error,
             "generation": self.generation,
@@ -917,6 +920,19 @@ class App:
         game_art: bool = True,
     ) -> None:
         self.session = session
+        # Keep an immutable module graph for this process, even during a deploy.
+        web = resources.files(WEB_PACKAGE).joinpath("web")
+        self.web_assets: dict[str, bytes] = {}
+
+        def collect(folder: Any, prefix: str = "") -> None:
+            for item in folder.iterdir():
+                name = prefix + item.name
+                if item.is_dir():
+                    collect(item, name + "/")
+                else:
+                    self.web_assets[name] = item.read_bytes()
+
+        collect(web)
         #: Extensions from outside this package. A plugin may define
         #: ``get(app, handler, path, query)`` and ``post(app, handler, path, body)``,
         #: each returning True once it has answered the request; ``config(app,
@@ -1132,6 +1148,7 @@ class App:
                 "version": __version__,
             }
             config["asset_version"] = self.asset_version()
+            config["viewer_build"] = self.session.viewer_build
             config["game_art"] = self.game_art
             for plugin in plugins:
                 extend = getattr(plugin, "config", None)
@@ -1337,12 +1354,19 @@ class App:
         if ".." in name or name.startswith("/") or ":" in name or "\\" in name:
             _error(h, HTTPStatus.BAD_REQUEST)
             return
-        res = resources.files(WEB_PACKAGE).joinpath("web").joinpath(name)
-        if not res.is_file():
-            _error(h)
-            return
+        versioned = False
+        version, sep, rest = name.partition("/")
+        if sep and re.fullmatch(r"[0-9a-f]{16}", version):
+            if version != self.session.viewer_build:
+                return _error(h, HTTPStatus.GONE)
+            name, versioned = rest, True
+        body = self.web_assets.get(name)
+        if body is None:
+            return _error(h)
         ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        _bytes(h, res.read_bytes(), ctype)
+        if name == "index.html":
+            body = body.replace(b"/static/", f"/static/{self.session.viewer_build}/".encode())
+        _bytes(h, body, ctype, cache=ASSET_IMMUTABLE if versioned else False)
 
     def _stream(self, h: BaseHTTPRequestHandler) -> None:
         h.send_response(200)

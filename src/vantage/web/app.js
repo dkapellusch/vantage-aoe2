@@ -6,6 +6,7 @@ import {
 } from './state.js';
 import * as world from './world.js';
 import { InitialFrame } from './initial-load.js';
+import { startupAssets, trackedImage, resourceName } from './startup-assets.js';
 import { loadMoments, toggleReviewTimeline, reviewStatus } from './review-workspace.js';
 import * as panels from './panels.js';
 import { toggleTeamBoardView } from './team-board.js';
@@ -31,24 +32,78 @@ let fpsAcc = 0, fpsN = 0;
 let endgameShown = false;
 
 // Keep the initial recording clock still while hidden assets and the HUD load.
-const initialLoad = new InitialFrame();
+const initialLoad = new InitialFrame({ settleMs: 0, timeoutMs: 8000 });
+initialLoad.started = performance.now();
 let booted = false;
 let initialFonts = false;
 let startupLayout = '';
 function reportReady() {
   window.dispatchEvent(new CustomEvent('vantage:ready'));
-  if (window.parent !== window) window.parent.postMessage({ type: 'vantage:ready' }, '*');
+  if (window.parent !== window) window.parent.postMessage({ type: 'vantage:ready', degraded: !!initialLoad.degraded }, '*');
 }
 window.addEventListener('message', (event) => {
   if (event.source === window.parent && event.data?.type === 'vantage:ready?'
-    && ['revealing', 'ready'].includes(initialLoad.state)) reportReady();
+    && ['prepared', 'revealing', 'ready'].includes(initialLoad.state)) reportReady();
 });
-function startupError() {
-  document.body.dataset.startup = 'error';
-  $('initial-load').querySelector('p').textContent = t('Error');
-  $('initial-retry').hidden = false;
-  if (window.parent !== window) window.parent.postMessage({ type: 'vantage:error' }, '*');
+function reportStartup(type, detail = {}) {
+  if (window.parent !== window) window.parent.postMessage({ type, ...detail }, '*');
 }
+let startupWork = false, startupQueued = false, revealQueued = false, initialViewPromise = null, startupViewRetryAt = 0;
+function prepareStartupData() {
+  if (initialViewPromise || !S.map || S.view || !initialLoad.pending || performance.now() < startupViewRetryAt) return;
+  initialViewPromise = (async () => {
+    S.view = await fetchView(S.start); S.t = S.start;
+    if (!S.view) throw Object.assign(new Error("View is unavailable; retrying"), { resource: "/api/view" });
+    if (S.view) await Promise.all([world.refreshTrees(S.t, true), world.refreshTerrain(S.t, true)]);
+  })().catch(error => {
+    startupViewRetryAt = performance.now() + 1000; startupError(error);
+    setTimeout(queueStartup, 1000);
+  }).finally(() => { initialViewPromise = null; queueStartup(); });
+}
+function startupError(error) {
+  const detail = { resource: resourceName(error?.resource || '/startup'), message: String(error?.message || error || 'Startup is retrying').slice(0, 300) };
+  reportStartup('vantage:error', detail);
+  $('initial-load').querySelector('p').textContent = `${t('Loading…')} ${detail.resource}`;
+  $('initial-retry').hidden = false;
+}
+function revealInitialFrame() {
+  if (revealQueued || document.hidden || !['prepared', 'revealing'].includes(initialLoad.state)) return;
+  revealQueued = true;
+  requestAnimationFrame(() => {
+    revealQueued = false;
+    if (document.hidden) return;
+    world.resize(); world.resizeMinimap(); world.draw(0); world.drawMinimap();
+    document.body.dataset.startup = 'revealing';
+    const finish = () => {
+      initialLoad.finish(); document.body.dataset.startup = 'ready';
+      document.body.dataset.viewerReady = 'true';
+    };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) finish();
+    else setTimeout(finish, 160);
+  });
+}
+function advanceStartup() {
+  if (!booted || !initialLoad.pending || startupWork) return;
+  startupWork = true;
+  prepareStartupData();
+  try {
+    if (S.map && S.view) { world.viewReady(S.view); renderHud(); layoutLeftColumn(); placeDashboard(); world.draw(0); }
+    firstFrame(performance.now());
+  } catch (error) { startupError(error); }
+  finally { startupWork = false; }
+}
+function queueStartup() {
+  if (startupQueued || !initialLoad.pending) return;
+  startupQueued = true;
+  queueMicrotask(() => { startupQueued = false; advanceStartup(); });
+}
+window.addEventListener('vantage:asset-settled', queueStartup);
+window.addEventListener('vantage:resource-error', e => {
+  if (initialLoad.pending) startupError(e.detail);
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { queueStartup(); revealInitialFrame(); }
+});
 function firstFrame(now) {
   if (!initialLoad.pending) return;
   const idle = booted && (!S.session || S.session.mode === 'idle'
@@ -70,21 +125,21 @@ function firstFrame(now) {
   const hud = !!S.view && !!$('scoreboard').textContent.trim()
     && (!settings.showDashboard || !!$('dash-table').rows.length);
   const ready = initialLoad.update({
-    data: idle || !!(S.map && S.view && S.catalog && S.series),
+    data: idle || !!(S.map && S.view && S.catalog),
     graphics: idle || document.body.classList.contains('overlay-mode') || world.initialFrameReady(),
     hud: idle || hud,
     images: images.every((im) => im.complete),
     fonts: initialFonts && document.fonts.status === 'loaded',
   }, layoutKey, now);
+  const pending = startupAssets().filter(a => a.state === 'loading');
+  const detail = initialLoad.missing.join(', ');
+  $('initial-load').querySelector('p').textContent = detail ? `${t('Loading…')} ${detail}` : t('Loading…');
+  reportStartup('vantage:progress', { pending: pending.slice(0, 12).map(a => a.resource), missing: initialLoad.missing });
   if (ready) {
-    document.body.dataset.startup = 'revealing';
+    document.body.dataset.startup = 'prepared';
     reportReady();
-    const ms = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160;
-    setTimeout(() => {
-      initialLoad.finish(); document.body.dataset.startup = 'ready';
-      document.body.dataset.viewerReady = 'true';
-    }, ms);
-  } else if (initialLoad.state === 'error') startupError();
+    revealInitialFrame();
+  }
 }
 
 // Shell-owned shared state.
@@ -185,10 +240,10 @@ function checkGameData(desc) {
 let refreshing = null, pendingDesc = null;
 function refreshSession(desc) {
   pendingDesc = desc;
-  if (!refreshing && !document.hidden) {
+  if (!refreshing && (!document.hidden || initialLoad.pending)) {
     refreshing = (async () => {
       try {
-        while (pendingDesc && !document.hidden) {
+        while (pendingDesc && (!document.hidden || initialLoad.pending)) {
           const next = pendingDesc;
           pendingDesc = null;
           // One failed update (a request that failed) must not stop the next.
@@ -209,7 +264,17 @@ function renderFidelityNotice(desc) {
   el.classList.toggle('hidden', !notice);
 }
 
+function checkViewerBuild(desc) {
+  if (!serverConfig?.viewer_build || !desc?.viewer_build || serverConfig.viewer_build === desc.viewer_build) return false;
+  // A deployment changes the JS graph as well as its API. Reload once, retaining
+  // the playhead and selection; never combine old data caches with new code.
+  try { sessionStorage.setItem(`vantage:resume:${location.pathname}`, JSON.stringify({
+    t: S.t, selected: [...S.selection], at: Date.now(),
+  })); } catch { /* private browsing may deny storage */ }
+  location.reload(); return true;
+}
 async function applySession(desc) {
+  if (checkViewerBuild(desc)) return;
   checkCompatibility(desc);
   checkGameData(desc);
   askToContinue(desc);
@@ -244,7 +309,7 @@ async function applySession(desc) {
   }
   if (tl) {
     S.start = tl.start; S.end = tl.end; S.complete = tl.complete;
-    if ((!S.map || !S.match.map_size) && tl.end > 0) await loadStatic();
+    if ((!S.map || !S.match.map_size) && tl.end > 0) { await loadStatic(); S.catalogVersion = tl.catalog_version; }
     if (tl.catalog_version !== S.catalogVersion) {
       S.catalogVersion = tl.catalog_version;
       S.catalog = await api(`/api/catalog?lang=${language}`);
@@ -261,6 +326,7 @@ async function applySession(desc) {
       await refreshSeries().catch(() => S.series);
     }
   }
+  if (initialLoad.pending) queueStartup();
   $('status-line').textContent = statusText(desc);
   renderLaunchStatus();
 }
@@ -463,7 +529,7 @@ function renderCertsCard(el, certs) {
 
 function subscribe() {
   const es = new EventSource('/api/stream');
-  es.onmessage = (m) => { refreshSession(JSON.parse(m.data)).catch(console.error); };
+  es.onmessage = (m) => { const desc = JSON.parse(m.data); if (!checkViewerBuild(desc)) refreshSession(desc).catch(console.error); };
   // Skin files changed (the server watches the enabled skins).
   es.addEventListener('skins', () => { if (settings.toggleHTMLServer) reloadSkins(); });
   es.onerror = () => { $('status-line').textContent = `⚠ ${t('server unreachable')}`; };
@@ -2236,7 +2302,14 @@ function wire() {
 async function boot() {
   $('initial-retry').onclick = () => location.reload();
   // A missing game icon should leave an empty slot, not a broken-image glyph.
-  window.addEventListener('error', (e) => { if (e.target && e.target.tagName === 'IMG') e.target.style.visibility = 'hidden'; }, true);
+  window.addEventListener('error', (e) => {
+    const image = e.target;
+    if (image?.tagName !== 'IMG' || image._startupRetry) return;
+    image._startupRetry = true;
+    trackedImage(image, image.currentSrc || image.src,
+      () => { image.style.visibility = ''; }, () => { image.style.visibility = 'hidden'; });
+  }, true);
+  document.addEventListener('load', e => { if (e.target?.tagName === 'IMG') queueStartup(); }, true);
   if (new URLSearchParams(location.search).get('overlay') === '1') {
     // On <html> too: the page background must be transparent for OBS.
     document.documentElement.classList.add('overlay-mode');
@@ -2245,18 +2318,29 @@ async function boot() {
   world.resize();
   wire();
   const probing = probeAssetOrigin();
+  // Hub workers are network routers, not asset caches. Check for their update
+  // without blocking data preparation or requiring a foreground animation.
+  if (location.pathname.startsWith('/v/') && navigator.serviceWorker)
+    navigator.serviceWorker.getRegistration(location.href).then(r => r?.update()).catch(() => {});
   serverConfig = await api('/api/config').catch(() => null);
   await probing;
   S.version = (serverConfig && serverConfig.version) || '';
   applyServerConfig(serverConfig);
+  $('viewer-build').textContent = `Vantage ${S.version} · ${serverConfig?.viewer_build || 'unknown build'}`;
   // The replay-conversion page exists only when a server plugin provides it.
   document.getElementById('btn-native').hidden = !(serverConfig && serverConfig.native_page);
   document.body.dataset.tooltips = tooltipLevel();
   await setLanguage(settings.language || detectLanguage());
   const conflicts = rebuildKeys();
   if (conflicts.length) toast(t('Hotkey conflict: {list}', { list: describeConflicts(conflicts, t).join('; ') }));
-  const desc = await api('/api/session').catch(() => null);
-  if (desc) await refreshSession(desc);
+  let desc;
+  // Fetch/retry without animation frames or foreground visibility. A failed
+  // upstream can recover while this match tab remains in the background.
+  while (!desc) {
+    try { desc = await api('/api/session'); await refreshSession(desc); }
+    catch (error) { startupError(error); await new Promise(r => setTimeout(r, 1000)); }
+  }
+  prepareStartupData();
   if (!desc || desc.mode === 'idle') ACTIONS.openHome();
   // The certificate card comes first: the tutorial can wait for a working setup.
   else if (!settings.seenTutorial && !document.body.classList.contains('overlay-mode')
@@ -2268,13 +2352,31 @@ async function boot() {
   window.addEventListener('resize', layoutLeftColumn);
   renderHud(); layoutLeftColumn(); placeDashboard();
   // Starting font loads after the real HUD is present covers skin-provided fonts too.
-  document.fonts.ready.then(() => { initialFonts = true; });
+  document.fonts.ready.then(() => { initialFonts = true; queueStartup(); });
   booted = true;
+  advanceStartup();
+  // The budget can reveal a usable map with placeholders; it never turns an
+  // optional image into a terminal error. Progress itself is completion-driven.
+  setTimeout(advanceStartup, initialLoad.timeoutMs);
   requestAnimationFrame(tick);
+  try {
+    const key = `vantage:resume:${location.pathname}`, raw = sessionStorage.getItem(key);
+    sessionStorage.removeItem(key);
+    const saved = raw && JSON.parse(raw);
+    if (saved && Date.now() - saved.at < 120000) {
+      (async () => {
+        // The replacement server decodes in the background. Do not clamp a
+        // saved late-game playhead to the first few seconds already ingested.
+        while (S.end < saved.t && !S.complete) await new Promise(r => setTimeout(r, 250));
+        await initialViewPromise;
+        S.selection = new Set(saved.selected || []); seek(saved.t);
+      })().catch(console.error);
+    }
+  } catch { /* invalid/denied storage is harmless */ }
 }
 
 // Debug/automation handle (used by the headless UI checks). openDocs and
 // hotkey conflicts are also reachable from other modules through it.
 window.vantage = { S, settings, initialLoad, seek, viewTimings, viewStats, actions: ACTIONS, world, openDocs, heroes, startSequence, topKiller, autocastEntity, reloadSkins };
 
-boot().catch((error) => { console.error(error); initialLoad.fail(); startupError(); });
+boot().catch((error) => { console.error(error); startupError(error); });

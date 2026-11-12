@@ -262,6 +262,22 @@ class SpriteStore:
 
         ``damage`` indexes :data:`DAMAGE_LEVELS`; ``layer`` is one of :data:`LAYERS`.
         """
+        # The engine uses "None" sprites as effect/draw-list containers. Their
+        # missing file is intentional, so answer a settled transparent strip.
+        base = info.name.removesuffix("_x1").removesuffix("_x2").lower()
+        if base in _NO_PICTURE:
+            return _png(1, 1, bytes(4)), {
+                "cw": 1,
+                "ch": 1,
+                "ax": 0,
+                "ay": 0,
+                "n": 1,
+                "step": 1,
+                "per": 1,
+                "duration": 0,
+                "pc": False,
+                "empty": True,
+            }
         damage = damage if 0 <= damage < len(DAMAGE_LEVELS) else 0
         layer = layer if layer in LAYERS else "all"
         # Sprite ids are per game (Return of Rome reuses them), so the SLD name

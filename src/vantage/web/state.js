@@ -1,3 +1,4 @@
+import { requestResource } from './startup-assets.js';
 // Shared state, server API, persisted settings and small helpers.
 
 import { t } from './i18n.js';
@@ -316,9 +317,7 @@ export async function api(path, body, { priority, signal } = {}) {
   };
   if (priority) opts.priority = priority;
   if (signal) opts.signal = signal;
-  const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(`${path}: ${r.status}`);
-  return r.json();
+  return requestResource(path, opts);
 }
 
 // Sprite strips come from the other name of this loopback server (127.0.0.1 <->
@@ -418,7 +417,7 @@ function viewJson(path, signal) {
   return new Promise((resolve, reject) => {
     const id = ++workerSeq;
     workerCalls.set(id, { resolve, reject });
-    viewWorker.postMessage({ id, url: new URL(path, location.href).href });
+    viewWorker.postMessage({ id, url: viewRequestUrl(path, location.href) });
     if (signal) {
       signal.addEventListener('abort', () => {
         if (!workerCalls.delete(id)) return;
@@ -859,4 +858,11 @@ export function toast(msg) {
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 1600);
+}
+
+// Dedicated workers can bypass a page service worker. Scope their requests
+// explicitly; a shared-origin match cookie belongs to whichever tab opened last.
+export function viewRequestUrl(path, href) {
+  const base = new URL(href), match = base.pathname.match(/^\/v\/m[a-z2-7]{12}(?=\/|$)/);
+  return new URL(match ? match[0] + path : path, base).href;
 }

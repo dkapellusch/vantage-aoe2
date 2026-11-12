@@ -23,6 +23,7 @@ import { RowInterpolator, sortByKey } from './playback.js';
 import { followRows } from './camera-follow.js';
 import { changedTilesInRegion, terrainRegion, changedTreeTiles, groundProjection, mergeDirtyRect, treeSpriteState, OutlineCache, coalesceRects } from './render-cache.js';
 import { ViewGraphics, SpriteHistory } from './graphics-cache.js';
+import { requestResource, trackAsset, trackedImage, notifyAssetsChanged } from './startup-assets.js';
 
 const TW = 32, TH = 16;           // tile size on screen at zoom 1
 const TERRAIN_TW = 16, TERRAIN_TH = 8; // pre-rendered terrain resolution
@@ -184,11 +185,10 @@ function spriteStrip(sid, facet, color, opts) {
   const [path] = key.split('?');
   // One request: the PNG, its layout in the X-Sprite-Meta header (an older server
   // without it gets the .json as before), decoded off the main thread.
-  fetch(assetUrl(`/sprite/${path}.png?${query}`))
-    .then(async (r) => {
-      if (!r.ok) throw new Error(String(r.status));
+  const url = assetUrl(`/sprite/${path}.png?${query}`);
+  trackAsset(url, () => requestResource(url, {}, async (r) => {
       const hdr = r.headers.get('X-Sprite-Meta');
-      const m = hdr ? JSON.parse(hdr) : await fetch(assetUrl(`/sprite/${path}.json?${query}`)).then((j) => j.json());
+      const m = hdr ? JSON.parse(hdr) : await requestResource(assetUrl(`/sprite/${path}.json?${query}`));
       // Premultiplied: the GPU batch (sprite-gl.js) uploads the pixels as they are.
       const img = await createImageBitmap(await r.blob(), { premultiplyAlpha: 'premultiply' });
       e.meta = m;
@@ -206,11 +206,11 @@ function spriteStrip(sid, facet, color, opts) {
         const k2 = `${sid}/${facet}/-1?${plain}`, cur = spriteCache.get(k2);
         if (!cur || !cur.img) spriteCache.set(k2, { meta: { ...m, pm: false }, img, tile: e.tile, failed: false, bytes: 0, pin: e.pin });
       }
-    })
+    }))
     .catch((err) => {
       e.failed = true;
-      if (!(err && err.message === '404')) e.retryAt = performance.now() + 5000;
-      spriteRequests--;
+      if (err?.status !== 404) e.retryAt = performance.now() + 5000;
+      spriteRequests--; notifyAssetsChanged();
     });
   if (standIn && countingDraw) spriteStats.standIn++;
   return standIn || e;
@@ -1052,7 +1052,7 @@ function drawSprites(r, px, py) {
   const split = layerSplit !== false && filt('unitShadow') !== filt('unitColor');
   // Shading steps of a fifth of the hit points (sprites.DAMAGE_LEVELS).
   const dmg = building && !replaced && !foundation ? Math.min(5, Math.round(lost * 5)) : 0;
-  let drew = false, failed = 0, pendingMain = false;
+  let drew = false, pendingMain = false;
   let drawn = [];
   // No save()/restore() per entity (a canvas state flush each, the costliest
   // call at 8x): only the alpha and the smoothing flag change, set directly.
@@ -1066,7 +1066,7 @@ function drawSprites(r, px, py) {
     for (const [layer, filterKey] of passes) {
       const [color, pm] = stripColor(sid, r[1], layer, gpu);
       const e = spriteStrip(sid, facet, color, { dmg, layer, dir: !building, pm });
-      if (e && e.failed && !e.retryAt) { if (layer !== 'shadow') failed++; continue; }
+      if (e && e.failed && !e.retryAt) continue;
       if (!e || !e.img || !e.meta) { if (layer !== 'shadow') pendingMain = true; continue; }
       const m = e.meta;
       const perMs = Math.max(1, (m.duration || 0.1) * 1000);
@@ -1096,8 +1096,8 @@ function drawSprites(r, px, py) {
     spriteStats.missing++;
     spriteStats.missingMasters.set(r[2], (spriteStats.missingMasters.get(r[2]) || 0) + 1);
   }
-  // Permanently empty game graphics have no visible body or health-bar anchor.
-  if (!drew && failed && !pendingMain) drew = true;
+  // Real missing graphics use the ordinary entity marker. Intentional empty
+  // engine graphics have a transparent strip and already count as drawn.
   if (ghost) ctx.globalAlpha = 1;
   // A damage graphic's flames are the whole fire (a mill at 41 % showed six in the
   // game; the stream carried one of them): they are drawn, and the streamed fire
@@ -1128,7 +1128,7 @@ const viewSize = { w: 0, h: 0, dpr: 1 };
 
 export function resize() {
   const dpr = window.devicePixelRatio || 1;
-  viewSize.w = window.innerWidth; viewSize.h = window.innerHeight; viewSize.dpr = dpr;
+  viewSize.w = window.innerWidth || 1280; viewSize.h = window.innerHeight || 800; viewSize.dpr = dpr;
   canvas.width = Math.round(viewSize.w * dpr);
   canvas.height = Math.round(viewSize.h * dpr);
   resizeMinimap();
@@ -1146,8 +1146,7 @@ function img(src) {
   let im = imgCache.get(src);
   if (!im) {
     im = new Image();
-    im.src = src;
-    im.onerror = () => { im.failed = true; };
+    trackedImage(im, src, () => {}, () => { im.failed = true; });
     imgCache.set(src, im);
   }
   return im.complete && !im.failed && im.naturalWidth ? im : null;
@@ -1341,13 +1340,13 @@ function rasterTerrain(x0, y0, x1, y1, view = false) {
 // dirt under buildings): the view names the terrain snapshot in force and only the
 // changed tiles are repainted (flat layer, minimap, textured chunks).
 let terrainT = -1, terrainPending = false, terrainGen = 0, terrainAt = 0;
-export async function refreshTerrain(t) {
+export async function refreshTerrain(t, initial = false) {
   if (!S.map || !S.map._terrain || terrainPending) return;
   const want = S.view && S.view.terrain_t != null ? S.view.terrain_t : -1;
   if (want < 0 || want === terrainT) return;
   // At 4-8x a new snapshot arrives several times a second; each one rebuilds the
   // terrain chunks it touches, so they are applied at most every 0.7 s of wall time.
-  if (performance.now() - terrainAt < 700) return;
+  if (!initial && performance.now() - terrainAt < 700) return;
   terrainAt = performance.now();
   terrainPending = true;
   try {
@@ -1483,13 +1482,13 @@ function drawTrees(c, tw, th, oy, color) {
 }
 
 let treesAt = 0, treesPending = false;
-export async function refreshTrees(t) {
+export async function refreshTrees(t, initial = false) {
   if (!S.map || treesPending) return;
   const want = S.view && S.view.trees_t != null ? S.view.trees_t : -1;
   if (want === treesT) return;
   // A snapshot every 3 game seconds is several a second at 4-8x: fetched (and the
   // forest redrawn) at most every 0.7 s of wall time, like the terrain.
-  if (performance.now() - treesAt < 700) return;
+  if (!initial && performance.now() - treesAt < 700) return;
   treesAt = performance.now();
   treesT = want;
   treesPending = true;
@@ -1643,15 +1642,13 @@ function terrainPattern(i) {
   const flat = (S.map && S.map.terrain_colors && S.map.terrain_colors[i]) || '#3c5a28';
   if (!tex || !tex[0]) { terrainPatterns.set(i, flat); return flat; }
   const im = new Image();
-  im.onerror = () => { terrainPatterns.set(i, flat); };
-  im.onload = () => {
+  trackedImage(im, withAssetVersion(`/terrain/${tex[0]}.png`), () => {
     const p = ctx.createPattern(im, 'repeat');
     p._w = im.width;
     p._img = im; // the GPU chunk compositor's texture
     textureAvg.set(i, meanColor(im));
     terrainPatterns.set(i, p);
-  };
-  im.src = withAssetVersion(`/terrain/${tex[0]}.png`);
+  }, () => { terrainPatterns.set(i, flat); });
   return null;
 }
 
@@ -1663,8 +1660,7 @@ function terrainMask(name) {
   if (terrainMasks.has(name)) return terrainMasks.get(name);
   terrainMasks.set(name, null);
   const im = new Image();
-  im.onerror = () => { terrainMasks.set(name, false); };
-  im.onload = () => {
+  trackedImage(im, withAssetVersion(`/terrain-mask/${name}.png`), () => {
     const c = document.createElement('canvas');
     c.width = im.width; c.height = im.height;
     const g = c.getContext('2d');
@@ -1678,8 +1674,7 @@ function terrainMask(name) {
     p._w = c.width;
     p._img = im; // the GPU compositor reads the noise from the red channel
     terrainMasks.set(name, p);
-  };
-  im.src = `/terrain-mask/${name}.png`;
+  }, () => { terrainMasks.set(name, false); });
   return null;
 }
 

@@ -322,3 +322,16 @@ def test_concurrent_requests_for_one_strip_render_it_once(tmp_path: Path, monkey
     assert all(g == got[0] for g in got)
     # Written whole: no temporary files left beside the cached strip.
     assert sorted(p.suffix for p in (tmp_path / "cache" / "sprites").iterdir()) == [".json", ".png"]
+
+
+def test_engine_none_graphics_are_settled_transparent_strips(tmp_path: Path) -> None:
+    store = SpriteStore(None, tmp_path)
+    for sid, name in [(12268, "None"), (12276, "None"), (1751, "None_x1")]:
+        result = store.strip(SpriteInfo(sid, name, 15, 16, 0.15), 2, None, "-1")
+        assert result is not None
+        png, meta = result
+        assert png.startswith(b"\x89PNG") and meta["empty"]
+        assert meta["cw"] == meta["ch"] == meta["n"] == 1
+    # A real missing filename remains an error, so the client can identify it
+    # and draw its entity placeholder rather than silently hiding the unit.
+    assert store.strip(SpriteInfo(999, "missing_knight", 1, 1, 0), 0, None, "-1") is None

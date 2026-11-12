@@ -27,12 +27,18 @@ test('a size change or newly requested asset restarts layout settling', () => {
   assert.equal(gate.update(complete, 'after icons', 290), true);
   assert.equal(gate.update(complete, 'new view during playback', 400), false);
 });
-test('stalled/failed startup offers an error instead of revealing partial content', () => {
+test('a usable first frame degrades to placeholders after its budget and can finish', () => {
   const gate = new InitialFrame({ timeoutMs: 500 });
   gate.update({ ...complete, graphics: false }, 'layout', 0);
-  assert.equal(gate.update({ ...complete, graphics: false }, 'layout', 500), false);
-  assert.equal(gate.state, 'error');
-  assert.equal(gate.update(complete, 'layout', 1000), false);
-  const failed = new InitialFrame(); failed.fail();
-  assert.equal(failed.state, 'error');
+  assert.equal(gate.update({ ...complete, graphics: false }, 'layout', 500), true);
+  assert.equal(gate.state, 'prepared'); assert.equal(gate.degraded, true);
+  gate.finish(); assert.equal(gate.state, 'ready');
+});
+test('missing mandatory data never reveals fabricated content; later recovery can finish', () => {
+  const gate = new InitialFrame({ timeoutMs: 500, settleMs: 0 });
+  gate.update({ ...complete, data: false }, 'layout', 0);
+  assert.equal(gate.update({ ...complete, data: false }, 'layout', 30000), false);
+  assert.equal(gate.state, 'loading');
+  assert.equal(gate.update(complete, 'layout', 30001), true);
+  gate.finish(); assert.equal(gate.state, 'ready');
 });

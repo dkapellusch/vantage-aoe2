@@ -91,3 +91,13 @@ test('margin strips are prefetched once the on-screen ones are in, and never hol
   assert.equal(cache.ready(view, 'camera', catalog, 1), true);
   assert.deepEqual(requested, []);
 });
+
+test('a deliberately missing sprite settles startup and no longer blocks graphics', () => {
+  const failed = new Set(), loaded = new Set(['map']);
+  const gate = new ViewGraphics(() => ['map', 'missing-sprite'],
+    r => loaded.has(r) || failed.has(r), () => {});
+  const view = {}, catalog = {};
+  assert.equal(gate.ready(view, 'camera', catalog, 0), false);
+  failed.add('missing-sprite');
+  assert.equal(gate.ready(view, 'camera', catalog, 0), true);
+});

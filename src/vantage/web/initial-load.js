@@ -1,5 +1,5 @@
-// First-frame readiness: every dependency must be ready and the layout must
-// remain unchanged briefly. A timeout offers retry; it never reveals half a map.
+// Prepare independently of visibility. Prefer a complete first frame; after the
+// graphics budget, usable data and HUD can reveal with optional placeholders.
 export class InitialFrame {
   constructor({ settleMs = 100, timeoutMs = 30000 } = {}) {
     this.settleMs = settleMs;
@@ -19,13 +19,17 @@ export class InitialFrame {
     else if (this.stableSince == null || layout !== this.layout) this.stableSince = now;
     this.layout = layout;
     if (!this.missing.length && now - this.stableSince >= this.settleMs) {
-      this.state = 'revealing';
+      this.state = 'prepared';
       this.revealedAt = now;
       return true;
     }
-    if (now - this.started >= this.timeoutMs) this.state = 'error';
+    if (now - this.started >= this.timeoutMs && requirements.data && requirements.hud) {
+      this.degraded = this.missing.length > 0;
+      this.state = 'prepared'; this.revealedAt = now;
+      return true;
+    }
     return false;
   }
-  finish() { if (this.state === 'revealing') this.state = 'ready'; }
+  finish() { if (['prepared', 'revealing'].includes(this.state)) this.state = 'ready'; }
   fail() { this.state = 'error'; }
 }

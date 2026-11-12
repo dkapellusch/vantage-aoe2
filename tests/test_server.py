@@ -91,6 +91,7 @@ def test_idle_then_open_recording(server: tuple[str, Session, Path]) -> None:
     assert _get(base + "/api/techtree/1") == {}  # no game install in tests
     config = _get(base + "/api/config")
     assert config.pop("asset_version")
+    assert config.pop("viewer_build") == session.viewer_build
     assert config == {
         "patch": {},
         "force_default": False,
@@ -954,3 +955,22 @@ def test_versioned_asset_urls_are_cached_for_good(server: tuple[str, Session, Pa
     # Without the version, or with another one, a URL may yet change content.
     assert asset_cache_control({}, version) == "max-age=86400"
     assert asset_cache_control({"av": "old"}, version) == "max-age=86400"
+
+
+def test_html_and_relative_modules_share_an_immutable_build_graph(
+    server: tuple[str, Session, Path],
+) -> None:
+    base, session, _ = server
+    build = session.viewer_build
+    assert len(build) == 16
+    html = _get(base + "/")
+    assert f"/static/{build}/app.js".encode() in html
+    with urllib.request.urlopen(base + f"/static/{build}/app.js") as response:
+        assert response.headers["Cache-Control"] == "max-age=31536000, immutable"
+        assert b"./state.js" in response.read()
+    assert b"viewRequestUrl" in _get(base + f"/static/{build}/state.js")
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _get(base + "/static/0000000000000000/app.js")
+    assert error.value.code == 410
+    assert _get(base + "/api/session")["viewer_build"] == build
+    assert _get(base + "/api/config")["viewer_build"] == build
