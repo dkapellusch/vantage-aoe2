@@ -723,6 +723,20 @@ class Timeline:
         self.resource_history.checkpoint(t)
         for pid, stats in v["players"].items():
             stats["resource_income"] = self.resource_history.player(int(pid), t)
+            bonus = self.resource_history.farms.bonus(int(pid), t)
+            stats["folwark_bonus_food"] = round(bonus, 1)
+            # Preserve the raw counter for reconciliation; rates and gathered
+            # totals exclude Folwark's instant construction payout.
+            owner_node = W.players_of(world).get(int(pid)) if world is not None else None
+            raw_collected = (
+                {r: W.attr(owner_node, r + "Total") for r in W.RESOURCE_NAMES}
+                if owner_node is not None
+                else dict(stats["collected"])
+            )
+            raw_collected["total"] = sum(raw_collected[r] for r in W.RESOURCE_NAMES)
+            stats["recorded_collected"] = raw_collected
+            stats["collected"]["food"] = round(max(0, raw_collected["food"] - bonus))
+            stats["collected"]["total"] = round(max(0, raw_collected["total"] - bonus))
         self._player_extras(v)
         self._activity(v)
         kf = Keyframe(t, zlib.compress(json.dumps(v, separators=(",", ":")).encode(), 3))
@@ -2150,6 +2164,9 @@ class Timeline:
             result["damage_by_target"] = {k: round(v, 1) for k, v in by_target.items()}
             result["damage_by_attacker"] = {k: round(v, 1) for k, v in by_attacker.items()}
             result.update(self._entity_state(eid, t, keyframe))
+            result.update(
+                self.resource_history.farms.entity(eid, result["owner"], result["master"], end)
+            )
             query_ms = self.time if t is None else int(t)
             result.update(
                 entity_stats_validity_version=1,

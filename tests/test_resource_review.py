@@ -1158,6 +1158,9 @@ def test_query_state_roundtrip_answers_every_query_the_same() -> None:
         h.ambiguous_sites = defaultdict(list)
         h._sites = set()
         h.coverage = []
+        from vantage.farms import FarmHistory
+
+        h.farms = FarmHistory()
         h.benefits = type("B", (), {})()
         h.benefits.logs = defaultdict(list)
         h.benefits.player = lambda owner, t, b=h.benefits: {"effects": list(b.logs.get(owner, []))}

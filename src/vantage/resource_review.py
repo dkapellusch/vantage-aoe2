@@ -16,6 +16,7 @@ from typing import Any
 
 from vantage import world as W
 from vantage.economy_benefits import EconomyBenefits
+from vantage.farms import FarmHistory
 from vantage.patch import Node
 
 RES = ("food", "wood", "stone", "gold")
@@ -77,6 +78,7 @@ class ResourceHistory:
         self._research: dict[int, set[int]] = {}
         self._known_entities: set[int] = set()
         self.benefits = EconomyBenefits(data)
+        self.farms = FarmHistory()
         self.exchanges: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
         self.exchange_log: dict[int, list[tuple[int, list[dict[str, Any]]]]] = defaultdict(list)
         self._dirty_exchange: set[int] = set()
@@ -242,6 +244,17 @@ class ResourceHistory:
         )
         masters: dict[tuple[int, int], Node | None] = {}
         rules: dict[tuple[int, int], W.MasterRules] = {}
+        farm_grants = self.farms.sample(world, t, baseline=baseline)
+        farm_receipts = {
+            pid: max(0.0, W.attr(p, "foodTotal") - self.players[pid][0][0])
+            for pid, p in players.items()
+            if pid in self.players and not baseline
+        }
+        before_grants = len(self.farms.grants)
+        self.farms.confirm(farm_grants, farm_receipts)
+        confirmed = self.farms.grants[before_grants:]
+        for grant in confirmed:
+            self._credit(grant["owner"], "Poles Folwark bonus food", "food", grant["food"])
         done: dict[int, set[int]] = {}
         built: dict[int, tuple[int, int, bool]] = {}
         civs = {pid: int(p.fields.get(W.P_CIV, -1)) for pid, p in players.items()}
@@ -554,6 +567,10 @@ class ResourceHistory:
             if baseline or previous is None:
                 continue
             receipts = [max(0.0, totals[i] - previous[0][i]) for i in range(4)]
+            # Folwark grants enter foodTotal but are not villager gathering.
+            receipts[0] = max(
+                0.0, receipts[0] - sum(g["food"] for g in confirmed if g["owner"] == pid)
+            )
             relic_delta = max(0.0, relic - previous[1])
             trade_delta = [max(0.0, trade[i] - previous[2][i]) for i in range(4)]
             self._credit(pid, "Relics", "gold", relic_delta)
@@ -763,6 +780,11 @@ class ResourceHistory:
         state["sites"] = self._sites
         state["coverage"] = self.coverage
         state["benefit_logs"] = self.benefits.logs
+        state["farm_history"] = {
+            "rules": self.farms.rules,
+            "farms": self.farms.farms,
+            "grants": self.farms.grants,
+        }
         return state
 
     def restore_query_state(self, state: dict[str, Any]) -> None:
@@ -771,6 +793,10 @@ class ResourceHistory:
         self._sites = set(state["sites"])
         self.coverage = [tuple(row) for row in state["coverage"]]
         self.benefits.logs = defaultdict(list, state["benefit_logs"])
+        farm_state = state.get("farm_history", {})
+        self.farms.rules = defaultdict(list, farm_state.get("rules", {}))
+        self.farms.farms = defaultdict(list, farm_state.get("farms", {}))
+        self.farms.grants = farm_state.get("grants", [])
 
     @staticmethod
     def _at(log: list[Any], t: int, default: Any) -> Any:

@@ -1261,3 +1261,41 @@ def test_average_apm_counts_only_the_time_the_timeline_observed() -> None:
     v = tl.view_at(None)
     assert v is not None
     assert v["players"]["1"]["apm_avg"] == round(240 / ((tl.time - tl.start) / 60_000))
+
+
+def test_folwark_grant_does_not_inflate_gathering_totals_or_rates() -> None:
+    tl = Timeline(GameData(None))
+    tl.feed(snapshot_frame())
+    tl.feed(
+        Frame(
+            time=1000,
+            patch=delta(
+                1000,
+                set_attr(1, "folwarkBuildingId", 109),
+                set_attr(1, "folwarkCollectAmount", 25),
+                set_attr(1, "farmDeathRate", 250),
+                set_master(1, 70, "MasterEntity", "objectGroup", "Int16", 49),
+                spawn(300, 70, 1, 4.0, 4.0, model="BuildingEntity", built=False),
+            ).forward(),
+        )
+    )
+    before = tl.view_at(1000)["players"]["1"]
+    raw = before["collected"]["food"]
+    tl.feed(
+        Frame(
+            time=2000,
+            patch=delta(
+                2000,
+                set_entity(300, "BuildingEntity", "built", "Boolean", True),
+                set_attr(1, "foodTotal", raw + 25),
+            ).forward(),
+        )
+    )
+    tl.finish()
+    after = tl.view_at(2000)["players"]["1"]
+    assert after["recorded_collected"]["food"] == raw + 25
+    assert after["collected"]["food"] == before["collected"]["food"]
+    assert after["collected"]["total"] == before["collected"]["total"]
+    assert after["collected_rate"]["food"] == before["collected_rate"]["food"] == 0
+    assert after["resource_income"]["bonus"]["food"] == 25
+    assert tl.unit_stats(300, 2000)["farm"]["grants"][0]["food"] == 25
