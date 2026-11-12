@@ -70,6 +70,10 @@ export function bonusIncomeHtml(players) {
       const group = effects.filter(row => row.category === category);
       return group.length ? `<tr class="review-income-category"><th colspan="5">${label} <span>${category === 'exchange' ? '' : '≈'}${fmtNum(group.reduce((sum, row) => sum + row.total, 0))}</span></th></tr>${sourceRows(group)}` : '';
     }).join('');
+    // A player with no bonus income is one line, not a table of zeros.
+    if (!rows.length && !benefits && !RESOURCE_ORDER.some(r => income.bonus?.[r])) {
+      return `<section class="review-income-player review-income-none" data-ui-key="income-player-${id}"><b style="color:${esc(color)}">${esc(name)}</b> <span class="hint">${t('No bonus income')}${partial ? ` · ${t('Partial history')}` : ''}</span></section>`;
+    }
     return `<section class="review-income-player" data-ui-key="income-player-${id}"><div class="review-income-head"><b style="color:${esc(color)}">${esc(name)}</b><span class="hint" ${tip(t('Bonus income'), t('Attributed bonus income. Approximate source attribution; yield and savings are separate.'))}>${t('Income')} ≈ ${fmtNum(income.total)}</span></div>
       <div class="review-resource-numbers">${resourceNumbers(income.bonus)}</div>
       ${partial ? `<span class="hint" ${tip(t('Partial history'), t('The recording starts late or has missing frames.'))}>${t('Partial history')}</span>` : ''}

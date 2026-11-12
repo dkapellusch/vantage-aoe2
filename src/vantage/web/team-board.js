@@ -1,4 +1,4 @@
-// Team board: the team overview panel in two-team games.
+// Team board: the team panel (#overview) in two-team games.
 //
 // Teams view: one row per stat, team A's value and bar on the left, team B's on
 // the right, the difference in the leader's colour between them. Players view:
@@ -8,6 +8,7 @@
 
 import { settings, saveSettings, esc, tip, fmtNum, fmtStock, playerStats, playerMarkColor, playerTextColor, teamName, plainTeamName, teamMemberLabel, RES } from './state.js';
 import { t } from './i18n.js';
+import { METRICS } from './metrics.js';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const RES_LABEL = { food: 'Food', wood: 'Wood', gold: 'Gold', stone: 'Stone' };
@@ -30,26 +31,24 @@ export function sumStat(stats, f) {
   return total;
 }
 
+// A Team board row for a registered metric (metrics.js): its name, value and direction.
+const row = (id, extra = {}) => { const m = METRICS[id]; return { id, label: m.label, f: m.f, ...(m.lower ? { lower: true } : {}), ...(m.warnEach ? { warnEach: m.warnEach } : {}), ...(m.cap ? { cap: m.cap } : {}), ...(m.detail ? { detail: m.detail } : {}), ...extra }; };
+
 export const SECTIONS = [
   { key: 'army', rows: [
-    { label: 'Villagers', f: (s) => s.villagers, detail: 'Including garrisoned ones, as the game counts them' },
-    { label: 'Military', f: (s) => s.military, detail: 'Military units' },
-    { label: 'Army value', f: (s) => s.army_value, detail: 'Resources spent on the living army' },
-    { label: 'Idle villagers', f: (s) => s.idle_villagers, lower: true, warnEach: 2 },
+    row('villagers'), row('military'), row('army_value'), row('idle_villagers'),
   ] },
   { key: 'banked', title: 'Banked · gatherers', rows: RES.map((r) => ({ label: RES_LABEL[r], res: r, f: (s) => s.resources?.[r], sub: (s) => s.tasks?.[r] ?? 0, stock: true, detail: 'banked / workers' })) },
   { key: 'rate', title: 'Collection rate · last minute', rows: [
-    { label: 'Total /min', strong: true, f: (s) => s.collected_rate?.total, detail: 'Resources collected per minute over the last game minute' },
+    row('rate', { label: 'Total /min', strong: true }),
     ...RES.map((r) => ({ label: `${RES_LABEL[r]} /min`, res: r, f: (s) => s.collected_rate?.[r] })),
   ] },
   { key: 'collected', title: 'Collected · whole game', rows: [
-    { label: 'Total collected', strong: true, f: (s) => s.collected?.total, detail: 'Resources collected since the start, including still-carried ones' },
+    row('collected', { label: 'Total collected', strong: true }),
     ...RES.map((r) => ({ label: RES_LABEL[r], res: r, f: (s) => s.collected?.[r] })),
   ] },
   { key: 'fights', title: 'Population · fights', rows: [
-    { label: 'Population', f: (s) => s.pop, cap: (s) => s.pop_cap, detail: 'Counts units in training, as the game does' },
-    { label: 'Kills', f: (s) => s.kills },
-    { label: 'Losses', f: (s) => s.deaths, lower: true, detail: 'Including those to animals and other non-player causes' },
+    row('population'), row('kills'), row('losses'),
   ] },
 ];
 
@@ -71,7 +70,7 @@ function head(a, b) {
     return `<span class="tb-team${right ? ' right' : ''}" data-details="1" ${tip(plainTeamName(team), t('Click: switch Teams / Players (Ctrl+Alt+R)'))}><i style="background:${c}"></i><span>${esc(teamName(team))}</span></span>`;
   };
   const view = teamBoardView();
-  const seg = `<span class="tb-seg" role="group" aria-label="${esc(t('Team overview view'))}">${['teams', 'players'].map((v) => `<button type="button" data-view="${v}" aria-pressed="${view === v}">${esc(t(v === 'teams' ? 'Teams' : 'Players'))}</button>`).join('')}</span>`;
+  const seg = `<span class="tb-seg" role="group" aria-label="${esc(t('Team board view'))}">${['teams', 'players'].map((v) => `<button type="button" data-view="${v}" aria-pressed="${view === v}">${esc(t(v === 'teams' ? 'Teams' : 'Players'))}</button>`).join('')}</span>`;
   return `<div class="tb-head">${side(a, false)}${seg}${side(b, true)}</div>`;
 }
 
@@ -108,7 +107,9 @@ function teamsView(a, b, ctx) {
   const ages = (team) => team.players.map((p) => { const s = playerStats(p.id); return s ? ctx.ageShield(s, p.id) : ''; }).join('');
   let html = `<div class="tb-row tb-ages"><span class="tb-side a">${ages(a)}</span><span class="tb-lab">${esc(t('Age'))}</span><span class="tb-side b">${ages(b)}</span></div>`;
   for (const sec of SECTIONS) {
-    const rows = sec.rows.map((r) => statRow(r, a, b, sa, sb)).filter(Boolean);
+    // Rows ticked off in Customize (settings.hud.hiddenRows) are left out.
+    const off = (settings.hud && settings.hud.hiddenRows) || [];
+    const rows = sec.rows.filter((r) => !r.id || !off.includes(r.id)).map((r) => statRow(r, a, b, sa, sb)).filter(Boolean);
     if (!rows.length) continue;
     if (sec.title) html += sectionHead(sec);
     if (!sec.title || !folded(sec.key)) html += rows.join('');
@@ -117,13 +118,13 @@ function teamsView(a, b, ctx) {
 }
 
 const PLAYER_COLS = [
-  { h: 'Vil', f: (s) => s.villagers, detail: 'Villagers' },
-  { h: 'Mil', f: (s) => s.military, detail: 'Military units' },
-  { h: 'Idle', f: (s) => s.idle_villagers, lower: true, warn: 5, detail: 'Idle villagers' },
+  { h: METRICS.villagers.short, f: METRICS.villagers.f, detail: METRICS.villagers.label },
+  { h: METRICS.military.short, f: METRICS.military.f, detail: METRICS.military.label },
+  { h: METRICS.idle_villagers.short, f: METRICS.idle_villagers.f, lower: true, warn: 5, detail: METRICS.idle_villagers.label },
   ...RES.map((r) => ({ res: r, f: (s) => s.resources?.[r], sub: (s) => s.tasks?.[r] ?? 0, stock: true, detail: `${RES_LABEL[r]}: banked (workers)` })),
-  { h: 'Pop', f: (s) => s.pop, cap: (s) => s.pop_cap, detail: 'Population / cap' },
+  { h: METRICS.population.short, f: METRICS.population.f, cap: METRICS.population.cap, detail: 'Population / cap' },
   { h: '/min', f: (s) => s.collected_rate?.total, detail: 'Resources collected per minute, last minute' },
-  { h: 'Coll.', f: (s) => s.collected?.total, detail: 'Resources collected, whole game' },
+  { h: METRICS.collected.short, f: METRICS.collected.f, detail: 'Resources collected, whole game' },
 ];
 
 function playersView(sides, ctx) {
