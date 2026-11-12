@@ -91,7 +91,12 @@ def test_idle_then_open_recording(server: tuple[str, Session, Path]) -> None:
     assert _get(base + "/api/techtree/1") == {}  # no game install in tests
     config = _get(base + "/api/config")
     assert config.pop("asset_version")
-    assert config == {"patch": {}, "force_default": False, "version": vantage.__version__}
+    assert config == {
+        "patch": {},
+        "force_default": False,
+        "version": vantage.__version__,
+        "game_art": True,
+    }
     assert _get(base + "/api/catalog?lang=de")["units"]["83"]["name"]
     assert _get(base + "/api/recordings")[0]["name"] == "game.vrec"
     assert _get(base + "/api/replays")[0]["name"] == "a.aoe2record"

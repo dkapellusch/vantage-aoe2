@@ -120,3 +120,12 @@ Vantage is an independent, unofficial project. It is not affiliated with, endors
 Vantage ships no game assets. It reads graphics, sounds and strings at run time from your own installation of the game. It was made under Microsoft's [Game Content Usage Rules](https://www.xbox.com/en-US/developers/rules) using assets from Age of Empires II: Definitive Edition, and it is not endorsed by or affiliated with Microsoft.
 
 Third-party runtime libraries and their licenses are listed in [THIRD_PARTY.md](THIRD_PARTY.md).
+
+`vantage serve --no-game-art` keeps installed game data for analysis and upgrade
+relevance while drawing plain map symbols. Game image/audio routes are disabled;
+upgrade chips use readable technology names. This differs from `--recording-only`,
+which skips game discovery unless an explicit `--game-dir` is supplied.
+
+Persisted consumers can use `vantage.analysis.analysis_provenance` to detect
+changes to the actual Python implementation, capture schema, installed data and
+TC growth target, even while an editable install keeps the same package version.

@@ -114,6 +114,7 @@ function updateMix() {
 
 /** Play one sound. ``opts.gain`` scales it, ``opts.minGap`` (ms) throttles the bus. */
 export async function play(url, busName = 'events', pan = 0, opts = {}) {
+  if (S.gameArt === false) return null;
   const c = audioCtx();
   if (!c || c.state !== 'running') return null;
   if ((settings.soundOutputVolume ?? 1) <= 0 || busVolume(busName) <= 0) return null;

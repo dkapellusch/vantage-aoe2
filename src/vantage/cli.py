@@ -103,6 +103,12 @@ def build_parser(plugin: Any = None) -> argparse.ArgumentParser:
     )
     s.add_argument("--minimize-game", action="store_true", help="with --live: minimise the game")
     s.add_argument(
+        "--no-game-art",
+        dest="game_art",
+        action="store_false",
+        help="use plain graphics without serving game art; keep game data for analysis",
+    )
+    s.add_argument(
         "--recording-only",
         action="store_true",
         help="open recordings without launching or discovering the game or using its API; "
@@ -405,6 +411,7 @@ def _serve(args: argparse.Namespace, plugin: Any = None) -> int:
             follow_live=not override and not recording_only and own_dirs is None,
             plugins=[] if plugin is None else plugin.server_plugins(),
             recording_only=recording_only,
+            game_art=args.game_art,
         )
         if recording:
             session.open_recording(str(recording))

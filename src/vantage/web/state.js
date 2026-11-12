@@ -281,6 +281,7 @@ function loadSettings() {
 export function applyServerConfig(cfg) {
   if (!cfg) return;
   assetVersion = typeof cfg.asset_version === 'string' ? cfg.asset_version : '';
+  S.gameArt = cfg.game_art !== false;
   if (cfg.force_default) settings = { ...DEFAULT_SETTINGS };
   Object.assign(settings, cfg.patch || {});
   migrateSettings(settings);

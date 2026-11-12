@@ -914,6 +914,7 @@ class App:
         follow_live: bool = True,
         plugins: Sequence[Any] = (),
         recording_only: bool = False,
+        game_art: bool = True,
     ) -> None:
         self.session = session
         #: Extensions from outside this package. A plugin may define
@@ -927,6 +928,7 @@ class App:
         #: Also list the replay folders of the profile the live game reports.
         self.follow_live = follow_live
         self.recording_only = recording_only
+        self.game_art = game_art
         self._sprites: SpriteStore | None = None
         self._sprites_key: tuple[Any, ...] = ()
         #: ``/api/series`` as last encoded: (timeline, its version, body).
@@ -965,6 +967,21 @@ class App:
             return self._static(h, "index.html")
         if path.startswith("/static/"):
             return self._static(h, path[len("/static/") :])
+        if not self.game_art and re.match(
+            r"^/(?:icon/|emblem/|ui/|sprite/|terrain(?:/|-)|audio/|particle_atlas\.)", path
+        ):
+            if path.startswith(("/icon/", "/emblem/", "/ui/")):
+                # Neutral, original placeholder: reserve image space without
+                # serving game art or dropping the underlying game metadata.
+                return _bytes(
+                    h,
+                    b'<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36">'
+                    b'<rect x="2" y="2" width="32" height="32" rx="4" '
+                    b'fill="#24282c" stroke="#8b8679"/></svg>',
+                    "image/svg+xml",
+                )
+            _error(h)
+            return None
         for plugin in getattr(self, "plugins", ()):
             answer = getattr(plugin, "get", None)
             if answer is not None and answer(self, h, path, q):
@@ -1115,6 +1132,7 @@ class App:
                 "version": __version__,
             }
             config["asset_version"] = self.asset_version()
+            config["game_art"] = self.game_art
             for plugin in plugins:
                 extend = getattr(plugin, "config", None)
                 if extend is not None:
@@ -1134,7 +1152,7 @@ class App:
                 return None
             return _bytes(h, f.read_bytes(), "application/json")
         if path == "/api/particles":
-            return _json(h, s.data.particle_definitions_table())
+            return _json(h, s.data.particle_definitions_table() if self.game_art else {})
         if path in ("/particle_atlas.png", "/particle_atlas.json"):
             got_atlas = s.data.particle_atlas(q.get("path", ""))
             if got_atlas is None:
@@ -1203,7 +1221,15 @@ class App:
         use. Asset URLs carrying it (``av=``) are cached by the browser for good."""
         data = self.session.data
         mods = (data.mod_roots("graphics"), data.mod_roots("sprites"), data.mod_roots("terrain"))
-        parts = (__version__, RENDER_VERSION, data.build, data.game_dir, data.mode, mods)
+        parts = (
+            __version__,
+            RENDER_VERSION,
+            data.build,
+            data.game_dir,
+            data.mode,
+            mods,
+            self.game_art,
+        )
         return hashlib.sha1(repr(parts).encode()).hexdigest()[:12]
 
     def _asset_cache(self, query: dict[str, str]) -> str:
@@ -2125,6 +2151,7 @@ def serve(
     follow_live: bool = True,
     plugins: Sequence[Any] = (),
     recording_only: bool = False,
+    game_art: bool = True,
 ) -> ThreadingHTTPServer:
     # Request threads share the GIL with the thread ingesting the stream. At the
     # default 5 ms switch interval a cached sprite strip took 19 ms (p50) while a
@@ -2137,6 +2164,7 @@ def serve(
         follow_live=follow_live,
         plugins=plugins,
         recording_only=recording_only,
+        game_art=game_art,
     )
     if client_config is not None:
         app.client_config = client_config

@@ -166,3 +166,7 @@
     z-index: 9; background: var(--panel-solid);
   }
 }
+
+/* Without game art, upgrades still need visible names and research status. */
+.review-upgrade.review-upgrade-text { width: auto; height: auto; min-height: 30px; max-width: 100%; padding: 4px 7px !important; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; white-space: normal; text-align: left; }
+.review-upgrade-text small { position: static; background: none; }

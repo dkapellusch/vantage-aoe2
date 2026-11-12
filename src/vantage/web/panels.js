@@ -2015,7 +2015,10 @@ export function relevantUpgrades(rows) {
     const info = S.catalog.techs[tid] ? techInfoFor(tid, pid) : stage;
     const icon = techIconFor(tid, pid) || (stage.icon >= 0 ? `/icon/tech/${stage.icon}.png?g=${S.game}` : '');
     const detail = stripMarkup(info.help || info.description || '');
-    return `<button class="review-upgrade ${status}" data-tech="${tid}" data-pid="${pid}" data-building="${a?.building || ''}" ${unavailable ? 'disabled' : ''} ${tip(info.name || stage.name, `${t(status)}${a?.remaining != null ? ' · ' + Math.ceil(a.remaining) + 's' : ''}${detail ? ' · ' + detail : ''}`)}><img src="${icon}" alt="${esc(info.name || stage.name)}"><small>${done.has(tid) ? '✓' : a?.remaining != null ? Math.ceil(a.remaining) + 's' : unavailable ? '×' : ''}</small></button>`;
+    const textOnly = S.gameArt === false;
+    const label = textOnly ? `<span class="review-upgrade-name">${esc(info.name || stage.name)}</span>`
+      : `<img src="${icon}" alt="${esc(info.name || stage.name)}">`;
+    return `<button class="review-upgrade ${textOnly ? 'review-upgrade-text ' : ''}${status}" data-tech="${tid}" data-pid="${pid}" data-building="${a?.building || ''}" ${unavailable ? 'disabled' : ''} ${tip(info.name || stage.name, `${t(status)}${a?.remaining != null ? ' · ' + Math.ceil(a.remaining) + 's' : ''}${detail ? ' · ' + detail : ''}`)}>${label}<small>${done.has(tid) ? '✓' : a?.remaining != null ? Math.ceil(a.remaining) + 's' : unavailable ? '×' : ''}</small></button>`;
   }).join('')}</div></section>`;
 }
 

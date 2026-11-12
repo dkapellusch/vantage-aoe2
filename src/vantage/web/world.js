@@ -422,7 +422,7 @@ function colorIndex(owner) {
 }
 
 export function spritesOn() {
-  return settings.gameGraphics !== false && S.camera.zoom >= 0.7;
+  return S.gameArt !== false && settings.gameGraphics !== false && S.camera.zoom >= 0.7;
 }
 
 // Particles (fire, smoke, dust, impacts). The game draws them from texture

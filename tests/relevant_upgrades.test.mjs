@@ -39,3 +39,17 @@ test('real chip renderer uses effect IDs, orders groups, preserves statuses and 
     assert.match(relevantUpgrades(row(3)),/Relevant upgrades unavailable/);
   } finally {globalThis.fetch=old;}
 });
+
+
+test('a server with no game art keeps metadata but overrides saved graphics preferences',async()=>{
+  const {applyServerConfig,settings}=await import('../src/vantage/web/state.js');
+  const {spritesOn}=await import('../src/vantage/web/world.js');
+  const oldZoom=S.camera.zoom,oldGraphics=settings.gameGraphics;S.camera.zoom=1;
+  applyServerConfig({game_art:false,patch:{gameGraphics:true}});
+  assert.equal(spritesOn(),false);
+  const text=relevantUpgrades([[123,1,38]]);
+  assert.match(text,/review-upgrade-name/);assert.match(text,/Upgrade 209/);
+  assert.doesNotMatch(text,/<img/);
+  applyServerConfig({game_art:true});assert.equal(spritesOn(),true);
+  S.camera.zoom=oldZoom;settings.gameGraphics=oldGraphics;
+});
