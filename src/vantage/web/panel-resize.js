@@ -1,16 +1,23 @@
 import { settings, saveSettings } from './state.js';
 import { t } from './i18n.js';
+import { isAnchored, toAnchored, fromAnchored, migratePanelSizes, snapToGrid, avoidZone, safeFrame } from './hud-model.js';
 
 // HUD panel rectangles the user set: resized from a corner handle, or moved by
 // the ⠿ grip in the hover toolbar (layout.js) or anywhere on a panel in arrange
-// mode (Alt+L). settings.panelSizes[id] = {left, top, width, height, moved?, auto?}:
-// moved panels leave their column; auto ones were only moved, so they keep
-// their natural size. Moves and resizes snap to the window edges and to other
-// panels' edges (Shift while dragging: no snapping).
+// mode (Alt+L). settings.panelSizes[id] is stored as an anchor and fractions of
+// the window (hud-model.js toAnchored: {anchor, x, y, w, h, moved?, auto?,
+// scale?, opacity?}), so a layout survives a window resize and an OBS source of
+// another size; this module works in pixels and converts at the edges.
+// Rectangles saved by older builds ({left, top, width, height}) are converted
+// on first use. moved panels leave their column; auto ones were only moved, so
+// they keep their natural size. Moves and resizes snap to the window edges and
+// to other panels' edges (Shift while dragging: no snapping); in the layout
+// editor also to its grid and safe frame, and out of the reserved zone.
 
 const SELECTOR = '.panel[id], .overlay[id], .review-surface[id]';
 const EXCLUDE = new Set(['omni-menu', 'panels-menu', 'jump-banner', 'launch-status', 'autocast-banner']);
-const corners = ['nw', 'ne', 'sw', 'se'];
+// Corner handles and edge handles (data-corner keeps its name for both).
+const corners = ['nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'];
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const MARGIN = 8, SNAP = 8, GAP = 6;
 
@@ -111,21 +118,62 @@ const topmost = () => (Array.isArray(settings.panelOrder) ? settings.panelOrder.
 function setRect(el, rect) {
   el.classList.add('hud-custom-size');
   el.classList.toggle('hud-auto-size', !!rect.auto);
-  for (const key of ['left', 'top', 'width', 'height']) el.style.setProperty(`--panel-${key}`, `${rect[key]}px`);
+  // zoom scales the element's own lengths too: divide, so the rectangle stays the one asked for.
+  const z = typeof rect.scale === 'number' && rect.scale > 0 ? rect.scale : 1;
+  for (const key of ['left', 'top', 'width', 'height']) el.style.setProperty(`--panel-${key}`, `${rect[key] / z}px`);
+  el.style.zoom = z === 1 ? '' : String(z);
+  if (typeof rect.opacity === 'number' && rect.opacity < 1) el.style.setProperty('--panel-opacity', String(rect.opacity));
+  else el.style.removeProperty('--panel-opacity');
   el.style.zIndex = rect.moved ? (topmost() === el.id ? '2' : '1') : '';
   syncSlot(el, rect);
 }
 
 function clearRect(el) {
   el.classList.remove('hud-custom-size', 'hud-auto-size');
-  el.style.zIndex = '';
-  for (const key of ['left', 'top', 'width', 'height']) el.style.removeProperty(`--panel-${key}`);
+  el.style.zIndex = ''; el.style.zoom = '';
+  for (const key of ['left', 'top', 'width', 'height', 'opacity']) el.style.removeProperty(`--panel-${key}`);
 }
 
-// Flags (moved, auto) survive fitting to a smaller window.
-const fitted = (rect) => ({ ...(rect.moved ? { moved: true } : {}), ...(rect.auto ? { auto: true } : {}), ...fitRect(rect, viewport()) });
+// Flags (moved, auto) and the scale and opacity survive fitting to a smaller window.
+const extrasOf = (rect) => ({ ...(rect.moved ? { moved: true } : {}), ...(rect.auto ? { auto: true } : {}), ...(rect.fixed ? { fixed: true } : {}),
+  ...(typeof rect.scale === 'number' ? { scale: rect.scale } : {}), ...(typeof rect.opacity === 'number' ? { opacity: rect.opacity } : {}) });
+const fitted = (saved) => { const rect = fromAnchored(saved, viewport()); return { ...extrasOf(rect), ...fitRect(rect, viewport()) }; };
 
+/** The saved rectangle of a panel in pixels for this window (undefined when it sits in its default place). */
+export function savedRect(id) {
+  const saved = settings.panelSizes?.[id];
+  return saved && typeof saved === 'object' ? fromAnchored(saved, viewport()) : undefined;
+}
+
+// Store a pixel rectangle as an anchored one. The anchor follows the panel
+// (the third of the window it is in) unless it was fixed by hand.
+function store(id, rect) {
+  const before = settings.panelSizes?.[id];
+  const anchor = rect.fixed && rect.anchor ? rect.anchor : before && before.fixed ? before.anchor : null;
+  settings.panelSizes = { ...(settings.panelSizes || {}), [id]: toAnchored(rect, viewport(), anchor) };
+}
+
+/** Place a panel from code (the layout editor's inspector, the Statistics window's dock). */
+export function setPanelRect(id, rect, { save = true } = {}) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const before = savedRect(id) || {};
+  const next = { ...extrasOf(before), ...extrasOf(rect), ...fitRect(rect, viewport()), ...(rect.anchor ? { anchor: rect.anchor } : {}) };
+  if (rect.auto === false) delete next.auto;
+  if (rect.fixed === false) delete next.fixed;
+  if (rect.scale === 1) delete next.scale;
+  if (rect.opacity === 1) delete next.opacity;
+  store(id, next); setRect(el, fitted(settings.panelSizes[id])); dockTimebar(); placeHandles();
+  if (save) { saveSettings(); changed(); }
+}
+
+let migrated = false;
 export function applyPanelSizes() {
+  if (!migrated) {
+    migrated = true;
+    // Schema v2: pixel rectangles from older builds become anchors and fractions (saved with the next change).
+    if (Object.values(settings.panelSizes || {}).some((r) => r && !isAnchored(r))) settings.panelSizes = migratePanelSizes(settings.panelSizes, viewport());
+  }
   for (const [id, rect] of Object.entries(settings.panelSizes || {})) {
     const el = document.getElementById(id);
     if (el && rect && typeof rect === 'object') setRect(el, fitted(rect));
@@ -136,6 +184,14 @@ export function applyPanelSizes() {
   }
   dockTimebar();
   placeHandles();
+}
+
+/** Make the page match settings.panelSizes after it was replaced (a loaded layout, an undo). */
+export function syncPanelSizes() {
+  const sizes = settings.panelSizes || {};
+  for (const el of document.querySelectorAll('.hud-custom-size')) if (!sizes[el.id]) { clearRect(el); dropSlot(el.id); }
+  migrated = false;
+  applyPanelSizes();
 }
 
 /** Every panel back to the layout's own place and size. */
@@ -157,7 +213,10 @@ export function resetPanel(id) {
 
 function placeHandles() {
   if (!handleBox) return;
-  const visible = !move && host?.isConnected && host.getClientRects().length
+  // No handles where nothing may be resized: a locked layout or the OBS overlay
+  // (outside the layout editor), and the phone layout.
+  const locked = document.body.classList.contains('hud-phone') || (document.body.classList.contains('hud-locked') && !arranging() && !!host?.closest('#hud'));
+  const visible = !move && !locked && host?.isConnected && host.getClientRects().length
     && !host.closest('.hidden, .panel-off, .collapsed') && !document.body.classList.contains('no-ui');
   handleBox.classList.toggle('hidden', !visible);
   if (!visible) return;
@@ -167,16 +226,46 @@ function placeHandles() {
   const r = host.getBoundingClientRect();
   for (const button of handleBox.children) {
     const corner = button.dataset.corner;
-    button.style.left = `${clamp(corner.includes('w') ? r.left : r.right, 7, window.innerWidth - 7) - 7}px`;
-    button.style.top = `${clamp(corner.includes('n') ? r.top : r.bottom, 7, window.innerHeight - 7) - 7}px`;
+    if (corner.length === 1) {
+      // An edge: a thin strip between the corners, mostly outside the panel so its own controls stay clickable.
+      const across = corner === 'n' || corner === 's';
+      button.style.left = `${across ? r.left + 12 : clamp(corner === 'w' ? r.left : r.right, 4, window.innerWidth - 2) - 4}px`;
+      button.style.top = `${across ? clamp(corner === 'n' ? r.top : r.bottom, 4, window.innerHeight - 2) - 4 : r.top + 12}px`;
+      button.style.width = `${across ? Math.max(0, r.width - 24) : 6}px`;
+      button.style.height = `${across ? 6 : Math.max(0, r.height - 24)}px`;
+    } else {
+      button.style.left = `${clamp(corner.includes('w') ? r.left : r.right, 7, window.innerWidth - 7) - 7}px`;
+      button.style.top = `${clamp(corner.includes('n') ? r.top : r.bottom, 7, window.innerHeight - 7) - 7}px`;
+    }
     button.setAttribute('aria-label', t('Resize {panel}', { panel: host.id.replaceAll('-', ' ') }));
-    button.setAttribute('aria-description', t({ nw: 'Top left', ne: 'Top right', sw: 'Bottom left', se: 'Bottom right' }[corner]));
+    button.setAttribute('aria-description', t({ nw: 'Top left', ne: 'Top right', sw: 'Bottom left', se: 'Bottom right', n: 'Top edge', s: 'Bottom edge', e: 'Right edge', w: 'Left edge' }[corner]));
   }
 }
 
 function commit(el, rect) {
-  settings.panelSizes = { ...(settings.panelSizes || {}), [el.id]: rect };
-  setRect(el, rect); dockTimebar(); placeHandles();
+  const before = savedRect(el.id);
+  // Scale and opacity (set in the layout editor) stay through moves and resizes.
+  const next = { ...(before ? { ...(typeof before.scale === 'number' ? { scale: before.scale } : {}), ...(typeof before.opacity === 'number' ? { opacity: before.opacity } : {}) } : {}), ...rect };
+  store(el.id, next);
+  setRect(el, next); dockTimebar(); placeHandles();
+}
+
+// Put back what was saved before a cancelled move or resize (the stored form, untouched).
+function restore(el, raw) {
+  settings.panelSizes = { ...(settings.panelSizes || {}), [el.id]: raw };
+  setRect(el, fitted(raw)); dockTimebar(); placeHandles();
+}
+
+// The layout editor's extra rules: its snap grid, the safe frame as a snap
+// target, and the reserved zone (a webcam) panels stay out of.
+function editorRules() {
+  const h = settings.hud || {};
+  const vp = viewport(), z = h.reserved;
+  return {
+    grid: arranging() && h.snap !== false,
+    frame: arranging() && h.safeArea ? safeFrame(vp) : null,
+    zone: z ? { left: z.x * vp.width, top: z.y * vp.height, width: z.w * vp.width, height: z.h * vp.height } : null,
+  };
 }
 
 // Snap targets: the other visible HUD panels.
@@ -209,7 +298,8 @@ export function startMove(el, e) {
   e.preventDefault(); e.stopPropagation();
   const r = el.getBoundingClientRect();
   const saved = settings.panelSizes?.[el.id];
-  move = { el, x: e.clientX, y: e.clientY, saved, others: otherRects(el),
+  const rules = editorRules();
+  move = { el, x: e.clientX, y: e.clientY, saved, rules, others: [...otherRects(el), ...(rules.frame ? [rules.frame] : [])],
     rect: { left: r.left, top: r.top, width: r.width, height: r.height },
     auto: saved ? !!saved.auto : true };
   raise(el.id);
@@ -220,7 +310,15 @@ export function startMove(el, e) {
 function moveTo(e) {
   if (!move) return;
   let rect = moveRect(move.rect, e.clientX - move.x, e.clientY - move.y, viewport()), guides = [];
-  if (!e.shiftKey) ({ rect, guides } = snapRect(rect, move.others, viewport()));
+  if (!e.shiftKey) {
+    ({ rect, guides } = snapRect(rect, move.others, viewport()));
+    // The grid takes the axes no edge claimed.
+    if (move.rules.grid) {
+      const g = snapToGrid(rect);
+      rect = { ...rect, left: guides.some((x) => x.axis === 'x') ? rect.left : g.left, top: guides.some((x) => x.axis === 'y') ? rect.top : g.top };
+    }
+  }
+  rect = avoidZone(rect, move.rules.zone);
   showGuides(guides);
   commit(move.el, { ...fitRect(rect, viewport()), moved: true, ...(move.auto ? { auto: true } : {}) });
 }
@@ -228,10 +326,10 @@ function moveTo(e) {
 function endMove(cancel = false) {
   if (!move) return;
   const { el, saved, x, y, last } = move;
-  if (cancel) { if (saved) commit(el, saved); else resetPanel(el.id); }
+  if (cancel) { if (saved) restore(el, saved); else resetPanel(el.id); }
   else if (!last || (Math.abs(last.x - x) < 3 && Math.abs(last.y - y) < 3)) {
     // A click on the grip, not a drag: nothing moves.
-    if (saved) commit(el, saved); else { const sizes = { ...settings.panelSizes }; delete sizes[el.id]; settings.panelSizes = sizes; clearRect(el); }
+    if (saved) restore(el, saved); else { const sizes = { ...settings.panelSizes }; delete sizes[el.id]; settings.panelSizes = sizes; clearRect(el); }
   }
   move = null; showGuides([]);
   document.body.classList.remove('hud-moving');
@@ -240,7 +338,7 @@ function endMove(cancel = false) {
 
 /** Nudge a panel with the keyboard (the grip focused): 10 px, 1 px with Shift. */
 export function nudgePanel(el, dx, dy) {
-  const r = el.getBoundingClientRect(), saved = settings.panelSizes?.[el.id];
+  const r = el.getBoundingClientRect(), saved = savedRect(el.id);
   raise(el.id);
   commit(el, { ...moveRect({ left: r.left, top: r.top, width: r.width, height: r.height }, dx, dy, viewport()), moved: true, ...(!saved || saved.auto ? { auto: true } : {}) });
   saveSettings(); changed();
@@ -250,9 +348,13 @@ export function nudgePanel(el, dx, dy) {
 
 export function arranging() { return document.body.classList.contains('hud-arrange'); }
 export function setArranging(on) {
+  if (arranging() === !!on) return;
   document.body.classList.toggle('hud-arrange', on);
   const banner = document.getElementById('arrange-banner');
-  if (banner) banner.classList.toggle('hidden', !on);
+  // The layout editor (layout-editor.js) replaces the banner with its own bar when it is loaded.
+  if (banner) banner.classList.toggle('hidden', !on || document.body.classList.contains('hud-editor'));
+  document.dispatchEvent(new CustomEvent('vantage:arrange', { detail: { on: !!on } }));
+  placeHandles();
 }
 
 export function installPanelResizing(onChange) {
@@ -300,22 +402,24 @@ export function installPanelResizing(onChange) {
     const r = host.getBoundingClientRect();
     drag = { corner, x: e.clientX, y: e.clientY, others: otherRects(host),
       rect: { left: r.left, top: r.top, width: r.width, height: r.height },
-      saved: settings.panelSizes?.[host.id] };
+      saved: settings.panelSizes?.[host.id], moved: !!savedRect(host.id)?.moved };
     e.target.setPointerCapture(e.pointerId);
     document.body.classList.add('hud-resizing');
   });
   handleBox.addEventListener('pointermove', e => {
     if (!drag) return;
-    let rect = resizeRect(drag.rect, drag.corner, e.clientX - drag.x, e.clientY - drag.y, viewport(), minimum(host.id)), guides = [];
+    // An edge handle moves one axis only.
+    const dx = /^[ns]$/.test(drag.corner) ? 0 : e.clientX - drag.x, dy = /^[ew]$/.test(drag.corner) ? 0 : e.clientY - drag.y;
+    let rect = resizeRect(drag.rect, drag.corner, dx, dy, viewport(), minimum(host.id)), guides = [];
     if (!e.shiftKey) ({ rect, guides } = snapRect(rect, drag.others, viewport(), drag.corner));
     showGuides(guides);
     // A resized panel keeps where it was moved to, now at the size it was given.
-    commit(host, { ...fitRect(rect, viewport()), ...(drag.saved?.moved ? { moved: true } : {}) });
+    commit(host, { ...fitRect(rect, viewport()), ...(drag.moved ? { moved: true } : {}) });
   });
   function finish(cancel = false) {
     if (!drag) return;
     if (cancel) {
-      if (drag.saved) commit(host, drag.saved);
+      if (drag.saved) restore(host, drag.saved);
       else {
         const sizes = { ...settings.panelSizes }; delete sizes[host.id]; settings.panelSizes = sizes;
         clearRect(host);
@@ -339,9 +443,10 @@ export function installPanelResizing(onChange) {
   handleBox.addEventListener('keydown', e => {
     if (!host || !e.target.dataset.corner || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
     e.preventDefault(); e.stopPropagation();
-    const step = e.shiftKey ? 1 : 10, r = host.getBoundingClientRect(), saved = settings.panelSizes?.[host.id];
-    commit(host, { ...resizeRect(r, e.target.dataset.corner, e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0,
-      e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0, viewport(), minimum(host.id)), ...(saved?.moved ? { moved: true } : {}) });
+    const step = e.shiftKey ? 1 : 10, r = host.getBoundingClientRect(), saved = savedRect(host.id), corner = e.target.dataset.corner;
+    const kx = /^[ns]$/.test(corner) ? 0 : e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+    const ky = /^[ew]$/.test(corner) ? 0 : e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+    commit(host, { ...resizeRect(r, corner, kx, ky, viewport(), minimum(host.id)), ...(saved?.moved ? { moved: true } : {}) });
     saveSettings(); changed();
   });
   applyPanelSizes();
