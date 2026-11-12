@@ -60,6 +60,7 @@ class HealingHistory:
         events: list[dict[str, Any]],
         *,
         discontinuity: bool = False,
+        owned: dict[int, Node] | None = None,
     ) -> None:
         if world is None:
             return
@@ -72,7 +73,7 @@ class HealingHistory:
         entities, players = W.entities_of(world), W.players_of(world)
         links: dict[int, tuple[int, int]] = {}
         repairs: set[int] = set()
-        for eid, entity in entities.items():
+        for eid, entity in (entities if owned is None else owned).items():
             f = entity.fields
             owner = int(f.get(W.E_OWNER, 0) or 0)
             if owner <= 0 or f.get(W.E_STATE, 2) > W.ENTITY_ALIVE:

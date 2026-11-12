@@ -476,10 +476,17 @@ class Timeline:
                 self._pressure = PressureTracker()
             self._prev_frame_t = frame.time
             self.time = frame.time
+            world = W.world_of(self.patcher.root)
+            owned = {
+                eid: e
+                for eid, e in (W.entities_of(world).items() if world else ())
+                if int(e.fields.get(W.E_OWNER, 0) or 0) > 0
+            }
             self.building_history.sample(
                 W.world_of(self.patcher.root),
                 frame.time,
                 discontinuity=bool(frame.skipped) or (frame.is_snapshot and self.frames > 1),
+                owned=owned,
             )
             self.activity_log.update(self.building_history.logs)
             self.resource_history.sample(
@@ -490,12 +497,14 @@ class Timeline:
                 raw_events=frame.events,
                 commands=commands,
                 discontinuity=bool(frame.skipped) or (frame.is_snapshot and self.frames > 1),
+                owned=owned,
             )
             self.healing_history.sample(
                 W.world_of(self.patcher.root),
                 frame.time,
                 frame.events,
                 discontinuity=bool(frame.skipped) or (frame.is_snapshot and self.frames > 1),
+                owned=owned,
             )
             self._commands(frame.time, commands)
             for ev in pre_events:

@@ -22,6 +22,7 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import sys
 import threading
 import time
@@ -47,6 +48,7 @@ from vantage.gamedata import (
     replay_dirs,
     windows_path,
 )
+from vantage.http_cache import content_encoding
 from vantage.launcher import GameLauncher
 from vantage.live import MAX_API_VERSION, classify_stream_error, port_open
 from vantage.paths import local_data_dir
@@ -110,6 +112,7 @@ class Session:
     def __init__(self, data: GameData, recordings_dir: Path) -> None:
         self.data = data
         self.viewer_build = deployment_revision()
+        self.server_instance = secrets.token_hex(8)
         self.recordings_dir = recordings_dir
         self.timeline: Timeline | None = None
         self.tc_idle_villagers = 120
@@ -763,6 +766,7 @@ class Session:
         return {
             "mode": self.mode,
             "viewer_build": self.viewer_build,
+            "server_instance": self.server_instance,
             "source": self.source,
             "error": self.error,
             "generation": self.generation,
@@ -820,6 +824,9 @@ def _json_body(
     headers: dict[str, str] | None = None,
 ) -> None:
     """Send JSON that is already encoded."""
+    body, headers = content_encoding(
+        body, "application/json", handler.headers.get("Accept-Encoding", ""), headers
+    )
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(body)))
@@ -852,6 +859,9 @@ def _bytes(
 ) -> None:
     """Send ``body``; ``cache`` True caches it for a day, a string is the
     ``Cache-Control`` value itself."""
+    body, headers = content_encoding(
+        body, ctype, handler.headers.get("Accept-Encoding", ""), headers
+    )
     handler.send_response(200)
     handler.send_header("Content-Type", ctype)
     handler.send_header("Content-Length", str(len(body)))
@@ -1149,6 +1159,7 @@ class App:
             }
             config["asset_version"] = self.asset_version()
             config["viewer_build"] = self.session.viewer_build
+            config["server_instance"] = self.session.server_instance
             config["game_art"] = self.game_art
             for plugin in plugins:
                 extend = getattr(plugin, "config", None)

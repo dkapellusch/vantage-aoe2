@@ -265,7 +265,11 @@ function renderFidelityNotice(desc) {
 }
 
 function checkViewerBuild(desc) {
-  if (!serverConfig?.viewer_build || !desc?.viewer_build || serverConfig.viewer_build === desc.viewer_build) return false;
+  const changedBuild = serverConfig?.viewer_build && desc?.viewer_build
+    && serverConfig.viewer_build !== desc.viewer_build;
+  const changedProcess = serverConfig?.server_instance && desc?.server_instance
+    && serverConfig.server_instance !== desc.server_instance;
+  if (!changedBuild && !changedProcess) return false;
   // A deployment changes the JS graph as well as its API. Reload once, retaining
   // the playhead and selection; never combine old data caches with new code.
   try { sessionStorage.setItem(`vantage:resume:${location.pathname}`, JSON.stringify({

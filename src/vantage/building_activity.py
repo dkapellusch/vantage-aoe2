@@ -63,7 +63,14 @@ class BuildingHistory:
         self.ended[eid] = t
         del self.states[eid]
 
-    def sample(self, world: Node | None, t: int, *, discontinuity: bool = False) -> None:
+    def sample(
+        self,
+        world: Node | None,
+        t: int,
+        *,
+        discontinuity: bool = False,
+        owned: dict[int, Node] | None = None,
+    ) -> None:
         if world is None:
             return
         if discontinuity and self.time is not None:
@@ -77,7 +84,7 @@ class BuildingHistory:
         production: dict[int, list[dict[str, Any]]] = defaultdict(list)
         villagers: dict[int, int] = defaultdict(int)
         buildings: dict[int, tuple[Node, dict[str, Any] | None]] = {}
-        for e in W.live_entities(world):
+        for e in W.live_entities(world, owned.values() if owned is not None else None):
             f = e.fields
             owner = int(f.get(W.E_OWNER, 0) or 0)
             if owner not in players or owner == 0:

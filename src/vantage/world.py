@@ -1618,13 +1618,13 @@ def master_node(entity: Node, players: dict[int, Node]) -> Node | None:
     return player_master_node(entity, players)
 
 
-def live_entities(world: Node) -> Iterator[Node]:
+def live_entities(world: Node, candidates: Iterable[Node] | None = None) -> Iterator[Node]:
     """Entities that exist on the map (not doppelgangers, not dying/dead).
 
     State 3 is alive for Gaia only -- it is how mines, bushes and carcasses
     persist while they still hold resources.
     """
-    for e in entities_of(world).values():
+    for e in entities_of(world).values() if candidates is None else candidates:
         f = e.fields
         if e.model == MODEL_DOPPLE or f.get(E_DOPPLE):
             continue

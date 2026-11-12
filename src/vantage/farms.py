@@ -38,7 +38,9 @@ class FarmHistory:
         i = bisect_right(log, t, key=lambda row: row[0]) - 1
         return log[i][1] if i >= 0 else None
 
-    def sample(self, world: Node, t: int, *, baseline: bool) -> list[dict[str, Any]]:
+    def sample(
+        self, world: Node, t: int, *, baseline: bool, owned: dict[int, Node] | None = None
+    ) -> list[dict[str, Any]]:
         players = W.players_of(world)
         entities = W.entities_of(world)
         for pid, player in players.items():
@@ -76,7 +78,7 @@ class FarmHistory:
                 log.append((t, rule))
         sites: dict[int, list[tuple[int, Node]]] = defaultdict(list)
         farms = {}
-        for eid, entity in entities.items():
+        for eid, entity in (entities if owned is None else owned).items():
             f = entity.fields
             owner = int(f.get(W.E_OWNER, 0) or 0)
             if owner <= 0 or f.get(W.E_DOPPLE) or f.get(W.E_STATE, 2) != W.ENTITY_ALIVE:

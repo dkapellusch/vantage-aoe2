@@ -92,6 +92,7 @@ def test_idle_then_open_recording(server: tuple[str, Session, Path]) -> None:
     config = _get(base + "/api/config")
     assert config.pop("asset_version")
     assert config.pop("viewer_build") == session.viewer_build
+    assert config.pop("server_instance") == session.server_instance
     assert config == {
         "patch": {},
         "force_default": False,

@@ -220,6 +220,7 @@ class ResourceHistory:
         handicaps: dict[int, int] | None = None,
         raw_events: list[dict[str, Any]] | None = None,
         commands: list[dict[str, Any]] | None = None,
+        owned: dict[int, Node] | None = None,
     ) -> None:
         if world is None:
             return
@@ -244,7 +245,7 @@ class ResourceHistory:
         )
         masters: dict[tuple[int, int], Node | None] = {}
         rules: dict[tuple[int, int], W.MasterRules] = {}
-        farm_grants = self.farms.sample(world, t, baseline=baseline)
+        farm_grants = self.farms.sample(world, t, baseline=baseline, owned=owned)
         farm_receipts = {
             pid: max(0.0, W.attr(p, "foodTotal") - self.players[pid][0][0])
             for pid, p in players.items()
@@ -266,7 +267,7 @@ class ResourceHistory:
                 if isinstance(rs, Node) and rs.fields.get(W.R_STATE) == W.RESEARCH_DONE
             }
         # Sites first: a worker's action may no longer retain its last drop target.
-        for eid, e in entities.items():
+        for eid, e in (entities if owned is None else owned).items():
             f = e.fields
             owner = int(f.get(W.E_OWNER, 0) or 0)
             if owner <= 0 or f.get(W.E_STATE, 2) > W.ENTITY_ALIVE:
