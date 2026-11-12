@@ -1636,5 +1636,16 @@
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Masa pusat bandar tidak melatih atau menyelidik. Jeda di bawah 1 s dikira sebagai bekerja. Sekatan perumahan atau had penduduk dikecualikan; masa kekurangan rumah dikira berasingan.",
  "Population limit": "Had penduduk",
  "Lifetime healing": "Penyembuhan sepanjang hayat",
- "Relevant upgrades unavailable": "Naik taraf berkaitan tidak tersedia"
+ "Relevant upgrades unavailable": "Naik taraf berkaitan tidak tersedia",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "Dari siap dibina sehingga pertama kali mencapai {target} penduduk hidup atau had populasi. Masa bertindih dikira sekali. Masa pusat bandar tidak melatih atau menyelidik. Jeda di bawah 1 s dikira sebagai bekerja. Sekatan perumahan atau had penduduk dikecualikan; masa kekurangan rumah dikira berasingan.",
+ "Idle TC (growth)": "PB melahu (pertumbuhan)",
+ "TC Idle (growth)": "PB melahu (pertumbuhan)",
+ "Idle TC (growth) / Housed": "PB melahu (pertumbuhan) / Penuh rumah",
+ "TC growth / Hsd": "TC (pertumbuhan) / Penuh rumah",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "Dari siap dibina sehingga pertama kali mencapai {target} penduduk hidup atau had populasi. Masa bertindih dikira sekali.",
+ "{target} living villagers": "{target} penduduk hidup",
+ "Match population limit": "Had populasi",
+ "Cutoff: {time} ({reason}).": "Had masa: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "Ambang belum dicapai; dikira sehingga {time}.",
+ "Whole-game window: {time}.": "Seluruh permainan: {time}."
 }

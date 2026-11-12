@@ -1636,5 +1636,16 @@
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Tempo con un centro città inattivo: né addestramento né ricerca. Le pause sotto 1 s contano come lavoro. I blocchi per alloggi o limite di popolazione sono esclusi; il tempo senza alloggi è conteggiato separatamente.",
  "Population limit": "Limite di popolazione",
  "Lifetime healing": "Cure nel corso della vita",
- "Relevant upgrades unavailable": "Miglioramenti pertinenti non disponibili"
+ "Relevant upgrades unavailable": "Miglioramenti pertinenti non disponibili",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "Dal completamento fino al primo raggiungimento di {target} abitanti vivi o del limite di popolazione. Le sovrapposizioni contano una volta. Tempo con un centro città inattivo: né addestramento né ricerca. Le pause sotto 1 s contano come lavoro. I blocchi per alloggi o limite di popolazione sono esclusi; il tempo senza alloggi è conteggiato separatamente.",
+ "Idle TC (growth)": "CC inattivo (crescita)",
+ "TC Idle (growth)": "CC inattivo (crescita)",
+ "Idle TC (growth) / Housed": "CC inattivo (crescita) / Senza case",
+ "TC growth / Hsd": "TC (crescita) / Senza case",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "Dal completamento fino al primo raggiungimento di {target} abitanti vivi o del limite di popolazione. Le sovrapposizioni contano una volta.",
+ "{target} living villagers": "{target} abitanti vivi",
+ "Match population limit": "Limite di popolazione",
+ "Cutoff: {time} ({reason}).": "Termine: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "Soglia non raggiunta; conteggiato fino a {time}.",
+ "Whole-game window: {time}.": "Partita intera: {time}."
 }

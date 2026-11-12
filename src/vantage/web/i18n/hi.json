@@ -1636,5 +1636,16 @@
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "नगर केंद्र का निष्क्रिय समय: न प्रशिक्षण, न शोध। 1 सेकंड से कम का अंतर काम माना जाता है। आवास या जनसंख्या सीमा से रुकी कतारें शामिल नहीं हैं; आवास की कमी का समय अलग गिना जाता है।",
  "Population limit": "जनसंख्या सीमा",
  "Lifetime healing": "जीवनकाल में उपचार",
- "Relevant upgrades unavailable": "संबंधित उन्नयन उपलब्ध नहीं हैं"
+ "Relevant upgrades unavailable": "संबंधित उन्नयन उपलब्ध नहीं हैं",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "निर्माण पूरा होने से पहली बार {target} जीवित ग्रामीणों या जनसंख्या सीमा तक। एक साथ निष्क्रिय नगर केंद्रों का समय एक बार गिना जाता है। नगर केंद्र का निष्क्रिय समय: न प्रशिक्षण, न शोध। 1 सेकंड से कम का अंतर काम माना जाता है। आवास या जनसंख्या सीमा से रुकी कतारें शामिल नहीं हैं; आवास की कमी का समय अलग गिना जाता है।",
+ "Idle TC (growth)": "निष्क्रिय TC (विकास)",
+ "TC Idle (growth)": "निष्क्रिय TC (विकास)",
+ "Idle TC (growth) / Housed": "निष्क्रिय TC (विकास) / आवास सीमा",
+ "TC growth / Hsd": "TC (विकास) / आवास सीमा",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "निर्माण पूरा होने से पहली बार {target} जीवित ग्रामीणों या जनसंख्या सीमा तक। एक साथ निष्क्रिय नगर केंद्रों का समय एक बार गिना जाता है।",
+ "{target} living villagers": "{target} जीवित ग्रामीण",
+ "Match population limit": "जनसंख्या सीमा",
+ "Cutoff: {time} ({reason}).": "समाप्ति: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "सीमा नहीं पहुँची; यहाँ तक गिना {time}.",
+ "Whole-game window: {time}.": "पूरे खेल का समय: {time}."
 }

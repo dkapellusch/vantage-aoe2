@@ -1654,5 +1654,16 @@
  "Reach": "Zasięg",
  "Farm grants": "Premie farm",
  "Lifetime healing": "Leczenie przez całe życie",
- "Relevant upgrades unavailable": "Odpowiednie ulepszenia niedostępne"
+ "Relevant upgrades unavailable": "Odpowiednie ulepszenia niedostępne",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "Od ukończenia do pierwszego osiągnięcia {target} żywych wieśniaków lub limitu populacji. Nakładające się okresy liczą się raz. Czas bezczynności centrum miasta: bez szkolenia i badań. Przerwy poniżej 1 s liczą się jako praca. Blokady z powodu braku domów lub limitu populacji są wyłączone; czas braku domów jest liczony oddzielnie.",
+ "Idle TC (growth)": "Bezczynne CM (rozwój)",
+ "TC Idle (growth)": "Bezczynne CM (rozwój)",
+ "Idle TC (growth) / Housed": "Bezczynne CM (rozwój) / Brak domów",
+ "TC growth / Hsd": "TC (rozwój) / Brak domów",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "Od ukończenia do pierwszego osiągnięcia {target} żywych wieśniaków lub limitu populacji. Nakładające się okresy liczą się raz.",
+ "{target} living villagers": "{target} żywych wieśniaków",
+ "Match population limit": "Limit populacji",
+ "Cutoff: {time} ({reason}).": "Koniec: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "Próg nieosiągnięty; liczono do {time}.",
+ "Whole-game window: {time}.": "Cała gra: {time}."
 }

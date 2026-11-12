@@ -30,7 +30,11 @@ class _Building:
 
 
 class BuildingHistory:
-    def __init__(self) -> None:
+    def __init__(self, villager_target: int = 120) -> None:
+        if villager_target < 1:
+            raise ValueError("TC idle villager target must be positive")
+        self.villager_target = villager_target
+        self.cutoffs: dict[int, tuple[int, str]] = {}
         self.states: dict[int, _Building] = {}
         self.logs: dict[int, list[tuple[int, int]]] = defaultdict(list)
         self.ended: dict[int, int] = {}
@@ -71,6 +75,7 @@ class BuildingHistory:
         self.time = t
         players = W.players_of(world)
         production: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        villagers: dict[int, int] = defaultdict(int)
         buildings: dict[int, tuple[Node, dict[str, Any] | None]] = {}
         for e in W.live_entities(world):
             f = e.fields
@@ -78,12 +83,24 @@ class BuildingHistory:
             if owner not in players or owner == 0:
                 continue
             mnode = W.master_node(e, players)
+            if mnode is not None and mnode.fields.get(W.M_CLASS) == 4:
+                villagers[owner] += 1
             if mnode is None or mnode.fields.get(W.M_TYPE) != W.TYPE_BUILDING:
                 continue
             prod = W.production_state(e) if f.get(W.B_BUILT) else None
             if prod is not None:
                 production[owner].append(prod)
             buildings[int(f.get(W.E_ID, 0))] = e, prod
+        # Living villagers, not the cumulative creation counter. Latch the first
+        # crossing at stream resolution; casualties never reopen the window.
+        for pid, player in players.items():
+            if pid <= 0 or pid in self.cutoffs:
+                continue
+            cap = W.attr(player, "unitLimit")
+            if villagers[pid] >= self.villager_target:
+                self.cutoffs[pid] = t, "villagers"
+            elif cap > 0 and W.attr(player, "population") >= cap:
+                self.cutoffs[pid] = t, "population"
         blocked = {
             pid: W.population_state(player, production[pid])[1]
             for pid, player in players.items()
@@ -150,3 +167,25 @@ class BuildingHistory:
             )
             / 1000
         )
+
+    def tc_idle_stats(self, owner: int, t: int) -> dict[str, Any]:
+        """One definition for HUD, summaries and charts, without future leakage.
+
+        Foundations never enter idle intervals, so each TC starts at completion.
+        A TC completed after the owner's cutoff contributes nothing to growth.
+        Whole-game idle retains the same union and queue/housing semantics.
+        """
+        cutoff = self.cutoffs.get(owner)
+        if cutoff is not None and cutoff[0] > t:
+            cutoff = None
+        end = min(t, cutoff[0]) if cutoff else t
+        return {
+            "tc_idle_seconds": round(self.tc_idle(owner, end)),
+            "tc_idle_whole_seconds": round(self.tc_idle(owner, t)),
+            "tc_idle_growth": {
+                "villager_target": self.villager_target,
+                "cutoff_ms": cutoff[0] if cutoff else None,
+                "reason": cutoff[1] if cutoff else None,
+                "through_ms": end,
+            },
+        }

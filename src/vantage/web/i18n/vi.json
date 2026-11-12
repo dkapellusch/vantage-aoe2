@@ -1636,5 +1636,16 @@
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Thời gian trung tâm đô thị không huấn luyện hay nghiên cứu. Khoảng chuyển tiếp dưới 1 giây được tính là làm việc. Không tính lúc bị chặn do thiếu nhà hoặc giới hạn dân số; thời gian thiếu nhà được tính riêng.",
  "Population limit": "Giới hạn dân số",
  "Lifetime healing": "Hồi máu suốt vòng đời",
- "Relevant upgrades unavailable": "Không có nâng cấp liên quan"
+ "Relevant upgrades unavailable": "Không có nâng cấp liên quan",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "Từ lúc xây xong đến lần đầu đạt {target} dân làng còn sống hoặc giới hạn dân số. Thời gian trùng nhau chỉ tính một lần. Thời gian trung tâm đô thị không huấn luyện hay nghiên cứu. Khoảng chuyển tiếp dưới 1 giây được tính là làm việc. Không tính lúc bị chặn do thiếu nhà hoặc giới hạn dân số; thời gian thiếu nhà được tính riêng.",
+ "Idle TC (growth)": "Nhà chính rỗi (tăng trưởng)",
+ "TC Idle (growth)": "Nhà chính rỗi (tăng trưởng)",
+ "Idle TC (growth) / Housed": "Nhà chính rỗi (tăng trưởng) / Hết nhà",
+ "TC growth / Hsd": "TC (tăng trưởng) / Hết nhà",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "Từ lúc xây xong đến lần đầu đạt {target} dân làng còn sống hoặc giới hạn dân số. Thời gian trùng nhau chỉ tính một lần.",
+ "{target} living villagers": "{target} dân làng còn sống",
+ "Match population limit": "Giới hạn dân số",
+ "Cutoff: {time} ({reason}).": "Mốc dừng: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "Chưa đạt ngưỡng; tính đến {time}.",
+ "Whole-game window: {time}.": "Cả trận: {time}."
 }

@@ -1636,5 +1636,16 @@
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "마을 회관이 훈련도 연구도 하지 않는 시간입니다. 1초 미만의 전환 간격은 작업으로 계산합니다. 주택 부족이나 인구 한도로 인한 대기는 제외하며, 주택 부족 시간은 별도로 계산합니다.",
  "Population limit": "인구 한도",
  "Lifetime healing": "평생 치유량",
- "Relevant upgrades unavailable": "관련 업그레이드를 사용할 수 없음"
+ "Relevant upgrades unavailable": "관련 업그레이드를 사용할 수 없음",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "완공부터 살아 있는 주민 {target}명 또는 인구 한도에 처음 도달할 때까지입니다. 겹치는 유휴 시간은 한 번만 계산합니다. 마을 회관이 훈련도 연구도 하지 않는 시간입니다. 1초 미만의 전환 간격은 작업으로 계산합니다. 주택 부족이나 인구 한도로 인한 대기는 제외하며, 주택 부족 시간은 별도로 계산합니다.",
+ "Idle TC (growth)": "유휴 마을 회관 (성장기)",
+ "TC Idle (growth)": "유휴 마을 회관 (성장기)",
+ "Idle TC (growth) / Housed": "유휴 마을 회관 (성장기) / 인구 제한",
+ "TC growth / Hsd": "TC (성장기) / 인구 제한",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "완공부터 살아 있는 주민 {target}명 또는 인구 한도에 처음 도달할 때까지입니다. 겹치는 유휴 시간은 한 번만 계산합니다.",
+ "{target} living villagers": "{target} 살아 있는 주민",
+ "Match population limit": "인구 한도",
+ "Cutoff: {time} ({reason}).": "종료 시점: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "기준 미도달; 집계 시점 {time}.",
+ "Whole-game window: {time}.": "전체 경기: {time}."
 }

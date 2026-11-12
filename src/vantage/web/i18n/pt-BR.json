@@ -1636,5 +1636,16 @@
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Tempo com um centro urbano ocioso: sem treinar nem pesquisar. Pausas inferiores a 1 s contam como trabalho. Bloqueios por moradia ou limite populacional são excluídos; o tempo sem moradia é contado separadamente.",
  "Population limit": "Limite populacional",
  "Lifetime healing": "Cura ao longo da vida",
- "Relevant upgrades unavailable": "Melhorias relevantes indisponíveis"
+ "Relevant upgrades unavailable": "Melhorias relevantes indisponíveis",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "Da conclusão até atingir pela primeira vez {target} aldeões vivos ou o limite populacional. Intervalos sobrepostos contam uma vez. Tempo com um centro urbano ocioso: sem treinar nem pesquisar. Pausas inferiores a 1 s contam como trabalho. Bloqueios por moradia ou limite populacional são excluídos; o tempo sem moradia é contado separadamente.",
+ "Idle TC (growth)": "CC inativo (crescimento)",
+ "TC Idle (growth)": "CC inativo (crescimento)",
+ "Idle TC (growth) / Housed": "CC inativo (crescimento) / Sem casas",
+ "TC growth / Hsd": "TC (crescimento) / Sem casas",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "Da conclusão até atingir pela primeira vez {target} aldeões vivos ou o limite populacional. Intervalos sobrepostos contam uma vez.",
+ "{target} living villagers": "{target} aldeões vivos",
+ "Match population limit": "Limite populacional",
+ "Cutoff: {time} ({reason}).": "Corte: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "Limite não atingido; contado até {time}.",
+ "Whole-game window: {time}.": "Partida inteira: {time}."
 }

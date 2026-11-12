@@ -146,7 +146,7 @@ export const DASH_HISTORY = {
   kd: 'kills', ecoKills: 'kills', ecoDeaths: 'deaths', ecoKD: 'kills', killsTotal: 'kills',
   deathsTotal: 'deaths', razings: 'razings', pop: 'pop', popOnly: 'pop', eco: 'eco_units',
   milGold: 'army_value', peakArmy: 'army_value', techs: 'techs', relics: 'relics', explored: 'explored',
-  tcIdle: 'tc_idle', housed: 'housed', idleTcHoused: 'tc_idle', eff: 'efficiency_lm',
+  tcIdle: 'tc_idle', t90TcIdle: 'tc_idle', housed: 'housed', idleTcHoused: 'tc_idle', eff: 'efficiency_lm',
   apm: 'apm', apmEco: 'apm_eco', apmMil: 'apm_mil', trade: 'trade_units',
 };
 export const DASH_SELECTIONS = new Set(['vils', 'mil', 'milValue', 'wFood', 'wWood', 'wGold', 'wStone', 'build', 'idle', 'tc', 'castles', 'tcCastle']);

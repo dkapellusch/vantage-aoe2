@@ -1636,5 +1636,16 @@
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "町の中心が訓練も研究もしていない時間。1秒未満の切り替え時間は稼働として数えます。住居不足や人口上限による待機は除外し、住居不足の時間は別に数えます。",
  "Population limit": "人口上限",
  "Lifetime healing": "生涯の回復量",
- "Relevant upgrades unavailable": "関連するアップグレードを取得できません"
+ "Relevant upgrades unavailable": "関連するアップグレードを取得できません",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "完成時から、生存する町の人が初めて{target}人に達するか人口上限に達するまで。重複する待機時間は一度だけ数えます。 町の中心が訓練も研究もしていない時間。1秒未満の切り替え時間は稼働として数えます。住居不足や人口上限による待機は除外し、住居不足の時間は別に数えます。",
+ "Idle TC (growth)": "待機 TC (成長期)",
+ "TC Idle (growth)": "待機 TC (成長期)",
+ "Idle TC (growth) / Housed": "待機 TC (成長期) / 人口上限",
+ "TC growth / Hsd": "TC (成長期) / 人口上限",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "完成時から、生存する町の人が初めて{target}人に達するか人口上限に達するまで。重複する待機時間は一度だけ数えます。",
+ "{target} living villagers": "{target} 生存する町の人",
+ "Match population limit": "人口上限",
+ "Cutoff: {time} ({reason}).": "終了時刻: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "未到達・集計時刻 {time}.",
+ "Whole-game window: {time}.": "試合全体: {time}."
 }

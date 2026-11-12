@@ -1636,5 +1636,16 @@
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Şehir merkezinin eğitim veya araştırma yapmadığı süre. 1 saniyeden kısa aralar çalışma sayılır. Konut veya nüfus sınırı nedeniyle beklemeler hariçtir; konut eksikliği süresi ayrı sayılır.",
  "Population limit": "Nüfus sınırı",
  "Lifetime healing": "Yaşam boyu iyileştirme",
- "Relevant upgrades unavailable": "İlgili geliştirmeler kullanılamıyor"
+ "Relevant upgrades unavailable": "İlgili geliştirmeler kullanılamıyor",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "Tamamlanmadan ilk kez {target} yaşayan köylüye veya nüfus sınırına ulaşılana kadar. Örtüşen süreler bir kez sayılır. Şehir merkezinin eğitim veya araştırma yapmadığı süre. 1 saniyeden kısa aralar çalışma sayılır. Konut veya nüfus sınırı nedeniyle beklemeler hariçtir; konut eksikliği süresi ayrı sayılır.",
+ "Idle TC (growth)": "Boştaki ŞM (büyüme)",
+ "TC Idle (growth)": "Boştaki ŞM (büyüme)",
+ "Idle TC (growth) / Housed": "Boştaki ŞM (büyüme) / Ev sınırında",
+ "TC growth / Hsd": "TC (büyüme) / Ev sınırında",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "Tamamlanmadan ilk kez {target} yaşayan köylüye veya nüfus sınırına ulaşılana kadar. Örtüşen süreler bir kez sayılır.",
+ "{target} living villagers": "{target} yaşayan köylü",
+ "Match population limit": "Nüfus sınırı",
+ "Cutoff: {time} ({reason}).": "Bitiş: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "Eşiğe ulaşılmadı; sayılan süre sonu {time}.",
+ "Whole-game window: {time}.": "Tüm oyun: {time}."
 }

@@ -255,6 +255,7 @@ class Keyframe:
 @dataclass
 class Timeline:
     data: GameData
+    tc_idle_villagers: int = field(default=120, kw_only=True)
     patcher: Patcher = field(default_factory=Patcher)
     catalog: W.Catalog = field(init=False)
     keyframes: list[Keyframe] = field(default_factory=list)
@@ -347,7 +348,7 @@ class Timeline:
         self._act_window: dict[str, deque[tuple[int, dict[str, int], float]]] = defaultdict(deque)
         #: player -> (keyframe time, ``collected`` then) over the last APM_WINDOW_MS
         self._col_window: dict[str, deque[tuple[int, dict[str, int]]]] = defaultdict(deque)
-        self.building_history = BuildingHistory()
+        self.building_history = BuildingHistory(self.tc_idle_villagers)
         self._housed: dict[str, float] = defaultdict(float)
         self._housed_since: dict[str, int] = {}
         self._relics_max: dict[str, int] = defaultdict(int)
@@ -904,7 +905,7 @@ class Timeline:
                     idle[str(state.owner)] += 1
         for pid, s in v["players"].items():
             s["idle_town_centers"] = idle[pid]
-            s["tc_idle_seconds"] = round(self.building_history.tc_idle(int(pid), t))
+            s.update(self.building_history.tc_idle_stats(int(pid), t))
             s["idle_tc_housed"] = [s["tc_idle_seconds"], s.get("housed_seconds", 0)]
 
     def _collected_rate(
@@ -2458,6 +2459,8 @@ class Timeline:
                         (r["efficiency_lm"] for r in rows if r["t"] >= 120_000), default=0
                     ),
                     "tc_idle_seconds": s.get("tc_idle_seconds", 0),
+                    "tc_idle_whole_seconds": s.get("tc_idle_whole_seconds", 0),
+                    "tc_idle_growth": s.get("tc_idle_growth"),
                     "housed_seconds": s.get("housed_seconds", 0),
                     "score": s.get("score_total", sum(s.get("score", {}).values())),
                     "status": s["status"],
@@ -2891,11 +2894,13 @@ def settle_heap() -> None:
     gc.freeze()
 
 
-def load_recording(path: str, data: GameData, progress: Any = None) -> Timeline:
+def load_recording(
+    path: str, data: GameData, progress: Any = None, *, tc_idle_villagers: int = 120
+) -> Timeline:
     """Build a complete timeline from a ``.vrec`` file."""
     from vantage.frames import read_frames
 
-    tl = Timeline(data)
+    tl = Timeline(data, tc_idle_villagers=tc_idle_villagers)
     for i, f in enumerate(read_frames(path)):
         if tl.feed(f) and f.is_snapshot:
             settle_heap()

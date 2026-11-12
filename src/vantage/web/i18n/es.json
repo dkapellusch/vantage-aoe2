@@ -1654,5 +1654,16 @@
  "Reach": "Alcance",
  "Farm grants": "Bonificaciones de granjas",
  "Lifetime healing": "Curación de por vida",
- "Relevant upgrades unavailable": "Mejoras relevantes no disponibles"
+ "Relevant upgrades unavailable": "Mejoras relevantes no disponibles",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "Desde su finalización hasta alcanzar por primera vez {target} aldeanos vivos o el límite de población. Los solapamientos cuentan una vez. Tiempo con un centro urbano inactivo: sin entrenar ni investigar. Las pausas menores de 1 s cuentan como trabajo. Se excluyen los bloqueos por viviendas o límite de población; el tiempo sin viviendas se cuenta por separado.",
+ "Idle TC (growth)": "CU inactivo (crecimiento)",
+ "TC Idle (growth)": "CU inactivo (crecimiento)",
+ "Idle TC (growth) / Housed": "CU inactivo (crecimiento) / Sin casas",
+ "TC growth / Hsd": "TC (crecimiento) / Sin casas",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "Desde su finalización hasta alcanzar por primera vez {target} aldeanos vivos o el límite de población. Los solapamientos cuentan una vez.",
+ "{target} living villagers": "{target} aldeanos vivos",
+ "Match population limit": "Límite de población",
+ "Cutoff: {time} ({reason}).": "Corte: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "Umbral no alcanzado; contado hasta {time}.",
+ "Whole-game window: {time}.": "Partida completa: {time}."
 }

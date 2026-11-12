@@ -110,6 +110,7 @@ class Session:
         self.data = data
         self.recordings_dir = recordings_dir
         self.timeline: Timeline | None = None
+        self.tc_idle_villagers = 120
         self.mode = "idle"
         self.source: dict[str, Any] = {}
         self.error: str | None = None
@@ -142,7 +143,7 @@ class Session:
         self.stop()
         with self.lock:
             self.generation += 1
-            self.timeline = Timeline(self.data)
+            self.timeline = Timeline(self.data, tc_idle_villagers=self.tc_idle_villagers)
             self.mode = mode
             self.source = source
             self.error = None
@@ -390,7 +391,9 @@ class Session:
                             timeline.finish()
                             with self.lock:
                                 self.generation += 1
-                                timeline = self.timeline = Timeline(self.data)
+                                timeline = self.timeline = Timeline(
+                                    self.data, tc_idle_villagers=self.tc_idle_villagers
+                                )
                             with self._writer_lock:
                                 if self._writer is not None:
                                     self._close_writer()

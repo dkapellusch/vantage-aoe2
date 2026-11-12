@@ -1654,5 +1654,16 @@
  "Reach": "Portée",
  "Farm grants": "Bonus des champs",
  "Lifetime healing": "Soins sur toute la vie",
- "Relevant upgrades unavailable": "Améliorations pertinentes indisponibles"
+ "Relevant upgrades unavailable": "Améliorations pertinentes indisponibles",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "Depuis l’achèvement jusqu’à atteindre pour la première fois {target} villageois vivants ou la limite de population. Les chevauchements comptent une fois. Temps avec un forum inactif : ni formation ni recherche. Les intervalles de moins de 1 s comptent comme du travail. Les blocages liés aux logements ou à la limite de population sont exclus ; le manque de logements est compté séparément.",
+ "Idle TC (growth)": "Forum inactif (croissance)",
+ "TC Idle (growth)": "Forum inactif (croissance)",
+ "Idle TC (growth) / Housed": "Forum inactif (croissance) / Bloqué (pop.)",
+ "TC growth / Hsd": "TC (croissance) / Bloqué (pop.)",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "Depuis l’achèvement jusqu’à atteindre pour la première fois {target} villageois vivants ou la limite de population. Les chevauchements comptent une fois.",
+ "{target} living villagers": "{target} villageois vivants",
+ "Match population limit": "Limite de population",
+ "Cutoff: {time} ({reason}).": "Fin: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "Seuil non atteint ; compté jusqu’à {time}.",
+ "Whole-game window: {time}.": "Partie entière: {time}."
 }

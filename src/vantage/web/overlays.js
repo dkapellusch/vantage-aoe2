@@ -15,6 +15,7 @@ import { t, LANGS, language, setLanguage, keyLabel } from './i18n.js';
 import * as PN from './panels.js';
 import { patchHtml } from './dom.js';
 import { bonusIncomeHtml } from './resource-review.js';
+import { tcIdleTooltip } from './tc-idle.js';
 
 const $ = (id) => document.getElementById(id);
 // app.js publishes its actions (pause, seek, speed, …) on window.vantage.
@@ -86,7 +87,7 @@ const TABS = {
     title: 'Economy',
     series: ['villagers', 'eco_pop', 'efficiency_lm', 'productive_lm', 'unproductive_lm', 'gather_food_lm', 'gather_wood_lm',
       'gather_gold_lm', 'gather_stone_lm', 'col_total', 'col_food', 'col_wood', 'col_gold', 'col_stone', 'idle', 'fishing_ships',
-      'trade_units', 'eco_units'],
+      'trade_units', 'eco_units', 'tc_idle', 'housed'],
   },
   technology: { title: 'Technology', series: ['techs', 'age'] },
   bonus: { title: 'Bonus resources', series: ['bonus_total', 'bonus_food', 'bonus_wood', 'bonus_gold', 'bonus_stone'] },
@@ -114,7 +115,7 @@ export const SERIES_LABEL = {
   gather_food_lm: 'Food gathering time (last minute, s)', gather_wood_lm: 'Wood gathering time (last minute, s)',
   gather_gold_lm: 'Gold gathering time (last minute, s)', gather_stone_lm: 'Stone gathering time (last minute, s)',
   mil_pop: 'Military population', eco_pop: 'Economy population',
-  tc_idle: 'Idle TC time', housed: 'Housed time',
+  tc_idle: 'Idle TC (growth)', housed: 'Housed time',
 };
 export function seriesLabel(key) { return t(SERIES_LABEL[key] || key); }
 
@@ -656,7 +657,7 @@ const AGG = {
     ['Villager idle time', (s) => (s.idle_seconds == null ? undefined : `${fmtNum(Math.round(s.idle_seconds / 60))} ${t('vil·min')}`), 'Villager-minutes idle (villagers × minutes)', { best: 'min', num: (s) => numOf(s.idle_seconds) }],
     ['Worker efficiency', (s) => (s.efficiency == null ? undefined : s.efficiency + '%'), '', { best: 'max', num: (s) => numOf(s.efficiency) }],
     ['Worst minute efficiency', (s) => (s.worst_minute_efficiency == null ? undefined : s.worst_minute_efficiency + '%'), '', { best: 'max', num: (s) => numOf(s.worst_minute_efficiency) }],
-    ['Idle TC time', (s) => tm(s.tc_idle_seconds), '', { best: 'min', num: (s) => numOf(s.tc_idle_seconds) }],
+    ['Idle TC (growth)', (s) => tm(s.tc_idle_seconds), '', { best: 'min', num: (s) => numOf(s.tc_idle_seconds), valueTip: tcIdleTooltip }],
     ['Housed time', (s) => tm(s.housed_seconds), '', { best: 'min', num: (s) => numOf(s.housed_seconds) }],
   ],
   technology: [
@@ -709,7 +710,7 @@ function aggregates(tab) {
     const cells = data.map((d) => { try { return f(d.s, d.v, d.p); } catch { return undefined; } });
     if (cells.every((x) => x === undefined || x === null)) return '';
     const best = opts.num ? bestCells(data.map((d) => { try { return opts.num(d.s, d.v, d.p); } catch { return undefined; } }), opts.best) : new Set();
-    return `<tr class="${opts.sub ? 'agg-sub' : ''}"><td ${tip(t(label), detail ? t(detail) : '')}>${t(label)}</td>${cells.map((x, i) => `<td class="${best.has(i) ? 'best' : ''}">${x ?? '–'}</td>`).join('')}</tr>`;
+    return `<tr class="${opts.sub ? 'agg-sub' : ''}"><td ${tip(t(label), detail ? t(detail) : '')}>${t(label)}</td>${cells.map((x, i) => `<td class="${best.has(i) ? 'best' : ''}" ${opts.valueTip ? `tabindex="0" ${tip(t(label), opts.valueTip(data[i].s))}` : ''}>${x ?? '–'}</td>`).join('')}</tr>`;
   }).join('');
   if (!rows) return '';
   const head = `<tr><th></th>${ps.map((p) => `<th class="pname" style="color:${playerTextColor(p.id)}">${esc(playerName(p.id))}</th>`).join('')}</tr>`;

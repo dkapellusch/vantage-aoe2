@@ -1636,5 +1636,16 @@
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Время простоя городского центра: без обучения и исследований. Паузы менее 1 с считаются работой. Блокировки из-за жилья или лимита населения исключены; нехватка жилья учитывается отдельно.",
  "Population limit": "Лимит населения",
  "Lifetime healing": "Исцеление за всё время",
- "Relevant upgrades unavailable": "Соответствующие улучшения недоступны"
+ "Relevant upgrades unavailable": "Соответствующие улучшения недоступны",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "С завершения постройки до первого достижения {target} живых жителей или предела населения. Перекрывающиеся интервалы считаются один раз. Время простоя городского центра: без обучения и исследований. Паузы менее 1 с считаются работой. Блокировки из-за жилья или лимита населения исключены; нехватка жилья учитывается отдельно.",
+ "Idle TC (growth)": "Простой ГС (рост)",
+ "TC Idle (growth)": "Простой ГС (рост)",
+ "Idle TC (growth) / Housed": "Простой ГС (рост) / Упор в лимит",
+ "TC growth / Hsd": "TC (рост) / Упор в лимит",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "С завершения постройки до первого достижения {target} живых жителей или предела населения. Перекрывающиеся интервалы считаются один раз.",
+ "{target} living villagers": "{target} живых жителей",
+ "Match population limit": "Предел населения",
+ "Cutoff: {time} ({reason}).": "Отсечка: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "Порог не достигнут; подсчёт до {time}.",
+ "Whole-game window: {time}.": "Вся игра: {time}."
 }

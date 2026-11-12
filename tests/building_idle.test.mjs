@@ -4,7 +4,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 
 test('building idle tooltip and population-block activity labels have every locale', () => {
   const source = readFileSync(new URL('../src/vantage/web/panels.js', import.meta.url), 'utf8');
-  const detail = source.match(/const TC_IDLE_TIP = '([^']+)';/)[1];
+  const definition = readFileSync(new URL('../src/vantage/web/tc-idle.js', import.meta.url), 'utf8');
+  const detail = definition.match(/const TC_IDLE_TIP = '([^']+)';/)[1];
   assert.match(detail, /neither training nor researching/);
   assert.match(detail, /housed time is separate/);
   const names = JSON.parse(source.match(/const ACT_NAMES = (\[[^;]+\]);/)[1].replaceAll("'", '"'));

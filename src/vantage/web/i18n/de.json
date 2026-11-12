@@ -1654,5 +1654,16 @@
  "Reach": "Reichweite",
  "Farm grants": "Feldboni",
  "Lifetime healing": "Heilung über die Lebenszeit",
- "Relevant upgrades unavailable": "Relevante Upgrades nicht verfügbar"
+ "Relevant upgrades unavailable": "Relevante Upgrades nicht verfügbar",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "Ab Fertigstellung bis erstmals {target} lebende Dorfbewohner oder das Bevölkerungslimit erreicht werden. Überschneidungen zählen einmal. Zeit mit untätigem Dorfzentrum: weder Ausbildung noch Forschung. Lücken unter 1 s zählen als Arbeit. Warteschlangen wegen fehlendem Wohnraum oder Bevölkerungslimit zählen nicht als untätig; Wohnraummangel wird separat gezählt.",
+ "Idle TC (growth)": "Untät. DZ (Wachstum)",
+ "TC Idle (growth)": "Untät. DZ (Wachstum)",
+ "Idle TC (growth) / Housed": "Untät. DZ (Wachstum) / Ohne Wohnraum",
+ "TC growth / Hsd": "TC (Wachstum) / Ohne Wohnraum",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "Ab Fertigstellung bis erstmals {target} lebende Dorfbewohner oder das Bevölkerungslimit erreicht werden. Überschneidungen zählen einmal.",
+ "{target} living villagers": "{target} lebende Dorfbewohner",
+ "Match population limit": "Bevölkerungslimit",
+ "Cutoff: {time} ({reason}).": "Ende: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "Nicht erreicht; gezählt bis {time}.",
+ "Whole-game window: {time}.": "Ganzes Spiel: {time}."
 }

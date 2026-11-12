@@ -21,6 +21,7 @@ import { centerOn, currentRows, selectedRows, gatherersOf, isTreeId, rowForEntit
 import { t, language } from './i18n.js';
 import { setSelectionHtml } from './selection-panel.js';
 import { patchHtml, listDelta } from './dom.js';
+import { tcIdleTooltip } from './tc-idle.js';
 import { ownerIdentity, selectionHeader, militaryCard, healingCells, wireReviewControls, reviewIcon, DASH_HISTORY, DASH_SELECTIONS } from './player-review.js';
 import { resourceTotalsHtml } from './resource-review.js';
 import { farmReviewHtml } from './farm-review.js';
@@ -1194,7 +1195,7 @@ function effAll(s, keys) {
 }
 const effTotal = (s, k, keys) => (s.efficiency_all && has(s.efficiency_all[k]) ? s.efficiency_all[k] : effAll(s, keys));
 
-const TC_IDLE_TIP = 'Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.';
+const TC_IDLE_TIP = 'TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.';
 
 // h: header (short), tip: what it measures. A value of null renders as '–'.
 const COL = {
@@ -1266,10 +1267,10 @@ const COL = {
   gWoodLm: { h: 'W time LM', tip: 'Share of villager time on wood, last minute', v: (s) => lmSum(s, ['gather_wood']) },
   gGoldLm: { h: 'G time LM', tip: 'Share of villager time on gold, last minute', v: (s) => lmSum(s, ['gather_gold']) },
   gStoneLm: { h: 'S time LM', tip: 'Share of villager time on stone, last minute', v: (s) => lmSum(s, ['gather_stone']) },
-  tcIdle: { h: 'Idle TC', tip: TC_IDLE_TIP, v: (s) => fmtTime((s.tc_idle_seconds || 0) * 1000) },
+  tcIdle: { h: 'Idle TC (growth)', tip: TC_IDLE_TIP, valueTip: tcIdleTooltip, v: (s) => fmtTime((s.tc_idle_seconds || 0) * 1000) },
   housed: { h: 'Housed', tip: 'Time spent housed', v: (s) => fmtTime((s.housed_seconds || 0) * 1000) },
   // "Idle TC / Housed Time": idle TC time with the housed time on a second line.
-  idleTcHoused: { h: 'Idle TC / Housed', abbr: 'Idl TC/Hsd', tip: TC_IDLE_TIP, icons: ['tc', 'pop'],
+  idleTcHoused: { h: 'Idle TC (growth) / Housed', abbr: 'TC growth / Hsd', tip: TC_IDLE_TIP, valueTip: tcIdleTooltip,
     v: (s) => { const a = Array.isArray(s.idle_tc_housed) ? s.idle_tc_housed : [s.tc_idle_seconds || 0, s.housed_seconds || 0];
       return { html: `${esc(fmtTime((a[0] || 0) * 1000))}<small class="dash-sub">${esc(fmtTime((a[1] || 0) * 1000))}</small>` }; } },
   tribute: { h: 'Tribute in', tip: 'Tribute received', v: (s) => s.tribute_received },
@@ -1292,7 +1293,7 @@ function lmSum(s, keys) {
 // with fixed short labels. These columns reuse Vantage's values under the
 // T90 labels and are never offered by the custom-page picker.
 const T90_COLS = {
-  t90EcoKd: ['ecoKD', 'Eco K/D'], t90Kd: ['kd', 'Kills Deaths'], t90TcIdle: ['tcIdle', 'TC Idle'],
+  t90EcoKd: ['ecoKD', 'Eco K/D'], t90Kd: ['kd', 'Kills Deaths'], t90TcIdle: ['tcIdle', 'TC Idle (growth)'],
   t90EcoIdle: ['idleEcoTime', 'Eco Idle'], t90Relics: ['relics', 'Relics'], t90RelicGold: ['relicGold', 'Rel Gold'],
   t90ResColl: ['colT', 'Res Coll'], t90ValueGold: ['milGold', 'Value%Gold'], t90Gather: ['gatherLm', 'Gth Eco'],
   t90WeLm: ['effLm', 'WE LM %'], t90WeAll: ['eff', 'WE All %'], t90ValueDestroyed: ['killValue', 'Value destroyed'],
@@ -1511,7 +1512,7 @@ export function renderDashboard() {
       value = `${parts[0]}<small class="dash-sub">${parts[1]}</small>`;
     }
     const label = fitOverview ? `<span class="dash-card-label">${esc(t(COL[c].h))}</span>` : '';
-    return `<td data-dash-column="${c}">${label}${DASH_HISTORY[c] || DASH_SELECTIONS.has(c) ? `<button class="review-dash-value" data-dash-metric="${c}" data-pid="${pid}" ${tip(t(COL[c].h), t('Inspect'))}>${value}</button>` : value}</td>`;
+    return `<td data-dash-column="${c}">${label}${DASH_HISTORY[c] || DASH_SELECTIONS.has(c) ? `<button class="review-dash-value" data-dash-metric="${c}" data-pid="${pid}" ${tip(t(COL[c].h), COL[c].valueTip ? COL[c].valueTip(s) : t('Inspect'))}>${value}</button>` : value}</td>`;
   };
   // Team games mirror by default (unless every column is a stockpile one): left
   // team, a divider, then the right team's columns reversed.

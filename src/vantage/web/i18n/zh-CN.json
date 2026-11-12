@@ -1636,5 +1636,16 @@
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "城镇中心既未训练也未研究的空闲时间。不到1秒的队列切换间隔计为工作。住房不足或人口上限造成的等待不计为空闲；住房不足时间单独统计。",
  "Population limit": "人口上限",
  "Lifetime healing": "生涯治疗量",
- "Relevant upgrades unavailable": "相关升级不可用"
+ "Relevant upgrades unavailable": "相关升级不可用",
+ "Time with at least one completed TC neither training nor researching, until the owner first reaches {target} living villagers or the match population limit. Overlapping idle TCs count once. Gaps under 1s count as working; housed time is separate and queued housing/population blocks are excluded.": "从建成起，直到首次达到{target}名存活村民或人口上限。多个城镇中心同时空闲只计一次。 城镇中心既未训练也未研究的空闲时间。不到1秒的队列切换间隔计为工作。住房不足或人口上限造成的等待不计为空闲；住房不足时间单独统计。",
+ "Idle TC (growth)": "闲置城镇中心 (发展期)",
+ "TC Idle (growth)": "闲置城镇中心 (发展期)",
+ "Idle TC (growth) / Housed": "闲置城镇中心 (发展期) / 人口已满",
+ "TC growth / Hsd": "TC (发展期) / 人口已满",
+ "TC idle during villager growth; inspect a player value for the definition, cutoff and whole-game total.": "从建成起，直到首次达到{target}名存活村民或人口上限。多个城镇中心同时空闲只计一次。",
+ "{target} living villagers": "{target} 存活村民",
+ "Match population limit": "人口上限",
+ "Cutoff: {time} ({reason}).": "截止时间: {time} ({reason}).",
+ "Cutoff not reached; counted through {time}.": "尚未达到阈值；统计至 {time}.",
+ "Whole-game window: {time}.": "整场比赛: {time}."
 }

@@ -89,6 +89,14 @@ def build_parser(plugin: Any = None) -> argparse.ArgumentParser:
     )
     s.add_argument("--patch-config", help="JSON object of UI settings to force on every browser")
     s.add_argument(
+        "--tc-idle-villagers",
+        type=int,
+        default=120,
+        metavar="N",
+        help="stop growth-phase TC idle at N living villagers or the match population "
+        "limit (default: 120)",
+    )
+    s.add_argument(
         "--force-default-config",
         action="store_true",
         help="browsers ignore their saved settings this session",
@@ -364,6 +372,10 @@ def _serve(args: argparse.Namespace, plugin: Any = None) -> int:
     rec_dir = args.recordings_dir.expanduser()
     rec_dir.mkdir(parents=True, exist_ok=True)
     session = session_class(data, rec_dir)
+    if args.tc_idle_villagers < 1:
+        print("--tc-idle-villagers must be positive", file=sys.stderr)
+        return 2
+    session.tc_idle_villagers = args.tc_idle_villagers
     # The recordings list names who played: read in the background, cached per file.
     summaries = getattr(session, "summaries", None)  # a substitute session may have none
     if summaries is not None:

@@ -98,13 +98,24 @@ their two values in the same column. **Coll.** means total resources collected;
 hover the heading for its full name. Narrow panels show labelled player cards
 with the same metrics in the same order; scroll vertically for more players.
 
-**Idle TC** is time with at least one completed town centre neither training
-nor researching. A queued unit waiting for housing or the population limit is
-not idle; **Housed** is separate. Queue handoffs under one second count as work.
-Longer empty pauses count in full, including their first second. The same
-definition drives each building's activity bar, including research buildings;
-foundations are under construction rather than idle. Several idle TCs do not
-multiply the player total: two idle TCs for one minute mean one minute of Idle TC.
+**Idle TC (growth)** is elapsed time with at least one completed town centre
+neither training nor researching. Each TC enters the window at completion. The
+window closes permanently when its owner first reaches **120 living villagers**
+or the **match population limit**, whichever comes first; later villager losses
+do not reopen it. If neither is reached, it runs through the viewed time (or the
+end of the match). The server option `--tc-idle-villagers N` changes the villager
+target. The hub accepts the same option for both analysis and embedded viewers.
+Hover, focus or tap a player's value for the definition, exact cutoff and the
+**whole-game window** total. All dashboard pages, T90 pages, player review and
+history charts use the same growth window.
+
+A queued unit waiting for housing or the population limit is not idle;
+**Housed** remains separate and covers the whole game. Queue handoffs under one
+second count as work. Longer empty pauses count in full, including their first
+second. The work/idle classification also drives each building's lifetime
+activity bar; foundations are under construction rather than idle. Several idle
+TCs do not multiply the player total: two idle TCs for one minute mean one minute
+of Idle TC (growth).
 
 The columns cover stockpiles, workers per resource, idle workers and idle town-centre time, housed time, worker efficiency, unit counts, army value and peak, kills and deaths, value destroyed, relics and relic gold, trade, tribute, market, conversions, resources collected, and APM (total and effective, split into economy and military). In **Settings → Dashboard pages** you can add, remove, reorder and edit the pages for 1v1, team games and FFA. *Mini dashboard* gives a compact version.
 
