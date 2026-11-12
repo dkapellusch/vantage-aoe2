@@ -28,6 +28,9 @@ export class ViewCache {
     if (cached) return cached.promise;
     const entry = { value: null, promise: null };
     entry.promise = this.load(key).catch(() => null).then((value) => {
+      // Before the first keyframe the server returns {}. It is not a view;
+      // caching it would pin a paused startup clock at t=0 forever.
+      if (!Number.isFinite(value?.time)) value = null;
       entry.value = value;
       // Failed requests may be retried; an old request must not remove a new
       // session's entry after clear().

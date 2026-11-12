@@ -245,3 +245,14 @@ test('a recording header drives its fidelity notice and an ordinary recording ha
   assert.equal(fidelityNotice(null), null);
 });
 
+
+test('an empty pre-snapshot response retries at the same frozen startup time', async () => {
+  let requests = 0;
+  const firstFrame = {time: 0, entities: []};
+  const cache = new ViewCache(async () => ++requests === 1 ? {} : firstFrame);
+  assert.equal(await cache.fetch(0), null);
+  assert.equal(cache.peek(0), null);
+  assert.equal(await cache.fetch(0), firstFrame);
+  assert.equal(cache.at(0), firstFrame);
+  assert.equal(requests, 2);
+});
