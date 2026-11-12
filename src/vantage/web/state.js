@@ -4,6 +4,7 @@ import { requestResource } from './startup-assets.js';
 import { t } from './i18n.js';
 import { ViewCache, mergeSeries, seriesEnd } from './playback.js';
 import { compactTeamLabels, memberLabel } from './team-names.js';
+import { defaultHud, normalizeHud, initialPreset } from './hud-model.js';
 
 export const S = {
   upcoming: [],   // read-ahead views (fast playback): their strips are requested early
@@ -61,7 +62,6 @@ export const DEFAULT_SETTINGS = {
   showProduction: true,
   showDashboard: true,
   showEvents: true,
-  useMinimalUi: false,
   hiddenPanels: [],             // HUD panels hidden from the Panels menu or their ✕ (layout.js)
   collapsedPanels: [],          // HUD panels collapsed to their top strip
   eventFilterOut: ['train_research'],
@@ -156,12 +156,15 @@ export const DEFAULT_SETTINGS = {
   fullStaticTechs: false,       // append the castle and imperial unique techs to the static techs panel
   endgameAutoClose: '0',        // seconds; '0' = close manually
   castingByIdentity: true,      // casting name/image overrides follow the player, not the slot
-  showStatsTimeControls: true,
+  showStatsTimeControls: true,  // the full-screen Statistics page (a phone); the Statistics window has none
   replayFilters: { game: '', civ: '', mode: '', players: '', count: '', player: '', strict: false, compatible: false, spoilers: true },
   autocastHighlights: true,
   toggleHTMLServer: false,      // skin-debugging HTTP server (live reload + /stats-dump)
   enabledSkins: [],             // several user skins merged (names); [] = default look
-  settingsVersion: 9,
+  statsWindow: { docked: false }, // the Statistics window: docked right or floating (its rectangle is in panelSizes)
+  // The customizable HUD (hud-model.js): the preset, each preset's edits, the layout options.
+  hud: defaultHud(),
+  settingsVersion: 10,
 };
 
 // One-off migrations for settings saved by older builds. Runs on every load
@@ -248,6 +251,13 @@ export function migrateSettings(s) {
     s.hudLayout = 'caster';
     s.settingsVersion = 9;
   }
+  if (v < 10) {
+    // The "Minimal UI" checkbox wrote this flag and nothing read it. The HUD
+    // presets replace it; a saved setup stays on Full (the HUD as it was).
+    delete s.useMinimalUi;
+    s.settingsVersion = 10;
+  }
+  s.hud = normalizeHud(s.hud);
   // Team games now have one Overview. Do not reinterpret a custom page's id.
   if (s.dashboardSelection?.oppositional === 'overviewSmall'
     && !s.customDashboardConfig?.oppositional?.length) {
@@ -265,6 +275,27 @@ export function migrateSettings(s) {
   return s;
 }
 
+// Where this page runs: inside another page (a hub embed) or under a hub match
+// path. A new viewer there starts on Minimal; the desktop app starts on Full.
+export function hudEnvironment() {
+  let embedded = false, hosted = false, requested = null;
+  try { embedded = typeof window !== 'undefined' && window.self !== window.top; } catch (e) { embedded = true; }
+  try {
+    hosted = typeof location !== 'undefined' && /^\/v\//.test(location.pathname || '');
+    requested = typeof location !== 'undefined' ? new URLSearchParams(location.search || '').get('hud') : null;
+  } catch (e) { /* no location: a test or a worker */ }
+  return { embedded, hosted, requested };
+}
+
+/** True when this browser had saved settings when the page loaded. */
+export let settingsWereSaved = false;
+
+// The settings of a viewer with nothing saved: the defaults, on the preset for this environment.
+function freshSettings() {
+  const env = hudEnvironment();
+  return { ...DEFAULT_SETTINGS, hud: { ...defaultHud(), preset: initialPreset({ ...env, hasSaved: false }) } };
+}
+
 export let settings = loadSettings();
 
 function loadSettings() {
@@ -272,10 +303,13 @@ function loadSettings() {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) {
       const saved = JSON.parse(raw);
-      return migrateSettings({ ...DEFAULT_SETTINGS, settingsVersion: 1, ...saved });
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+        settingsWereSaved = true;
+        return migrateSettings({ ...DEFAULT_SETTINGS, settingsVersion: 1, ...saved });
+      }
     }
-  } catch (e) { /* storage blocked: defaults */ }
-  return { ...DEFAULT_SETTINGS };
+  } catch (e) { /* storage blocked or unreadable: defaults */ }
+  return freshSettings();
 }
 
 // Server-side launch config: --patch-config overrides, --force-default-config.
@@ -283,7 +317,7 @@ export function applyServerConfig(cfg) {
   if (!cfg) return;
   assetVersion = typeof cfg.asset_version === 'string' ? cfg.asset_version : '';
   S.gameArt = cfg.game_art !== false;
-  if (cfg.force_default) settings = { ...DEFAULT_SETTINGS };
+  if (cfg.force_default) settings = freshSettings();
   Object.assign(settings, cfg.patch || {});
   migrateSettings(settings);
 }
@@ -300,7 +334,7 @@ export function replaceSettings(next) {
 }
 
 export function resetSettings() {
-  settings = { ...DEFAULT_SETTINGS };
+  settings = freshSettings();
   saveSettings();
 }
 
