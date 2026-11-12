@@ -2163,7 +2163,7 @@ function singlePanel(el, r) {
   const mk = S.view && S.view.market;
   const marketHtml = isMarket && mk ? `<div class="up-stats" style="margin-top:4px" ${tip(t('Market prices'), t('Base price in gold per 100: buying costs more and selling earns less, by the market commission'))}><div><span>${t('food')}</span> ${Math.round((mk.food || 0) * 100)}</div><div><span>${t('wood')}</span> ${Math.round((mk.wood || 0) * 100)}</div><div><span>${t('stone')}</span> ${Math.round((mk.stone || 0) * 100)}</div></div>` : '';
   const farmQ = s && (/mill|town center|folwark/i.test(u.name)) && s.farm_queue ? `<div class="hint">${t('Farm reseeds queued')}: ${s.farm_queue}</div>` : '';
-  const doing = r[9] != null && ACT_NAMES[r[9]] ? ` · <b>${t(ACT_NAMES[r[9]])}</b>` : '';
+  const doing = u.cls !== 49 && r[9] != null && ACT_NAMES[r[9]] ? ` · <b>${t(ACT_NAMES[r[9]])}</b>` : '';
   const carried = carryPairs(r[10]);
   const carry = carried.length && u.cls !== 49 ? `<div class="hint">${t('Carrying')} ${carried.map(([res, n]) => `${Math.round(n)} ${t(res)}`).join(' + ')}</div>` : '';
   const viewCons = S.view && S.view.construction ? S.view.construction[r[0]] ?? S.view.construction[String(r[0])] : null;
