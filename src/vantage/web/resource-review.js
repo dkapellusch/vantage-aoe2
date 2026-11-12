@@ -43,6 +43,8 @@ export function bonusIncomeHtml(players) {
         ? `${t('Observed free villagers matched to completed Wei economic-upgrade rewards. Resource columns show their neutral unit cost, not stockpile income.')} ${t('Villagers')}: ${fmtNum(row.count)}`
         : ['Camp construction', 'Town Center construction', 'Production-building construction', 'Building construction'].includes(row.source)
         ? t('Completion grants read from the building owner’s resource storage. Added directly to the stockpile; separate from villager deliveries and collected-resource counters.')
+        : row.source === 'Poles Folwark bonus food'
+        ? t('Bonus food from observed farm completions in Folwark range, confirmed by food receipts. Excluded from gathered food and collection rates; overlapping ranges are credited once.')
         : row.source === 'Age advancement' || row.source === 'Technology research'
         ? t('Direct stockpile grant from an executed civilization bonus. Separate from gathered resources; amounts use the supported game rules.')
         : row.category === 'unattributed'
@@ -59,7 +61,7 @@ export function bonusIncomeHtml(players) {
         : row.category === 'handicap' ? row.source.replace(/^Handicap · /, '')
         : row.category === 'exchange' ? t(row.source === 'Market sales' ? 'Sales' : 'Purchases')
         : row.source === 'Building loot' ? t('Building loot · Danes') : t(row.source);
-      return `<tr data-ui-key="income-${id}-${esc(row.source)}" class="${row.category === 'unattributed' ? 'hint' : ''}"><td ${tip(label, detail)}>${row.estimated && row.category !== 'unattributed' ? '≈ ' : ''}${esc(label)}</td>${RESOURCE_ORDER.map(r => `<td>${row.resources?.[r] > 0 ? row.resources[r] < 1 ? row.resources[r].toFixed(1) : fmtNum(row.resources[r]) : '·'}</td>`).join('')}</tr>`;
+      return `<tr data-ui-key="income-${id}-${esc(row.source)}" class="${row.category === 'unattributed' ? 'hint' : ''}"><td ${tip(label, detail)}>${row.estimated && row.category !== 'unattributed' ? '≈ ' : ''}${esc(label)}</td>${RESOURCE_ORDER.map(r => `<td>${row.resources?.[r] > 0 ? row.resources[r] < 1 || row.source === 'Poles Folwark bonus food' && !Number.isInteger(row.resources[r]) ? row.resources[r].toFixed(1) : fmtNum(row.resources[r]) : '·'}</td>`).join('')}</tr>`;
     }).join('');
     // Older backends labelled unproven global multipliers as civilization yield.
     const effects = [...(income.effects || []), ...(income.exchanges || [])].filter(row => row.total > 0

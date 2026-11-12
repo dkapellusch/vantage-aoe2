@@ -140,3 +140,26 @@
   #dashboard[data-overview-fit] .dash-sub { display: inline; margin-left: 3px; }
   #dashboard[data-overview-fit] .dash-sub::before { content: '/ '; }
 }
+
+.review-farm { margin: 10px 0; padding: 9px; border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
+.review-farm h4 { margin: 8px 0 6px; font-size: 11px; }
+.review-farm p { margin: 6px 0; line-height: 1.4; }
+.review-farm-row { display: flex; justify-content: space-between; gap: 8px; margin: 5px 0; }
+.review-farm-row span { color: var(--muted); }
+.review-farm-row b { text-align: right; }
+.review-farm-techs { display: flex; flex-wrap: wrap; gap: 5px; }
+.review-farm-tech { display: flex; flex-direction: column; gap: 3px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 4px; max-width: 100%; }
+.review-farm-tech small { color: var(--muted); }
+.review-farm-tech.done { border-color: #67805c; }
+.review-farm-tech.done small { color: #a8c293; }
+.review-farm-farmers { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
+.review-farm-grants { max-height: 160px; overflow-y: auto; }
+.review-farm-grants > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 4px 0; }
+#unitpanel:has(.review-farm) { max-height: min(650px, 72vh); }
+@media (max-width: 650px) {
+  body[data-hud-layout="caster"] #unitpanel:not(.hud-custom-size):has(.review-farm) {
+    right: 8px; bottom: 8px !important; translate: 0 0;
+    max-height: 72vh !important; max-width: calc(100vw - 16px);
+    z-index: 9; background: var(--panel-solid);
+  }
+}

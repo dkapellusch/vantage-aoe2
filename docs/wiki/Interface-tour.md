@@ -200,3 +200,29 @@ the first frame during this step. The laid-out HUD and finished map then fade
 in together; reduced-motion preferences skip the fade and spinner animation.
 A failed or stalled initial load offers **Reload**, without exposing a partial
 map. In the hub the viewer, result table and charts reveal together.
+
+
+### Farms and Folwarks
+
+Select a farm to see its owner's farm upgrades and their observed research
+completion times. A checkmark means earned; “Not yet” means the recording has
+not shown it completed. Upgrades already present at the start have no invented
+research time. Chinese team farm food, Sicilian farm-upgrade effects and Teuton
+reseeding costs use their actual recorded technology states. The owner's new
+farm capacity includes the effects already applied by the game. Capacity at
+construction and farm age appear only when completion was observed. Working
+farmers are links to the observed workers.
+
+**Food remaining is not recorded** by the current spectator stream. Its farm
+resource field is a small gathering buffer, not the lifetime food store. The
+panel therefore shows “Not recorded”, along with new-farm capacity and capacity
+at construction. Existing farms can receive partial top-ups from upgrades;
+neither their remaining food nor their current maximum can be recovered
+exactly from those fields.
+
+A Folwark's panel lists observed bonus food, triggered farms and each farm's
+grant. **Poles Folwark bonus food** also appears under economy bonus income.
+These instant grants are excluded from gathered-food totals and collection
+rates. Overlapping ranges pay once; when the stream cannot identify which
+Folwark paid, the shared amount is marked separately on the eligible buildings.
+Partial recordings and gaps can only provide observed totals.

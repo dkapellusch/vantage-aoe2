@@ -567,6 +567,10 @@ function primeViews(v, epoch) {
 
 async function updateView() {
   if (pendingView) return;
+  if (!S.view) {
+    if (performance.now() < viewRetryAt) return;
+    viewRetryAt = performance.now() + 100;
+  }
   if (S.view && S.nextView && S.t >= S.view.time && S.t < S.nextView.time) return;
   // At the live edge, retry look-ahead as the stream grows, without issuing a
   // different request for every animation frame.
@@ -845,6 +849,12 @@ function placeDashboard() {
     }
   }
   placeFloaters();
+  // Removing the dashboard also removes its reservation for the inspector.
+  // Otherwise an old inline height/bottom keeps clipping the next selection.
+  const up = $('unitpanel');
+  if (up && !up.classList.contains('hidden')) {
+    up.style.bottom = ''; up.style.maxHeight = '';
+  }
   if (!d || d.classList.contains('hidden')) return;
   const vw = window.innerWidth;
   const shown = (el) => el && !el.classList.contains('hidden') && !el.classList.contains('panel-off') && el.getClientRects().length;
@@ -889,9 +899,7 @@ function placeDashboard() {
   if (d.style.left !== want) { d.style.left = want; d.style.transform = 'none'; }
   // A wide page on a narrow window reaches under the unit panel (bottom right):
   // the unit panel then sits above the dashboard, between it and the events.
-  const up = $('unitpanel');
   if (!up || up.classList.contains('hidden')) return;
-  up.style.bottom = ''; up.style.maxHeight = '';
   const a = d.getBoundingClientRect(), b = up.getBoundingClientRect();
   if (a.right <= b.left || b.right <= a.left || a.bottom <= b.top) return;
   const ev = $('events');

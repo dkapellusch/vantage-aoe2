@@ -23,6 +23,7 @@ import { setSelectionHtml } from './selection-panel.js';
 import { patchHtml, listDelta } from './dom.js';
 import { ownerIdentity, selectionHeader, militaryCard, wireReviewControls, reviewIcon, DASH_HISTORY, DASH_SELECTIONS } from './player-review.js';
 import { resourceTotalsHtml } from './resource-review.js';
+import { farmReviewHtml } from './farm-review.js';
 import { renderTeamBoard, toggleTeamBoardView } from './team-board.js';
 
 const $ = (id) => document.getElementById(id);
@@ -2132,7 +2133,7 @@ function singlePanel(el, r) {
     const rows = actOrder.map((k) => `<div><span>${esc(t(k.replace('_', ' ')))}</span> ${tot ? Math.round(100 * ((acts || {})[k] || 0) / tot) + '%' : '–'}</div>`).join('');
     return `<div class="hint">${head}</div>${rows}`;
   };
-  const eff = us && us.activity && Object.keys(us.activity).length
+  const eff = u.cls !== 49 && us && us.activity && Object.keys(us.activity).length
     ? `<div class="hint" style="margin-top:6px">${t('Activity')}</div><div class="grid2" style="gap:6px"><div class="up-stats" style="grid-template-columns:1fr">${actHtml(us.activity_lm, t('Last minute'))}</div><div class="up-stats" style="grid-template-columns:1fr">${actHtml(us.activity, t('Lifetime'))}</div></div>`
     : '';
   const nick = settings.entityNames[r[0]];
@@ -2164,7 +2165,7 @@ function singlePanel(el, r) {
   const farmQ = s && (/mill|town center|folwark/i.test(u.name)) && s.farm_queue ? `<div class="hint">${t('Farm reseeds queued')}: ${s.farm_queue}</div>` : '';
   const doing = r[9] != null && ACT_NAMES[r[9]] ? ` · <b>${t(ACT_NAMES[r[9]])}</b>` : '';
   const carried = carryPairs(r[10]);
-  const carry = carried.length ? `<div class="hint">${t('Carrying')} ${carried.map(([res, n]) => `${Math.round(n)} ${t(res)}`).join(' + ')}</div>` : '';
+  const carry = carried.length && u.cls !== 49 ? `<div class="hint">${t('Carrying')} ${carried.map(([res, n]) => `${Math.round(n)} ${t(res)}`).join(' + ')}</div>` : '';
   const viewCons = S.view && S.view.construction ? S.view.construction[r[0]] ?? S.view.construction[String(r[0])] : null;
   const cons = us && has(us.construction_pct) ? us.construction_pct : viewCons;
   const consHtml = has(cons) && cons < 1 ? `<div class="hint">${t('Under construction')} ${Math.round(cons * 100)}%</div>${bar(cons, 'var(--accent)', t('Construction'))}` : '';
@@ -2178,10 +2179,12 @@ function singlePanel(el, r) {
   const mechanics = numbersReady ? `<div class="up-stats">${statsHtml}</div>${auraHtml}` : '';
   setHtml(el, `${selectionHeader(r, { ...u, icon_url: unitIcon(r[2], r[1], r[0]) }, nick || u.name, shownOwner)}
     <div class="hpbar"><div style="width:${Math.round(r[5] * 100)}%"></div></div>
-    <div class="hint">${t('HP')} ${numbersReady ? `${Math.round(r[5] * hpMax)} / ${baseDelta(base.hp ?? (sv('hp') || u.hp), hpMax)}` : '– / –'}${r[6] & 8 ? ` · <b style="color:var(--bad)">${t('idle')}</b>` : doing}${r[6] & 16 && !consHtml ? ` · ${t('under construction')}` : ''}</div>
+    <div class="hint">${t('HP')} ${numbersReady ? `${Math.round(r[5] * hpMax)} / ${baseDelta(base.hp ?? (sv('hp') || u.hp), hpMax)}` : '– / –'}${r[6] & 8 && u.cls !== 49 ? ` · <b style="color:var(--bad)">${t('idle')}</b>` : doing}${r[6] & 16 && !consHtml ? ` · ${t('under construction')}` : ''}</div>
     ${consHtml}${faithHtml}${chargeFillHtml}${gateHtml}
+    ${farmReviewHtml(us, { techName: id => techInfoFor(id, owner).name,
+      farmers: Object.entries(S.view?.gather_targets || {}).filter(([id, target]) => +target === r[0] && rowForEntityId(+id)?.[9] === 2).map(([id]) => +id) })}
     ${economic && u.kind === 'building' && (nonZero(rng.cur) || us?.kills || us?.dealt) ? militaryCard([r[0]]) : ''}${workingHtml}${economic ? `<details class="review-details" data-panel-detail="mechanics"><summary>${t('Details')}</summary>${resourceTotalsHtml(us?.resource_totals, u.cls === 4)}${mechanics}${eff}${combatHtml(us)}</details>` : `${militaryCard([r[0]])}${mechanics}`}
-    ${garHtml}${relevantUpgrades([r])}
+    ${garHtml}${us?.farm ? '' : relevantUpgrades([r])}
     ${r[1] > 0 && u.cost && Object.keys(u.cost).length ? `<div class="hint" style="margin-top:4px">${t('Cost')}: ${costText(u.cost)}</div>` : ''}
     ${economic ? '' : `${carry}${marketHtml}${farmQ}${prodHtml}<details class="review-details" data-panel-detail="activity"><summary>${t('Details')}</summary>${eff}</details>`}`);
   const nameEl = $('up-name');
