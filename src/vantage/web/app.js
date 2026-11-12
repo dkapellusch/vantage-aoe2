@@ -1385,7 +1385,7 @@ function onSelect(sel) {
   // A hidden selection panel looks like a broken click: say where it went, once.
   if (S.selection.size && !layout.isVisible('unitpanel') && !hiddenSelectionHinted) {
     hiddenSelectionHinted = true;
-    toast(t('{p} hidden · ▣ Panels (Alt+V) brings it back', { p: t('Selection panel') }));
+    toast(t('{p} hidden · ▣ Customize (Alt+V) brings it back', { p: t('Selection panel') }));
   }
   renderHud();
 }
@@ -1929,6 +1929,7 @@ const DOCS = [
   ]],
   ['Panels', [
     'Top: the scoreboard and team overview ({k:toggleOverview}). Left: static techs ({k:toggleStaticTechnologies}) and production ({k:toggleProduction}); slide-outs with every technology ({k:toggleSlideoutStaticTechs}) and a graph ({k:toggleSlideoutGraph}). Bottom: the dashboard, cycled with {k:cycleDashboardForward} / {k:cycleDashboardBackward}. Right: the event log (Page Up / Page Down to scroll) and the unit panel.',
+    'HUD presets decide how much is on screen: {k:hudPresetMinimal} Minimal (the Pulse strip and the minimap), {k:hudPresetCaster} Caster, {k:hudPresetReview} Review, {k:hudPresetAnalyst} Analyst and {k:hudPresetFull} Full (every panel, as your settings have them). Hold {k:peekFullHud} to peek at Full. {k:togglePanelsMenu} opens Customize: tick panels and metrics, copy a link that opens the same HUD (also for the OBS overlay page), save layouts. {k:arrangePanels} edits the layout: drag and resize panels, add widgets, set anchors and scenes.',
     '{k:toggleResourcesLeft} shows the resources left on the map; {k:togglePlayerResources} shows per-player rows. {k:swapScoreboardTeamSides} flips the team sides.',
   ]],
   ['Colours and display', [
@@ -1972,7 +1973,7 @@ function openDocs() {
 
 const OMNI = [
   ['Home', 'openHome'], ['Statistics', 'showAchievements'], ['Settings', 'openSettings'],
-  ['Panels', 'togglePanelsMenu'], ['Quick reference', 'openHelp'], ['Documentation', 'openDocs'], ['Tutorial', 'showTutorial'],
+  ['Customize', 'togglePanelsMenu'], ['Edit layout', 'arrangePanels'], ['Quick reference', 'openHelp'], ['Documentation', 'openDocs'], ['Tutorial', 'showTutorial'],
   ['Full screen', 'toggleFullScreen'],
 ];
 
@@ -2327,6 +2328,7 @@ function wire() {
   layout.setContext({
     onChange: renderHud, toast, seek, actions: ACTIONS,
     openStats: (opts) => overlays.openStats(seek, opts),
+    closeStats: () => overlays.closeStatsDock(),
   });
   layout.installPanelsMenu(renderHud);
   layout.installPanelTools(renderHud, toast);

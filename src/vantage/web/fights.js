@@ -1,7 +1,9 @@
-// Fights, found in the event log: kills closer together than GAP form one
+// Fights and key events, found in the event log: kills closer together than GAP form one
 // fight. Each fight carries what every player lost (units, resource value,
 // by unit type), so the Match story can size its bar by resources lost and the
 // Focus slot can print a recap. Pure; cached per event list by the callers.
+
+import { TOWN_CENTERS, GOTO_BUILDINGS } from './games.js';
 
 const GAP_MS = 10000;
 const MIN_KILLS = 2;
@@ -43,4 +45,27 @@ let cache = { events: null, n: -1, fights: [] };
 export function fightsOf(events) {
   if (cache.events !== events || cache.n !== events.length) cache = { events, n: events.length, fights: findFights(events) };
   return cache.fights;
+}
+
+// -- key events (the Event ticker) -------------------------------------------------------------
+
+const CASTLES = () => GOTO_BUILDINGS.gotoCastle || [];
+const WONDER = 276;
+/** A key event: an age-up, a resignation or win, a wonder or countdown, a town centre or castle lost. */
+export function isKeyEvent(e) {
+  if (e.kind === 'kill') return !!e.victim && e.victim.kind === 'building' && (TOWN_CENTERS.includes(e.victim.master) || CASTLES().includes(e.victim.master) || e.victim.master === WONDER);
+  if (e.cat === 'age') return e.kind === 'age_up';
+  return e.cat === 'status' || e.cat === 'victory' || e.kind === 'countdown';
+}
+
+/** The key events to show at `at`: the last `lines` within the window, with their age as 0..1. */
+export function tickerEvents(events, at, windowMs, lines = 2) {
+  const out = [];
+  for (let i = events.length - 1; i >= 0 && out.length < lines; i--) {
+    const e = events[i];
+    if (e.t > at) continue;
+    if (e.t < at - windowMs) break;
+    if (isKeyEvent(e)) out.push({ e, age: (at - e.t) / windowMs });
+  }
+  return out.reverse();
 }

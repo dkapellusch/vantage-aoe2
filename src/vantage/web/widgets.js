@@ -7,7 +7,7 @@ import { t } from './i18n.js';
 import { HUD_PARTS } from './panels.js';
 import { METRICS, KILLS_LOSSES } from './metrics.js';
 import { sumStat } from './team-board.js';
-import { sideValue } from './story.js';
+import { sideValue } from './story-model.js';
 import { seriesLabel } from './overlays.js';
 import { hud } from './layout.js';
 

@@ -14,12 +14,10 @@ import { HUD_PARTS } from './panels.js';
 import { METRICS, KILLS_LOSSES } from './metrics.js';
 import { sumStat, compare } from './team-board.js';
 import { pulseMetrics } from './layout.js';
+import { cellModel } from './pulse-model.js';
 
 const RES_LABEL = { food: 'Food', wood: 'Wood', gold: 'Gold', stone: 'Stone' };
-// Pulse metric id -> the registered metric it shows.
-const STAT = { vil: 'villagers', mil: 'military', army: 'army_value', idle: 'idle_villagers', pop: 'population', banksum: 'banked', ratesum: 'rate', score: 'score' };
 const PHONE = ['age', 'vil', 'mil', 'army', 'idle'];
-const DELTA = new Set(['army', 'ratesum']);
 
 const eapmOf = (pid) => { const a = S.view && S.view.apm && S.view.apm[pid]; return a && typeof a.effective === 'number' ? a.effective : null; };
 
@@ -31,31 +29,6 @@ export function pulseSides() {
 }
 
 function label(team) { return team.solo || team.players.length === 1 ? playerName(team.players[0].id) : teamName(team); }
-
-/**
- * One metric cell. value: the side's number; other: the opposing side's (null
- * in a free-for-all, where no delta is shown). Exported for the tests.
- */
-export function cellModel(id, stats, otherStats, players) {
-  const m = METRICS[STAT[id]];
-  if (!m) return null;
-  const value = sumStat(stats, m.f);
-  if (value == null) return null;
-  const other = otherStats ? sumStat(otherStats, m.f) : null;
-  const cmp = other == null ? null : compare(value, other, m.lower);
-  // A delta only where the lead is the story: army value and the collection rate.
-  const leads = DELTA.has(id) && !!cmp && cmp.lead === 'a' && cmp.diff > 0;
-  const cap = m.cap ? sumStat(stats, m.cap) : null;
-  const warn = !!m.warnEach && value >= m.warnEach * players;
-  const housed = id === 'pop' && stats.some((s) => s && s.housed);
-  const stock = id === 'banksum';
-  const shown = stock ? fmtStock(value) : fmtNum(value);
-  let spoken = `${t(m.label)} ${shown}${cap != null ? ` ${t('of')} ${cap}` : ''}`;
-  if (leads) spoken += `, ${t('ahead by {n}', { n: fmtNum(cmp.diff) })}`;
-  if (warn) spoken += `, ${t('high')}`;
-  if (housed) spoken += `, ${t('Housed')}`;
-  return { id, short: m.short, series: m.series || null, shown, cap, delta: leads ? fmtNum(cmp.diff) : null, warn, housed, spoken };
-}
 
 function cellHtml(c, pid, color, right) {
   const delta = c.delta ? `<em style="color:${color}" aria-hidden="true">${right ? '' : '▲'}${c.delta}${right ? '▲' : ''}</em>` : '';

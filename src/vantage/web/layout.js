@@ -208,7 +208,9 @@ export function applyPreset(name) {
   if (!STOCK[name] && name !== CUSTOM) return;
   peek = false; selExpanded = false;
   setHud({ ...hud(), preset: name });
-  if (STOCK[name] && STOCK[name].stats === 'dock' && window.innerWidth >= 1500) context.openStats({ dock: true });
+  // Analyst opens Statistics docked beside the map (a wide window only); leaving it puts things back.
+  if (STOCK[name] && STOCK[name].stats === 'dock' && window.innerWidth >= 1500) context.openStats({ dock: true, preset: true });
+  else context.closeStats();
   maybeHint(true);
 }
 export function presetIsChanged(name) { return presetChanged(hud(), name); }

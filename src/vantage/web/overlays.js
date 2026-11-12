@@ -507,10 +507,22 @@ function placeStatsWindow() {
 }
 
 /** Open Statistics (opts.dock: docked to the right edge; opts.metric: on that series). */
-export function openStats(seek, { dock = null, metric = null } = {}) {
-  if (dock != null) settings.statsWindow = { ...statsState(), docked: !!dock };
+let dockedByPreset = null; // what "docked" was before a preset (Analyst) docked the window
+export function openStats(seek, { dock = null, metric = null, preset = false } = {}) {
+  if (dock != null) {
+    if (preset && dockedByPreset == null) dockedByPreset = { docked: !!statsState().docked };
+    settings.statsWindow = { ...statsState(), docked: !!dock };
+  }
   if (!isOpen(STATS)) open(STATS);
   return renderStats(seek, metric);
+}
+
+/** Leaving a preset that docked the window: close it and put the viewer's own choice back. */
+export function closeStatsDock() {
+  if (!dockedByPreset) return;
+  settings.statsWindow = { ...statsState(), docked: dockedByPreset.docked };
+  dockedByPreset = null;
+  if (isOpen(STATS)) closeAll();
 }
 
 /** Dock the Statistics window to the right edge, or float it again (opening it if needed). */

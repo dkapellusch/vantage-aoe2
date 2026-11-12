@@ -12,11 +12,10 @@
 import { S, SPEEDS, fmtTime, fmtNum, esc, playerStats, playerMarkColor, playerTextColor, playerName, unitInfo, unitIcon, isTwoTeamLayout, sideTeams, RES } from './state.js';
 import { t } from './i18n.js';
 import { HUD_PARTS } from './panels.js';
-import { TOWN_CENTERS, GOTO_BUILDINGS } from './games.js';
 import { centerOn, selectedRows } from './world.js';
 import { METRICS } from './metrics.js';
 import { sumStat } from './team-board.js';
-import { fightsOf, fightForRecap } from './fights.js';
+import { fightsOf, fightForRecap, tickerEvents } from './fights.js';
 import { compareTableHtml, sideStats } from './compare-table.js';
 import { hud, setHud, expandSelection, isVisible } from './layout.js';
 
@@ -76,27 +75,6 @@ function renderFocus(el, ctx) {
 }
 
 // -- Event ticker --------------------------------------------------------------------------------
-
-const CASTLES = () => GOTO_BUILDINGS.gotoCastle || [];
-const WONDER = 276;
-/** A key event: an age-up, a resignation or win, a wonder or countdown, a town centre or castle lost. */
-export function isKeyEvent(e) {
-  if (e.kind === 'kill') return !!e.victim && e.victim.kind === 'building' && (TOWN_CENTERS.includes(e.victim.master) || CASTLES().includes(e.victim.master) || e.victim.master === WONDER);
-  if (e.cat === 'age') return e.kind === 'age_up';
-  return e.cat === 'status' || e.cat === 'victory' || e.kind === 'countdown';
-}
-
-/** The key events to show at `at`: the last `lines` within the window, with their age as 0..1. */
-export function tickerEvents(events, at, windowMs, lines = 2) {
-  const out = [];
-  for (let i = events.length - 1; i >= 0 && out.length < lines; i--) {
-    const e = events[i];
-    if (e.t > at) continue;
-    if (e.t < at - windowMs) break;
-    if (isKeyEvent(e)) out.push({ e, age: (at - e.t) / windowMs });
-  }
-  return out.reverse();
-}
 
 function renderTicker(el, ctx) {
   HUD_PARTS.delegate(el, 'click', '[data-t]', (d) => {

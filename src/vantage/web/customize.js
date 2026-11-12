@@ -66,6 +66,7 @@ function layoutHtml() {
   const names = Object.keys(h.layouts || {}).sort();
   return `${full ? `<div class="cz-line"><span class="hint">${esc(t('Placement'))}</span>${LAYOUTS.map(([k, l]) => `<button type="button" data-cz-layout="${k}" aria-pressed="${hudLayout() === k}">${esc(t(l))}</button>`).join('')}<button type="button" data-cz="everything" ${tip(t('Everything'), t('Every panel, none collapsed'))}>${esc(t('Everything'))}</button></div>` : ''}
     <div class="cz-line"><button type="button" data-cz="edit" class="cz-primary" ${tip(t('Edit layout'), t('Drag panels, resize them, add widgets, set anchors and scenes'))}>${esc(t('Edit layout…'))} ${key('arrangePanels')}</button><button type="button" data-cz="reset-layout" ${tip(t('Reset layout'), t('Every panel back to its place and size'))}>${esc(t('Reset layout'))}</button></div>
+    <div class="cz-line"><label for="cz-scene" class="hint">${esc(t('Scene'))}</label><select id="cz-scene" ${tip(t('Scene'), t('Panels can be tied to scenes in Edit layout. Auto follows the match: a fight, the end, nothing open.'))}><option value="auto">${esc(t('Auto'))}</option>${SCENES.map(([id, label]) => `<option value="${id}" ${h.scene === id ? 'selected' : ''}>${esc(t(label))}</option>`).join('')}</select></div>
     <label class="cz-check" ${tip(t('Lock panels'), t('Nothing moves or resizes by accident while watching: only Edit layout can'))}><input type="checkbox" data-cz-flag="lock" ${h.lock ? 'checked' : ''}> ${esc(t('Lock panels outside Edit layout'))}</label>
     <label class="cz-check" ${tip(t('Hide duplicates'), t('With the Team board on screen, the dashboard Overview drops Villagers, Idle, Military and Army value'))}><input type="checkbox" data-cz-flag="dedupe" ${h.dedupe ? 'checked' : ''}> ${esc(t('Hide dashboard columns the Team board shows'))}</label>
     <div class="cz-line"><label class="sr-only" for="cz-layout-list">${esc(t('Saved layouts'))}</label><select id="cz-layout-list"><option value="">${esc(t('Saved layouts…'))}</option>${names.map((n) => `<option value="${esc(n)}" ${n === h.layoutName ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
@@ -156,6 +157,7 @@ export function installCustomize(ctx) {
       setHud({ ...hud(), hiddenRows: e.target.checked ? hidden : [...hidden, d.czRow] });
     } else if (d.czFlag) setHud({ ...hud(), [d.czFlag]: e.target.checked });
     else if (e.target.id === 'cz-import') { importLayout(e.target.files && e.target.files[0]); return; }
+    else if (e.target.id === 'cz-scene') setHud({ ...hud(), scene: e.target.value });
     else return;
     changed();
   });
