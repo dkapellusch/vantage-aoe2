@@ -100,6 +100,7 @@ function evictSprites(hd) {
 }
 export function spriteMemory() { return { bytes: spriteBytes, strips: spriteCache.size }; }
 let spriteRequests = 0;
+let firstFrameSpritesPending = false;
 /** null = unknown, true/false once the server answered a layer=shadow request. */
 let layerSplit = null;
 
@@ -165,6 +166,7 @@ function spriteStrip(sid, facet, color, opts) {
   // the game having no picture there and stays as it is.
   if (e && e.retryAt && performance.now() > e.retryAt) { spriteCache.delete(key); spriteRevision++; e = null; }
   if (e) {
+    if (countingDraw && !e.img && !e.failed) firstFrameSpritesPending = true;
     spriteCache.delete(key); spriteCache.set(key, e); // most recent last
     if (e.img || e.failed || !(opts && opts.dir)) return e;
     const near = nearestFacing(sid, facet, color, query);
@@ -172,6 +174,7 @@ function spriteStrip(sid, facet, color, opts) {
     return near || e;
   }
   evictSprites(hd);
+  if (countingDraw) firstFrameSpritesPending = true;
   if (spriteRequests > 32) return null; // don't flood the server; retry next frame
   e = { meta: null, img: null, failed: false };
   spriteCache.set(key, e);
@@ -320,6 +323,21 @@ function requestSpriteRequirement(r) {
 export function viewReady(n) {
   if (!n || !spritesOn() || !S.catalog) return true;
   return viewGraphics.ready(n, graphicsContext(), S.catalog, spriteRevision);
+}
+
+// Includes decoded images and the painted ground, not merely finished HTTP
+// requests. Hidden first-frame draws also upload the GPU atlas before reveal.
+export function initialFrameReady() {
+  if (!S.map || !S.view || !S.catalog || !terrainCanvas) return false;
+  buildViewTerrain();
+  const terrain = !S.map.terrain_textures || !!viewTerrainCanvas;
+  const sprites = viewReady(S.view);
+  const images = [...imgCache.values()].every((im) => im.failed || (im.complete && im.naturalWidth));
+  const trees = S.view.trees_t == null || S.view.trees_t < 0 || S.view.trees_t === treesT;
+  const tiles = S.view.terrain_t == null || S.view.terrain_t < 0 || S.view.terrain_t === terrainT;
+  return terrain && sprites && !firstFrameSpritesPending && images && trees && tiles
+    && !treesPending && !terrainPending
+    && ground.map === S.map && !!ground.key;
 }
 
 function collectViewSprites(n) {
@@ -1175,6 +1193,7 @@ export function setMap(map) {
   biomeAt = 0;
   const colors = map.terrain_colors.map(hexToRgb);
   buildTerrain(terrain, elev, colors);
+  buildViewTerrain();
   buildFlatMap();
   if (S.camera.x === 60 && S.camera.y === 60) {
     S.camera.x = mapW / 2; S.camera.y = mapH / 2;
@@ -2264,6 +2283,7 @@ export function draw(dt = 1 / 60) {
   const tB = performance.now();
 
   countingDraw = true;
+  firstFrameSpritesPending = false;
   fireOwnedTiles.clear();
   sceneBegin();
   const sel = S.selection;

@@ -16,7 +16,7 @@
 .sb-share { display: flex; width: 120px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,.1); margin: 2px 0 1px; }
 .sb-share i { display: block; height: 100%; }
 .sb-share i + i { flex: 1; }
-.sb-lead { font: 600 11px var(--mono); white-space: nowrap; }
+.sb-lead { display: grid; grid-template-columns: 14px 1fr 14px; align-self: stretch; text-align: center; font-variant-numeric: tabular-nums; font: 600 11px var(--mono); white-space: nowrap; }
 .sb-lead.even { color: var(--muted); font-weight: 400; }
 :is(.sb-lead, .tb-lab em) .arr { font-size: 8px; margin: 0 3px; vertical-align: 1px; }
 .sb-unlocked { color: var(--muted); cursor: help; }
@@ -45,7 +45,8 @@
 .tb-v small.housed { color: var(--bad); font-weight: 700; }
 .tb-bar { height: 6px; background: rgba(255,255,255,.06); border-radius: 3px; display: flex; overflow: hidden; }
 .tb-bar.a { justify-content: flex-end; }
-.tb-bar i { display: block; height: 100%; border-radius: 3px; opacity: .45; }
+.tb-bar i { display: block; width: 100%; flex: none; transform-origin: left; height: 100%; border-radius: 3px; opacity: .45; }
+.tb-bar.a i { transform-origin: right; }
 .tb-bar i.lead { opacity: 1; }
 .tb-lab { display: flex; justify-content: center; align-items: baseline; gap: 5px; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; }
 .tb-lab img { width: 12px; height: 12px; align-self: center; margin-right: -2px; }
@@ -75,3 +76,6 @@ table.tb-players tr.tb-tm td i { display: inline-block; width: 9px; height: 9px;
 table.tb-players tr.tb-sum td { color: var(--muted); border-top: 1px dashed var(--line); font-size: 11px; }
 table.tb-players tr.tb-req td { padding-top: 0; text-align: left; }
 table.tb-players tr.dead { opacity: .45; filter: grayscale(.6); }
+
+.sb-lead .arr { margin: 0; }
+.sb-lead .arr.off { visibility: hidden; }

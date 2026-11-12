@@ -5,6 +5,7 @@ import {
   playerMarkColor, fmtTime, unitInfo, unitIcon, applyServerConfig, tip, esc, tooltipLevel, refreshSeries, probeAssetOrigin, abortViews, viewTimings, viewStats,
 } from './state.js';
 import * as world from './world.js';
+import { InitialFrame } from './initial-load.js';
 import { loadMoments, toggleReviewTimeline, reviewStatus } from './review-workspace.js';
 import * as panels from './panels.js';
 import { toggleTeamBoardView } from './team-board.js';
@@ -28,6 +29,63 @@ let nextFrameDue = 0;
 let mouse = { x: null, y: null };
 let fpsAcc = 0, fpsN = 0;
 let endgameShown = false;
+
+// Keep the initial recording clock still while hidden assets and the HUD load.
+const initialLoad = new InitialFrame();
+let booted = false;
+let initialFonts = false;
+let startupLayout = '';
+function reportReady() {
+  window.dispatchEvent(new CustomEvent('vantage:ready'));
+  if (window.parent !== window) window.parent.postMessage({ type: 'vantage:ready' }, '*');
+}
+window.addEventListener('message', (event) => {
+  if (event.source === window.parent && event.data?.type === 'vantage:ready?'
+    && ['revealing', 'ready'].includes(initialLoad.state)) reportReady();
+});
+function startupError() {
+  document.body.dataset.startup = 'error';
+  $('initial-load').querySelector('p').textContent = t('Error');
+  $('initial-retry').hidden = false;
+  if (window.parent !== window) window.parent.postMessage({ type: 'vantage:error' }, '*');
+}
+function firstFrame(now) {
+  if (!initialLoad.pending) return;
+  const idle = booted && (!S.session || S.session.mode === 'idle'
+    || (S.session.mode === 'live' && !(S.end > 0)));
+  const ids = ['scoreboard', 'overview', 'production', 'dashboard', 'timebar', 'minimap-wrap'];
+  const layoutKey = ids.map((id) => {
+    const r = $(id).getBoundingClientRect();
+    return `${id}:${r.x},${r.y},${r.width},${r.height}`;
+  }).join('|');
+  if (layoutKey !== startupLayout) {
+    startupLayout = layoutKey;
+    // A final size change can affect the map's camera culling and the minimap.
+    world.resizeMinimap();
+  }
+  const images = [...document.querySelectorAll('#hud img')].filter((im) => {
+    const r = im.getBoundingClientRect();
+    return r.width && r.height;
+  });
+  const hud = !!S.view && !!$('scoreboard').textContent.trim()
+    && (!settings.showDashboard || !!$('dash-table').rows.length);
+  const ready = initialLoad.update({
+    data: idle || !!(S.map && S.view && S.catalog && S.series),
+    graphics: idle || document.body.classList.contains('overlay-mode') || world.initialFrameReady(),
+    hud: idle || hud,
+    images: images.every((im) => im.complete),
+    fonts: initialFonts && document.fonts.status === 'loaded',
+  }, layoutKey, now);
+  if (ready) {
+    document.body.dataset.startup = 'revealing';
+    reportReady();
+    const ms = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160;
+    setTimeout(() => {
+      initialLoad.finish(); document.body.dataset.startup = 'ready';
+      document.body.dataset.viewerReady = 'true';
+    }, ms);
+  } else if (initialLoad.state === 'error') startupError();
+}
 
 // Shell-owned shared state.
 S.slideout = null;   // null | 'techs' | 'graph' (HUD renders the slide-outs)
@@ -536,6 +594,10 @@ async function updateView() {
     if (epoch !== viewEpoch) return;
     if (v && v.time != null) {
       S.view = v;
+      if (initialLoad.pending) {
+        world.viewReady(v);
+        renderHud(); layoutLeftColumn(); placeDashboard();
+      }
       if (S.jump && !S.jump.wait && Math.abs(v.time - S.jump.to) < 2500) S.jump = null;
       // Install the next cached target in this same frame. Awaiting it here
       // left one or more frames with no interpolation at every boundary.
@@ -653,6 +715,8 @@ function tick(now) {
     // A jump past the loaded part of a recording waits for the loader.
     if (S.end >= S.jump.to) { S.t = S.jump.to; S.jump.wait = false; resetViews(); }
     else S.t = S.end;
+  } else if (initialLoad.pending && !live) {
+    // Preserve the requested play/pause state; reveal the actual first frame.
   } else if (S.playing && (S.bufferWait = bufferWait()) > 0) {
     // Buffering for fast replay: hold until the rest can be watched at full speed.
   } else if (S.playing) {
@@ -699,6 +763,7 @@ function tick(now) {
   world.draw(dt);
   const tm = performance.now();
   world.drawMinimap();
+  firstFrame(now);
   if (perf.on) {
     perf.minimap.push(performance.now() - tm);
     perf.work.push(performance.now() - t0);
@@ -2149,6 +2214,7 @@ function wire() {
 }
 
 async function boot() {
+  $('initial-retry').onclick = () => location.reload();
   // A missing game icon should leave an empty slot, not a broken-image glyph.
   window.addEventListener('error', (e) => { if (e.target && e.target.tagName === 'IMG') e.target.style.visibility = 'hidden'; }, true);
   if (new URLSearchParams(location.search).get('overlay') === '1') {
@@ -2180,11 +2246,15 @@ async function boot() {
   // The panels too: a caster column has a fixed height, so only they change size.
   for (const id of ['scoreboard', 'timebar', 'leftcol', 'overview', 'techs', 'production']) if ($(id)) leftColObserver.observe($(id));
   window.addEventListener('resize', layoutLeftColumn);
+  renderHud(); layoutLeftColumn(); placeDashboard();
+  // Starting font loads after the real HUD is present covers skin-provided fonts too.
+  document.fonts.ready.then(() => { initialFonts = true; });
+  booted = true;
   requestAnimationFrame(tick);
 }
 
 // Debug/automation handle (used by the headless UI checks). openDocs and
 // hotkey conflicts are also reachable from other modules through it.
-window.vantage = { S, settings, seek, viewTimings, viewStats, actions: ACTIONS, world, openDocs, heroes, startSequence, topKiller, autocastEntity, reloadSkins };
+window.vantage = { S, settings, initialLoad, seek, viewTimings, viewStats, actions: ACTIONS, world, openDocs, heroes, startSequence, topKiller, autocastEntity, reloadSkins };
 
-boot();
+boot().catch((error) => { console.error(error); initialLoad.fail(); startupError(); });

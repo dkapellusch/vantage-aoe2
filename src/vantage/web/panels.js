@@ -520,8 +520,9 @@ function leadHtml(a, b) {
   const va = teamScoreValue(a), vb = teamScoreValue(b), tot = va + vb;
   if (!(tot > 0)) return '';
   const d = va - vb, ahead = d > 0 ? a : b;
-  const lead = Math.round(d) === 0 ? `<div class="sb-lead even">${esc(t('even'))}</div>`
-    : `<div class="sb-lead" style="color:${playerTextColor(ahead.players[0].id)}" ${tip(t('Lead'), teamName(ahead))}>${d > 0 ? '<b class="arr">◀</b>' : ''}${fmtNum(Math.abs(d))}${d < 0 ? '<b class="arr">▶</b>' : ''}</div>`;
+  const even = Math.round(d) === 0;
+  // Fixed arrow slots keep the lead's text still when the leading side changes.
+  const lead = `<div class="sb-lead${even ? ' even' : ''}" style="color:${even ? 'var(--muted)' : playerTextColor(ahead.players[0].id)}" ${tip(t('Lead'), teamName(ahead))}><b class="arr${!even && d > 0 ? '' : ' off'}" aria-hidden="true">◀</b><span>${even ? esc(t('even')) : fmtNum(Math.abs(d))}</span><b class="arr${!even && d < 0 ? '' : ' off'}" aria-hidden="true">▶</b></div>`;
   const share = (100 * va) / tot;
   return `<div class="sb-share" ${tip(t('Score share'), `${Math.round(share)}% – ${Math.round(100 - share)}%`)}><i style="width:${share.toFixed(1)}%;background:${playerMarkColor(a.players[0].id)}"></i><i style="background:${playerMarkColor(b.players[0].id)}"></i></div>${lead}`;
 }

@@ -98,9 +98,9 @@ function statRow(row, a, b, sa, sb) {
   };
   const ico = row.res ? `<img src="/ui/resource_${row.res}.png" alt="">` : '';
   return `<div class="tb-row${row.strong ? ' strong' : ''}" ${row.detail ? tip(t(row.label), t(row.detail)) : ''}>
-    ${val(va, sa, a, 'a')}<span class="tb-bar a"><i class="${c.lead === 'a' ? 'lead' : ''}" style="width:${c.aPct.toFixed(1)}%;background:${ca}"></i></span>
+    ${val(va, sa, a, 'a')}<span class="tb-bar a"><i class="${c.lead === 'a' ? 'lead' : ''}" style="transform:scaleX(${(c.aPct / 100).toFixed(4)});background:${ca}"></i></span>
     <span class="tb-lab">${ico}${esc(t(row.label))}${delta}</span>
-    <span class="tb-bar b"><i class="${c.lead === 'b' ? 'lead' : ''}" style="width:${c.bPct.toFixed(1)}%;background:${cb}"></i></span>${val(vb, sb, b, 'b')}</div>`;
+    <span class="tb-bar b"><i class="${c.lead === 'b' ? 'lead' : ''}" style="transform:scaleX(${(c.bPct / 100).toFixed(4)});background:${cb}"></i></span>${val(vb, sb, b, 'b')}</div>`;
 }
 
 function teamsView(a, b, ctx) {

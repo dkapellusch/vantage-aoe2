@@ -5,6 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vantage</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1 2 3v5c0 3.5 2.6 6 6 7 3.4-1 6-3.5 6-7V3z' fill='%23d9b45a'/%3E%3C/svg%3E">
+<!-- Critical startup paint: independent of module, skin, image and font loads. -->
+<style>
+html, body { margin: 0; background: #0d0f12; }
+body[data-startup="loading"] > :not(#initial-load):not(script),
+body[data-startup="error"] > :not(#initial-load):not(script) { visibility: hidden; }
+#initial-load { position: fixed; inset: 0; z-index: 10000; display: grid; place-content: center;
+  gap: 14px; text-align: center; background: #0d0f12; color: #9a958a;
+  font: 14px/1.4 system-ui, sans-serif; }
+#initial-load .load-mark { width: 32px; height: 32px; margin: auto;
+  border: 2px solid #34312a; border-top-color: #d9b45a; border-radius: 50%;
+  animation: load-turn 1.2s linear infinite; }
+#initial-load p { margin: 0; }
+#initial-load button { min-height: 40px; }
+#initial-load [hidden] { display: none; }
+body[data-startup="revealing"] > :not(#initial-load):not(script) { animation: first-frame .16s ease-out; }
+body[data-startup="revealing"] #initial-load { opacity: 0; pointer-events: none; transition: opacity .16s; }
+body[data-startup="ready"] #initial-load { display: none; }
+html.overlay-mode #initial-load { background: transparent; }
+html.overlay-mode #initial-load > * { visibility: hidden; }
+@keyframes load-turn { to { transform: rotate(360deg); } }
+@keyframes first-frame { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  #initial-load .load-mark, body[data-startup="revealing"] > :not(script) { animation: none; }
+  body[data-startup="revealing"] #initial-load { transition: none; }
+}
+</style>
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/hud.css">
 <link rel="stylesheet" href="/static/world.css">
@@ -14,7 +40,13 @@
 <link rel="stylesheet" href="/static/hud-layout.css">
 <link rel="stylesheet" href="/static/player-review.css">
 </head>
-<body>
+<body data-startup="loading">
+<div id="initial-load" role="status" aria-live="polite">
+  <span class="load-mark" aria-hidden="true"></span>
+  <p data-i18n="Loading…">Loading…</p>
+  <button id="initial-retry" type="button" hidden data-i18n="Reload">Reload</button>
+  <noscript>JavaScript is needed to open this match.</noscript>
+</div>
 <canvas id="world"></canvas>
 
 <div id="hud">
