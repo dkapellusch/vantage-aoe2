@@ -55,6 +55,9 @@
 }
 .review-metrics-unavailable { margin-top: 6px; color: #d1b47e; font-size: 11px; }
 .review-healing { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin: 6px 0 8px; color: #a4d9b1; }
+.review-healing h4 { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+.review-healing-lifetime { padding: 8px; border: 1px solid #a4d9b133; border-radius: 5px; }
+.review-healing-resources { grid-column: 1 / -1; text-align: center; line-height: 1.5; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .review-resource-totals { margin: 8px 0; padding: 8px; border: 1px solid #ffffff15; border-radius: 5px; }
 .review-resource-numbers { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; margin: 6px 0; font-variant-numeric: tabular-nums; }
 .review-resource-number { display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; }
@@ -155,9 +158,9 @@
 .review-farm-farmers { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
 .review-farm-grants { max-height: 160px; overflow-y: auto; }
 .review-farm-grants > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 4px 0; }
-#unitpanel:has(.review-farm) { max-height: min(650px, 72vh); }
+#unitpanel:has(.review-farm, .review-healing-lifetime) { max-height: min(650px, 72vh); }
 @media (max-width: 650px) {
-  body[data-hud-layout="caster"] #unitpanel:not(.hud-custom-size):has(.review-farm) {
+  body[data-hud-layout="caster"] #unitpanel:not(.hud-custom-size):has(.review-farm, .review-healing-lifetime) {
     right: 8px; bottom: 8px !important; translate: 0 0;
     max-height: 72vh !important; max-width: calc(100vw - 16px);
     z-index: 9; background: var(--panel-solid);

@@ -112,13 +112,13 @@ function metricLabel(label) {
   return `<span>${name}${unit.length ? `<small>${unit.join(' · ')}</small>` : ''}</span>`;
 }
 
-export function militaryCard(ids) {
+export function militaryCard(ids, { healing = true } = {}) {
   const range = S.reviewRange;
   const data = militaryResults(ids);
-  return `<div class="review-scopes"><span>${fmtTime(data?.as_of_ms ?? S.view?.time ?? S.t)}</span>${[['life', t('Life')], ['minute', '60s'], ['fight', range ? `${fmtTime(range.from)}–${fmtTime(range.to)}` : t('Fight')]].map(([key, label]) => `<button data-review-scope="${key}" aria-pressed="${(S.reviewScope || 'life') === key}" ${key === 'fight' && !range ? 'disabled' : ''} ${tip(key === 'fight' && !range ? t('Choose a review interval in Statistics') : label)}>${label}</button>`).join('')}</div>${performanceCells(data, ids.length > 1, S.reviewScope || 'life')}${healingCells(data?.healing)}`;
+  return `<div class="review-scopes"><span>${fmtTime(data?.as_of_ms ?? S.view?.time ?? S.t)}</span>${[['life', t('Life')], ['minute', '60s'], ['fight', range ? `${fmtTime(range.from)}–${fmtTime(range.to)}` : t('Fight')]].map(([key, label]) => `<button data-review-scope="${key}" aria-pressed="${(S.reviewScope || 'life') === key}" ${key === 'fight' && !range ? 'disabled' : ''} ${tip(key === 'fight' && !range ? t('Choose a review interval in Statistics') : label)}>${label}</button>`).join('')}</div>${performanceCells(data, ids.length > 1, S.reviewScope || 'life')}${healing ? healingCells(data?.healing) : ''}`;
 }
 
-export function healingCells(healing) {
+export function healingCells(healing, { lifetime = false } = {}) {
   if (!healing?.healer_count) return '';
   const marker = healing.partial ? '≥' : '≈';
   const value = healing.value == null ? `${fmtNum(healing.known_value)}+?` : fmtNum(healing.value);
@@ -126,7 +126,7 @@ export function healingCells(healing) {
     .map(([r, n]) => `${Number(n.toFixed(2))} ${t(r)}`).join(' · ');
   const method = t('Observed direct healing; concurrent damage is included. Shared healing is split once between known healers. Regeneration, repair and ambiguous healing are excluded.');
   const valuation = t('HP restored ÷ target maximum HP × its owner’s unit cost at that time. Estimated replacement value, not resources added to the stockpile.');
-  return `<div class="review-healing" data-ui-key="healing-performance"><div class="review-metric" tabindex="0" ${tip(t('HP healed'), method)}>${reviewIcon('healing')}<b>${marker}${fmtNum(healing.hp)}</b><span>${t('HP healed')}</span></div><div class="review-metric" tabindex="0" ${tip(t('Restored value'), `${valuation}${resources ? ` · ${resources}` : ''}${healing.unpriced_hp ? ` · ${t('Unpriced HP')}: ${fmtNum(healing.unpriced_hp)}` : ''}`)}>${reviewIcon('value')}<b>${marker}${value}</b><span>${t('Restored value')}</span></div></div>`;
+  return `<div class="review-healing${lifetime ? ' review-healing-lifetime' : ''}" data-ui-key="healing-performance">${lifetime ? `<h4>${t('Lifetime healing')}</h4>` : ''}<div class="review-metric" tabindex="0" ${tip(t('HP healed'), method)}>${reviewIcon('healing')}<b>${marker}${fmtNum(healing.hp)}</b><span>${t('HP healed')}</span></div><div class="review-metric" tabindex="0" ${tip(t('Restored value'), `${valuation}${resources ? ` · ${resources}` : ''}${healing.unpriced_hp ? ` · ${t('Unpriced HP')}: ${fmtNum(healing.unpriced_hp)}` : ''}`)}>${reviewIcon('value')}<b>${marker}${value}</b><span>${t('Restored value')}</span></div><div class="review-healing-resources" tabindex="0" ${tip(t('Restored value'), valuation)}>${marker} ${esc(resources || (healing.unpriced_hp ? '?' : '0'))}${resources && healing.unpriced_hp ? ' + ?' : ''}</div></div>`;
 }
 
 export function wireReviewControls(el) {

@@ -12,12 +12,31 @@ test('healing has a compact HP and replacement-value card with resource breakdow
   const html = healingCells({healer_count:1,hp:60,value:67.5,known_value:67.5,
     resources:{food:30,wood:0,gold:37.5,stone:0},unpriced_hp:0});
   assert.match(html,/HP healed/); assert.match(html,/Restored value/);
-  assert.match(html,/30 food/); assert.match(html,/37.5 gold/);
+  const visible = html.replace(/<[^>]*>/g, '');
+  assert.match(visible,/≈ 30 food · 37.5 gold/);
+  assert.doesNotMatch(visible,/0 wood/);
   assert.match(html,/not resources added to the stockpile/);
   assert.match(html,/data-ui-key="healing-performance"/);
   assert.equal(healingCells({healer_count:0}), '');
   assert.match(healingCells({healer_count:1,hp:10,value:null,known_value:0,
     unpriced_hp:10,partial:true}),/≥0\+\?/);
+});
+
+test('inspector healing remains lifetime under combat filters and displays group resource sums', () => {
+  const healing={healer_count:2,hp:90,value:101.25,known_value:101.25,
+    resources:{food:40,gold:61.25},unpriced_hp:0};
+  S.reviewScope='life';
+  const life=healingCells(healing,{lifetime:true});
+  for(const scope of ['minute','fight']) {
+    S.reviewScope=scope;
+    assert.equal(healingCells(healing,{lifetime:true}),life);
+  }
+  assert.match(life,/<h4>Lifetime healing<\/h4>/);
+  assert.match(life.replace(/<[^>]*>/g,''),/≈ 40 food · 61.25 gold/);
+  assert.doesNotMatch(healingCells(healing),/Lifetime healing/);
+  const partial=healingCells({...healing,partial:true,unpriced_hp:2,value:null},{lifetime:true});
+  assert.match(partial.replace(/<[^>]*>/g,''),/≥ 40 food · 61.25 gold \+ \?/);
+  S.reviewScope='life';
 });
 
 test('military windows are canonical and follow replay time including rewinds', () => {

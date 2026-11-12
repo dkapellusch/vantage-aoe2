@@ -21,7 +21,7 @@ import { centerOn, currentRows, selectedRows, gatherersOf, isTreeId, rowForEntit
 import { t, language } from './i18n.js';
 import { setSelectionHtml } from './selection-panel.js';
 import { patchHtml, listDelta } from './dom.js';
-import { ownerIdentity, selectionHeader, militaryCard, wireReviewControls, reviewIcon, DASH_HISTORY, DASH_SELECTIONS } from './player-review.js';
+import { ownerIdentity, selectionHeader, militaryCard, healingCells, wireReviewControls, reviewIcon, DASH_HISTORY, DASH_SELECTIONS } from './player-review.js';
 import { resourceTotalsHtml } from './resource-review.js';
 import { farmReviewHtml } from './farm-review.js';
 import { renderTeamBoard, toggleTeamBoardView } from './team-board.js';
@@ -2180,10 +2180,10 @@ function singlePanel(el, r) {
   setHtml(el, `${selectionHeader(r, { ...u, icon_url: unitIcon(r[2], r[1], r[0]) }, nick || u.name, shownOwner)}
     <div class="hpbar"><div style="width:${Math.round(r[5] * 100)}%"></div></div>
     <div class="hint">${t('HP')} ${numbersReady ? `${Math.round(r[5] * hpMax)} / ${baseDelta(base.hp ?? (sv('hp') || u.hp), hpMax)}` : '– / –'}${r[6] & 8 && u.cls !== 49 ? ` · <b style="color:var(--bad)">${t('idle')}</b>` : doing}${r[6] & 16 && !consHtml ? ` · ${t('under construction')}` : ''}</div>
-    ${consHtml}${faithHtml}${chargeFillHtml}${gateHtml}
+    ${consHtml}${faithHtml}${healingCells(us?.healing, { lifetime: true })}${chargeFillHtml}${gateHtml}
     ${farmReviewHtml(us, { techName: id => techInfoFor(id, owner).name,
       farmers: Object.entries(S.view?.gather_targets || {}).filter(([id, target]) => +target === r[0] && rowForEntityId(+id)?.[9] === 2).map(([id]) => +id) })}
-    ${economic && u.kind === 'building' && (nonZero(rng.cur) || us?.kills || us?.dealt) ? militaryCard([r[0]]) : ''}${workingHtml}${economic ? `<details class="review-details" data-panel-detail="mechanics"><summary>${t('Details')}</summary>${resourceTotalsHtml(us?.resource_totals, u.cls === 4)}${mechanics}${eff}${combatHtml(us)}</details>` : `${militaryCard([r[0]])}${mechanics}`}
+    ${economic && u.kind === 'building' && (nonZero(rng.cur) || us?.kills || us?.dealt) ? militaryCard([r[0]]) : ''}${workingHtml}${economic ? `<details class="review-details" data-panel-detail="mechanics"><summary>${t('Details')}</summary>${resourceTotalsHtml(us?.resource_totals, u.cls === 4)}${mechanics}${eff}${combatHtml(us)}</details>` : `${militaryCard([r[0]], { healing: false })}${mechanics}`}
     ${garHtml}${us?.farm ? '' : relevantUpgrades([r])}
     ${r[1] > 0 && u.cost && Object.keys(u.cost).length ? `<div class="hint" style="margin-top:4px">${t('Cost')}: ${costText(u.cost)}</div>` : ''}
     ${economic ? '' : `${carry}${marketHtml}${farmQ}${prodHtml}<details class="review-details" data-panel-detail="activity"><summary>${t('Details')}</summary>${eff}</details>`}`);
@@ -2312,7 +2312,7 @@ function groupHtml(rows, deadIds, compact = false) {
   const carriedHtml = Object.keys(carried).length ? `<div class="hint">${t('Carrying')}: ${resList(carried)}</div>` : '';
   const leftHtml = Object.keys(left).length ? `<div class="hint">${t('Left')}: ${resList(left)}</div>` : '';
   const detailKey = `owner-${[...byOwner.keys()].sort((a, b) => a - b).join('-')}`;
-  const record = militaryCard([...rows.map((r) => r[0]), ...deadIds]);
+  const record = `${healingCells(gs?.healing, { lifetime: true })}${militaryCard([...rows.map((r) => r[0]), ...deadIds], { healing: false })}`;
   if (compact) return `${[...byOwner.entries()].map(([owner, count]) => ownerIdentity(owner, count)).join('')}${record}<details class="review-details" data-panel-detail="${detailKey}-units"><summary>${t('Units & upgrades')}</summary>${hpHtml}${unknownHtml}${actHtml}${tableHtml}${relevantUpgrades(rows)}${combat}${timeHtml}${carriedHtml}${leftHtml}</details>`;
   return `${head}${hpHtml}${unknownHtml}${record}${actHtml}${tableHtml}<details class="review-details" data-panel-detail="${detailKey}-lifetime"><summary>${t('Lifetime details')}</summary>${combat}${timeHtml}</details>${relevantUpgrades(rows)}${carriedHtml}${leftHtml}`;
 }

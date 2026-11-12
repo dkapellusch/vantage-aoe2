@@ -129,8 +129,8 @@ Selecting works like in the game:
 
 A selection can mix players.
 
-- **One unit**: hit points, attack, armour and range (with bonuses against armour classes), reload, accuracy, speed, charge attacks, auras and regeneration, what it is carrying or doing, its garrison, and a monk's faith. You also see its kills (total, economy, friendly fire), conversions, damage dealt and taken, and how it spent its time over the last minute and over its life.
-- **A group**: combined health and resource value, what the group is doing, one row per unit type with the owner's upgraded stats, and the group's kills, deaths, damage and conversions.
+- **One unit**: hit points, attack, armour and range (with bonuses against armour classes), reload, accuracy, speed, charge attacks, auras and regeneration, what it is carrying or doing, its garrison, and a monk's faith. A monk's **Lifetime healing** card shows HP restored and its estimated replacement value per resource (food, gold, and any other recorded costs). This uses the healed unit's owner-specific cost and maximum HP; it is not food or gold added to the stockpile. The card always covers its life up to the current replay time, independently of the Life/60s/Fight combat filter. You also see its kills (total, economy, friendly fire), conversions, damage dealt and taken, and how it spent its time over the last minute and over its life.
+- **A group**: combined health and resource value, what the group is doing, one row per unit type with the owner's upgraded stats, and the group's kills, deaths, damage and conversions. Selecting several monks sums their lifetime healing, without counting shared healing twice.
 - **A resource** (mine, bush, fish, tree or carcass): how much is left and who is gathering it.
 
 Click a unit's name in the panel to give it a name of your own, such as a hero's nickname. Dead units stay in the selection with a skull (*Keep dead units in selection*). With nothing selected, the panel can show map information (*Show map info when nothing is selected*).

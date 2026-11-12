@@ -1634,5 +1634,6 @@
  "Deaths": "Kematian",
  "Kills per death of this selection (units that died while selected count)": "Bunuhan per kematian pilihan ini (unit yang mati semasa dipilih dikira)",
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Masa pusat bandar tidak melatih atau menyelidik. Jeda di bawah 1 s dikira sebagai bekerja. Sekatan perumahan atau had penduduk dikecualikan; masa kekurangan rumah dikira berasingan.",
- "Population limit": "Had penduduk"
+ "Population limit": "Had penduduk",
+ "Lifetime healing": "Penyembuhan sepanjang hayat"
 }

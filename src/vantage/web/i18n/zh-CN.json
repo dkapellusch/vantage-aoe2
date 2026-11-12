@@ -1634,5 +1634,6 @@
  "Deaths": "阵亡",
  "Kills per death of this selection (units that died while selected count)": "此选择的击杀/阵亡比（被选中时阵亡的单位也计入）",
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "城镇中心既未训练也未研究的空闲时间。不到1秒的队列切换间隔计为工作。住房不足或人口上限造成的等待不计为空闲；住房不足时间单独统计。",
- "Population limit": "人口上限"
+ "Population limit": "人口上限",
+ "Lifetime healing": "生涯治疗量"
 }

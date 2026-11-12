@@ -1634,5 +1634,6 @@
  "Deaths": "Потери",
  "Kills per death of this selection (units that died while selected count)": "Убийства на одну потерю в этом выборе (учитываются погибшие выбранные юниты)",
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Время простоя городского центра: без обучения и исследований. Паузы менее 1 с считаются работой. Блокировки из-за жилья или лимита населения исключены; нехватка жилья учитывается отдельно.",
- "Population limit": "Лимит населения"
+ "Population limit": "Лимит населения",
+ "Lifetime healing": "Исцеление за всё время"
 }

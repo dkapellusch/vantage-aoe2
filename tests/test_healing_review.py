@@ -243,3 +243,57 @@ def test_query_state_roundtrip_answers_totals_the_same() -> None:
     restored.restore_query_state(history.query_state())
     for end, since in ((1500, None), (2500, 1100), (400, None)):
         assert restored.totals([5, 6], end, since) == history.totals([5, 6], end, since)
+
+
+def test_real_monk_restores_damaged_knight_at_its_recorded_owner_cost() -> None:
+    """Nov 11 real game: monk 13156 heals Knight 12971 (130 HP, 60f/75g).
+
+    Raw fields retain healer links/counts, positions, actions, modifiers and
+    owner masters; the fixture does not supply expected healing as input.
+    """
+    import json
+    from pathlib import Path
+
+    def decode(value):
+        if isinstance(value, dict):
+            if "model" in value:
+                return Node(value["model"], decode(value["fields"]))
+            return {int(k): decode(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [decode(v) for v in value]
+        return value
+
+    fixture = json.loads((Path(__file__).parent / "fixtures/monk-knight-healing.json").read_text())
+    h = HealingHistory()
+    for row in fixture["frames"]:
+        entities = {}
+        for eid, entry in row["entities"].items():
+            entity = decode(entry["node"])
+            entity.fields[W.E_OWN_MASTER] = decode(fixture["masters"][entry["master"]])
+            entities[int(eid)] = entity
+        world = Node(
+            SCHEMA.model_id("World"),
+            {W.W_ENTITIES: entities, W.W_PLAYERS: decode(row["players"])},
+        )
+        h.sample(world, row["time"], row["events"], discontinuity=bool(row["skipped"]))
+    patient = entities[fixture["patient"]]
+    master = patient.fields[W.E_OWN_MASTER]
+    assert patient.fields[W.E_MASTER] == 38  # Knight
+    assert master.fields[W.M_HP] == 130
+    assert W.master_cost(master.fields) == {"food": 60, "gold": 75}
+    result = h.totals([fixture["healer"]], row["time"])
+    # First confirmed Heal link at 21:18.000: 25.225 HP; last: 52.130016 HP.
+    # The initial 0.225 HP before the link was observed is conservatively excluded.
+    initial = fixture["frames"][1]["entities"][str(fixture["patient"])]["node"]
+    delta_hp = patient.fields[W.E_HP] - initial["fields"][str(W.E_HP)]
+    assert round(delta_hp, 2) == 26.91
+    assert result["hp"] == 26.91
+    assert result["resources"]["food"] == round(delta_hp / 130 * 60, 2)
+    assert result["resources"]["gold"] == round(delta_hp / 130 * 75, 2)
+    assert result["resources"] == {"food": 12.42, "wood": 0, "stone": 0, "gold": 15.52}
+    assert result["value"] == 27.94
+    assert result["unpriced_hp"] == 0
+    assert result["healer_count"] == 1
+    restored = HealingHistory()
+    restored.restore_query_state(h.query_state())
+    assert restored.totals([fixture["healer"]], row["time"]) == result
