@@ -373,7 +373,8 @@ body.hud-phone #story [data-st="slower"] { display: none; }
 #layout-editor.fold-lib #le-lib-tab, #layout-editor.fold-insp #le-insp-tab { display: block; }
 #le-insp .le-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
 #le-insp label { display: flex; align-items: center; gap: 5px; justify-content: space-between; }
-#le-insp .le-fields input { width: 54px; }
+#le-insp .le-fields label { white-space: nowrap; font-size: 12px; }
+#le-insp .le-fields input { width: 48px; padding: 3px 4px; }
 #le-insp .le-fields span { color: var(--muted); }
 #le-insp .le-anchors { display: grid; grid-template-columns: repeat(3, 28px); gap: 4px; }
 #le-insp .le-anchors button { width: 28px; height: 28px; padding: 0; position: relative; }
