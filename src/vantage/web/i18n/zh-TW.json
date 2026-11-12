@@ -1647,5 +1647,9 @@
  "Match population limit": "人口上限",
  "Cutoff: {time} ({reason}).": "截止時間: {time} ({reason}).",
  "Cutoff not reached; counted through {time}.": "尚未達到門檻；統計至 {time}.",
- "Whole-game window: {time}.": "整場比賽: {time}."
+ "Whole-game window: {time}.": "整場比賽: {time}.",
+ "Working": "工作中",
+ "Building activity": "建築活動",
+ "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "僅當生產和研究佇列為空時才計為建築閒置。不到1秒的佇列切換計為工作。因住房或人口上限而停滯的佇列單獨統計，不算閒置。全程涵蓋建築的全部已觀測壽命；60秒和戰鬥使用選定時段。",
+ "unit·min": "unit·min"
 }

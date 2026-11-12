@@ -111,7 +111,9 @@ def test_deliberately_idle_tc_counts_the_entire_pause_not_pause_minus_grace() ->
     assert history.logs[tc.fields[W.E_ID]][-2:] == [(1000, W.ACT_IDLE), (11000, W.ACT_PRODUCING)]
 
 
-@pytest.mark.parametrize("master", [109, 12])  # TC and barracks use identical idle rules
+@pytest.mark.parametrize(
+    "master", [109, 12, 87, 101, 82, 45, 104, 209, 103, 84]
+)  # every production/research building
 def test_empty_subsecond_gap_between_items_is_working_for_all_buildings(master: int) -> None:
     history, world, tc = scene()
     player = W.players_of(world)[1]

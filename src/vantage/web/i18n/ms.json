@@ -1647,5 +1647,9 @@
  "Match population limit": "Had populasi",
  "Cutoff: {time} ({reason}).": "Had masa: {time} ({reason}).",
  "Cutoff not reached; counted through {time}.": "Ambang belum dicapai; dikira sehingga {time}.",
- "Whole-game window: {time}.": "Seluruh permainan: {time}."
+ "Whole-game window: {time}.": "Seluruh permainan: {time}.",
+ "Working": "Bekerja",
+ "Building activity": "Aktiviti bangunan",
+ "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "Bangunan melahu hanya apabila baris gilir pengeluaran dan penyelidikan kosong. Jeda kurang daripada 1 saat dikira bekerja. Unit tersekat oleh perumahan atau had populasi dikira berasingan. Hayat meliputi seluruh hayat yang diperhatikan; 60s dan Pertempuran menggunakan selang dipilih.",
+ "unit·min": "unit·min"
 }

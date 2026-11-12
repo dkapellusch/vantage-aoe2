@@ -44,6 +44,11 @@ def main() -> None:
     parser.add_argument("--end", type=int, default=2**63 - 1, help="Game milliseconds")
     parser.add_argument("--player", default="Shazama")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--all-buildings",
+        action="store_true",
+        help="Retain empty buildings too, for inspector regression tests",
+    )
     args = parser.parse_args()
     patcher = Patcher()
     catalog = W.Catalog(GameData(None))
@@ -85,7 +90,8 @@ def main() -> None:
             mid = int(e.fields.get(W.E_MASTER, -1))
             prod = W.production_state(e)
             if (
-                mid not in W.TOWN_CENTER_MASTERS
+                not args.all_buildings
+                and mid not in W.TOWN_CENTER_MASTERS
                 and prod is None
                 and master.fields.get(W.M_CLASS) != 4
             ):

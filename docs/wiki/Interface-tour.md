@@ -117,6 +117,14 @@ activity bar; foundations are under construction rather than idle. Several idle
 TCs do not multiply the player total: two idle TCs for one minute mean one minute
 of Idle TC (growth).
 
+The selected building's **Idle** in **Life / 60s / Fight** uses that same queue
+definition, independently of the player's growth cutoff. Life shows the entire
+observed lifetime; 60s and Fight show only their interval. Its tooltip explains
+the distinction. **Working**, **Housed** and **Population limit** durations are
+shown separately beneath the combat row. Foundations are excluded from idle, and
+a destroyed building cannot contribute outside its observed lifetime.
+
+
 The columns cover stockpiles, workers per resource, idle workers and idle town-centre time, housed time, worker efficiency, unit counts, army value and peak, kills and deaths, value destroyed, relics and relic gold, trade, tribute, market, conversions, resources collected, and APM (total and effective, split into economy and military). In **Settings → Dashboard pages** you can add, remove, reorder and edit the pages for 1v1, team games and FFA. *Mini dashboard* gives a compact version.
 
 ## Event log

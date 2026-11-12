@@ -1647,5 +1647,9 @@
  "Match population limit": "Предел населения",
  "Cutoff: {time} ({reason}).": "Отсечка: {time} ({reason}).",
  "Cutoff not reached; counted through {time}.": "Порог не достигнут; подсчёт до {time}.",
- "Whole-game window: {time}.": "Вся игра: {time}."
+ "Whole-game window: {time}.": "Вся игра: {time}.",
+ "Working": "Работает",
+ "Building activity": "Активность здания",
+ "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "Здание простаивает только при пустой очереди производства и исследований. Паузы меньше секунды считаются работой. Блокировка очереди нехваткой домов или лимитом населения учитывается отдельно. Жизнь охватывает весь наблюдаемый срок здания; 60с и Бой — выбранный интервал.",
+ "unit·min": "unit·min"
 }

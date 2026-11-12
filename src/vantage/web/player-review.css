@@ -170,3 +170,8 @@
 /* Without game art, upgrades still need visible names and research status. */
 .review-upgrade.review-upgrade-text { width: auto; height: auto; min-height: 30px; max-width: 100%; padding: 4px 7px !important; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; white-space: normal; text-align: left; }
 .review-upgrade-text small { position: static; background: none; }
+
+.review-building-work{display:flex;flex-wrap:wrap;gap:5px 12px;margin:0 0 8px;color:#a7aeb8;font-size:10px}
+.review-building-work b{color:#dce2e8;font-variant-numeric:tabular-nums;font-weight:500}
+
+.review-production{display:flex}.review-production .review-metric{flex-direction:row;gap:8px;padding:8px 4px}

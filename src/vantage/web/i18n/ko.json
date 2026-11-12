@@ -1647,5 +1647,9 @@
  "Match population limit": "인구 한도",
  "Cutoff: {time} ({reason}).": "종료 시점: {time} ({reason}).",
  "Cutoff not reached; counted through {time}.": "기준 미도달; 집계 시점 {time}.",
- "Whole-game window: {time}.": "전체 경기: {time}."
+ "Whole-game window: {time}.": "전체 경기: {time}.",
+ "Working": "작업 중",
+ "Building activity": "건물 활동",
+ "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "생산 및 연구 대기열이 비어 있을 때만 건물이 유휴 상태입니다. 1초 미만의 전환은 작업으로 계산합니다. 주택이나 인구 한도에 막힌 대기열은 별도로 계산합니다. 전체는 관측된 건물 수명 전체이며 60s와 전투는 선택한 구간입니다.",
+ "unit·min": "unit·min"
 }

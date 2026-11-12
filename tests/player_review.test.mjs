@@ -122,3 +122,31 @@ test('military refresh retains resolved numbers without leaking across scopes, s
     S.session={generation:556};assert.equal(militaryResults([42]),null);
   } finally {globalThis.fetch=original;}
 });
+
+
+test('building inspector scopes separate work and housing from empty-queue idle', () => {
+  const data={activity_kind:'building',since_ms:null,totals:{kills:0,deaths:0},destroyed_value:0,
+    forced_idle_seconds:0,activity_scope:{idle:34,producing:1550.5,researching:530,housed:3.5}};
+  for(const scope of ['life','minute','fight']) {
+    const html=performanceCells(data,false,scope);
+    assert.match(html,/>0:34<\/b>/);
+    assert.match(html,/empty production and research queue/);
+    assert.match(html,/Handoffs under 1 second/);
+    assert.match(html,/Working.*34:40/);
+    assert.match(html,/Housed.*0:03/);
+    assert.match(html,/Population limit.*0:00/);
+  }
+  const production=performanceCells(data,false,'life',true);
+  assert.doesNotMatch(production,/>Kills</);
+  assert.match(production,/>0:34<\/b>/);
+  assert.doesNotMatch(performanceCells({...data,activity_kind:'unit'},false),/review-building-work/);
+});
+
+test('production inspector eligibility follows catalog training and research locations', async () => {
+  const {isProductionBuilding}=await import('../src/vantage/web/player-review.js');
+  const old=S.catalog;
+  S.catalog={units:{1:{train_locations:[12,999]}},techs:{2:{building:209,time:60},3:{building:50,time:0}}};
+  for(const mid of [12,999,209]) assert.equal(isProductionBuilding(mid),true);
+  for(const mid of [50,72]) assert.equal(isProductionBuilding(mid),false);
+  S.catalog=old;
+});

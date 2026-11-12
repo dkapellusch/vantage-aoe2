@@ -1647,5 +1647,9 @@
  "Match population limit": "Limite di popolazione",
  "Cutoff: {time} ({reason}).": "Termine: {time} ({reason}).",
  "Cutoff not reached; counted through {time}.": "Soglia non raggiunta; conteggiato fino a {time}.",
- "Whole-game window: {time}.": "Partita intera: {time}."
+ "Whole-game window: {time}.": "Partita intera: {time}.",
+ "Working": "Al lavoro",
+ "Building activity": "Attività edificio",
+ "Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.": "Un edificio è inattivo solo con la coda di produzione e ricerca vuota. Le pause inferiori a 1 secondo contano come lavoro. Le unità bloccate dalle case o dal limite di popolazione sono separate. Vita copre tutta la vita osservata; 60s e Scontro usano il proprio intervallo.",
+ "unit·min": "unit·min"
 }

@@ -22,7 +22,7 @@ import { t, language } from './i18n.js';
 import { setSelectionHtml } from './selection-panel.js';
 import { patchHtml, listDelta } from './dom.js';
 import { tcIdleTooltip } from './tc-idle.js';
-import { ownerIdentity, selectionHeader, militaryCard, healingCells, wireReviewControls, reviewIcon, DASH_HISTORY, DASH_SELECTIONS } from './player-review.js';
+import { ownerIdentity, selectionHeader, militaryCard, isProductionBuilding, healingCells, wireReviewControls, reviewIcon, DASH_HISTORY, DASH_SELECTIONS } from './player-review.js';
 import { resourceTotalsHtml } from './resource-review.js';
 import { farmReviewHtml } from './farm-review.js';
 import { renderTeamBoard, toggleTeamBoardView } from './team-board.js';
@@ -2163,7 +2163,7 @@ function singlePanel(el, r) {
     ${consHtml}${faithHtml}${healingCells(us?.healing, { lifetime: true })}${chargeFillHtml}${gateHtml}
     ${farmReviewHtml(us, { techName: id => techInfoFor(id, owner).name,
       farmers: Object.entries(S.view?.gather_targets || {}).filter(([id, target]) => +target === r[0] && rowForEntityId(+id)?.[9] === 2).map(([id]) => +id) })}
-    ${economic && u.kind === 'building' && (nonZero(rng.cur) || us?.kills || us?.dealt) ? militaryCard([r[0]]) : ''}${workingHtml}${economic ? `<details class="review-details" data-panel-detail="mechanics"><summary>${t('Details')}</summary>${resourceTotalsHtml(us?.resource_totals, u.cls === 4)}${mechanics}${eff}${combatHtml(us)}</details>` : `${militaryCard([r[0]], { healing: false })}${mechanics}`}
+    ${economic && u.kind === 'building' ? (nonZero(rng.cur) || us?.kills || us?.dealt) ? militaryCard([r[0]]) : isProductionBuilding(r[2]) ? militaryCard([r[0]], { healing: false, productionOnly: true }) : '' : ''}${workingHtml}${economic ? `<details class="review-details" data-panel-detail="mechanics"><summary>${t('Details')}</summary>${resourceTotalsHtml(us?.resource_totals, u.cls === 4)}${mechanics}${eff}${combatHtml(us)}</details>` : `${militaryCard([r[0]], { healing: false })}${mechanics}`}
     ${garHtml}${us?.farm ? '' : relevantUpgrades([r])}
     ${r[1] > 0 && u.cost && Object.keys(u.cost).length ? `<div class="hint" style="margin-top:4px">${t('Cost')}: ${costText(u.cost)}</div>` : ''}
     ${economic ? '' : `${carry}${marketHtml}${farmQ}${prodHtml}<details class="review-details" data-panel-detail="activity"><summary>${t('Details')}</summary>${eff}</details>`}`);

@@ -85,7 +85,21 @@ export function militaryResults(ids) {
   return entry.at != null && (query.end >= entry.at || S.playing) ? entry.result : null;
 }
 
-export function performanceCells(data, grouped, scope = 'life') {
+// Read training/research locations from the catalog, including civ-specific
+// buildings. Farms, walls and pure drop sites do not get production-idle cards.
+let productionCatalog, productionVersion, productionBuildings = new Set();
+export function isProductionBuilding(mid) {
+  if (productionCatalog !== S.catalog || productionVersion !== S.catalogVersion) {
+    productionCatalog = S.catalog; productionVersion = S.catalogVersion;
+    productionBuildings = new Set(Object.values(S.catalog.units || {}).flatMap(u => u.train_locations || []));
+    for (const tech of Object.values(S.catalog.techs || {})) {
+      if (tech.building >= 0 && tech.time > 0) productionBuildings.add(tech.building);
+    }
+  }
+  return productionBuildings.has(mid);
+}
+
+export function performanceCells(data, grouped, scope = 'life', productionOnly = false) {
   const supportsScopes = data != null && Object.hasOwn(data, 'since_ms');
   const totals = scope === 'life' || supportsScopes ? data?.totals : null;
   const known = data?.destroyed_known_value;
@@ -93,16 +107,21 @@ export function performanceCells(data, grouped, scope = 'life') {
     : data?.destroyed_unknown ? `${fmtNum(known)}+?` : '–';
   const activity = data?.activity_scope ?? (scope === 'life' ? data?.activity : scope === 'minute' ? data?.activity_lm : null);
   const idle = activity ? (grouped ? ((activity.idle || 0) / 60).toFixed(1) : fmtTime((activity.idle || 0) * 1000)) : '–';
+  const building = data?.activity_kind === 'building';
+  const buildingMethod = t('Buildings are idle only with an empty production and research queue. Handoffs under 1 second count as working. Queued units blocked by housing or the population limit are separate, not idle. Life covers the whole observed building lifetime; 60s and Fight use their selected interval.');
   const resources = Object.entries(data?.resources_destroyed || {}).map(([res, n]) => `${fmtNum(n)} ${t(res)}`).join(' · ');
   const cells = [
     ['kills', totals ? fmtNum(totals.kills) : '–', t('Kills'), t('Enemy units and buildings killed in this time window')],
     ['deaths', totals ? fmtNum(totals.deaths) : '–', t('Deaths'), t('Deaths among the pinned selection in this time window')],
     ['value', destroyed, t('Destroyed'), `${t('Victim resource cost at the kill')}${resources ? ` · ${resources}` : ''}${data?.destroyed_unknown ? ` · ${t('Unknown costs')}: ${data.destroyed_unknown}` : ''}`],
-    ['idle', idle, grouped ? t('Idle · unit·min') : t('Idle'), t('Observed idle time; groups sum the time of their selected units')],
+    ['idle', idle, grouped ? t('Idle · unit·min') : t('Idle'), building ? buildingMethod : t('Observed idle time; groups sum the time of their selected units')],
     ['pressure', data?.forced_idle_seconds != null ? `≈${(data.forced_idle_seconds / 60).toFixed(1)}` : '–', t('Forced · vil·min'), t('Estimated downtime of directly attacked workers moving, idle or garrisoned within 15 seconds and 12 tiles; excludes unhit workers and avoids double counting')],
   ];
+  const duration = seconds => grouped ? `${((seconds || 0) / 60).toFixed(1)} ${t('unit·min')}` : fmtTime((seconds || 0) * 1000);
+  const work = building && activity ? `<div class="review-building-work" data-ui-key="building-work" tabindex="0" ${tip(t('Building activity'), buildingMethod)}><span>${t('Working')} <b>${duration((activity.producing || 0) + (activity.researching || 0))}</b></span><span>${t('Housed')} <b>${duration(activity.housed)}</b></span><span>${t('Population limit')} <b>${duration(activity.population_limit)}</b></span></div>` : '';
+  const displayed = productionOnly ? [cells[3]] : cells;
   const needsRestart = data && (!Object.hasOwn(data, 'destroyed_value') || !Object.hasOwn(data, 'forced_idle_seconds') || !supportsScopes);
-  return `${needsRestart ? `<div class="review-metrics-unavailable" role="status">${t('Restart Vantage for review metrics')}</div>` : ''}<div class="review-performance">${cells.map(([icon, value, label, detail]) => `<div class="review-metric" tabindex="0" ${tip(label, detail)}>${reviewIcon(icon)}<b>${value}</b>${metricLabel(label)}</div>`).join('')}</div>`;
+  return `${needsRestart ? `<div class="review-metrics-unavailable" role="status">${t('Restart Vantage for review metrics')}</div>` : ''}<div class="review-performance${productionOnly ? ' review-production' : ''}">${displayed.map(([icon, value, label, detail]) => `<div class="review-metric" tabindex="0" ${tip(label, detail)}>${reviewIcon(icon)}<b>${value}</b>${metricLabel(label)}</div>`).join('')}</div>${work}`;
 }
 
 // "Idle · unit·min": the name on one line and its unit beneath, so five
@@ -112,10 +131,10 @@ function metricLabel(label) {
   return `<span>${name}${unit.length ? `<small>${unit.join(' · ')}</small>` : ''}</span>`;
 }
 
-export function militaryCard(ids, { healing = true } = {}) {
+export function militaryCard(ids, { healing = true, productionOnly = false } = {}) {
   const range = S.reviewRange;
   const data = militaryResults(ids);
-  return `<div class="review-scopes"><span>${fmtTime(data?.as_of_ms ?? S.view?.time ?? S.t)}</span>${[['life', t('Life')], ['minute', '60s'], ['fight', range ? `${fmtTime(range.from)}–${fmtTime(range.to)}` : t('Fight')]].map(([key, label]) => `<button data-review-scope="${key}" aria-pressed="${(S.reviewScope || 'life') === key}" ${key === 'fight' && !range ? 'disabled' : ''} ${tip(key === 'fight' && !range ? t('Choose a review interval in Statistics') : label)}>${label}</button>`).join('')}</div>${performanceCells(data, ids.length > 1, S.reviewScope || 'life')}${healing ? healingCells(data?.healing) : ''}`;
+  return `<div class="review-scopes"><span>${fmtTime(data?.as_of_ms ?? S.view?.time ?? S.t)}</span>${[['life', t('Life')], ['minute', '60s'], ['fight', range ? `${fmtTime(range.from)}–${fmtTime(range.to)}` : t('Fight')]].map(([key, label]) => `<button data-review-scope="${key}" aria-pressed="${(S.reviewScope || 'life') === key}" ${key === 'fight' && !range ? 'disabled' : ''} ${tip(key === 'fight' && !range ? t('Choose a review interval in Statistics') : label)}>${label}</button>`).join('')}</div>${performanceCells(data, ids.length > 1, S.reviewScope || 'life', productionOnly)}${healing ? healingCells(data?.healing) : ''}`;
 }
 
 export function healingCells(healing, { lifetime = false } = {}) {

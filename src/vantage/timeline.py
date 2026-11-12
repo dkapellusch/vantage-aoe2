@@ -2149,6 +2149,7 @@ class Timeline:
             out["kills"] += out["eco_kills"]
             keep = ("kills", "eco_kills", "dealt", "taken", "died")
             result: dict[str, Any] = {k: round(out[k], 1) for k in keep}
+            result["activity_kind"] = "building" if eid in self.building_history.logs else "unit"
             result["activity"] = self._unit_activity(eid, t)
             result["activity_lm"] = self._unit_activity(eid, t, window=APM_WINDOW_MS)
             end = self.time if t is None else t
@@ -2250,6 +2251,13 @@ class Timeline:
             "entity_types": entity_types,
             "entity_stats_validity_version": 1,
             "as_of_ms": query_ms,
+            "activity_kind": (
+                "building"
+                if ids and all(eid in self.building_history.logs for eid in ids)
+                else "mixed"
+                if any(eid in self.building_history.logs for eid in ids)
+                else "unit"
+            ),
             "activity": {k: round(v, 1) for k, v in life.items()},
             "activity_lm": {k: round(v, 1) for k, v in last.items()},
             "activity_scope": {k: round(v, 1) for k, v in scoped.items()},
@@ -2332,11 +2340,14 @@ class Timeline:
         self, eid: int, t: int | None, window: int | None = None
     ) -> dict[str, float]:
         """Seconds per activity for one entity, over its life or the last window."""
-        log = self.activity_log.get(eid, [])
-        end = self.time if t is None else t
-        if eid in self.building_history.ended:
-            end = min(end, self.building_history.ended[eid])
-        start = end - window if window is not None else -1
+        # A building's queue history is authoritative, never the generic unit
+        # task fallback. Unit and group inspectors share this exact query path.
+        log = self.building_history.logs.get(eid, self.activity_log.get(eid, []))
+        query_end = self.time if t is None else t
+        start = query_end - window if window is not None else -1
+        # Keep the requested window anchored to replay time, even if a selected
+        # building was destroyed earlier. Do not extrapolate an unfinished load.
+        end = min(query_end, self.time, self.building_history.ended.get(eid, query_end))
         deaths = [when for when, kind, _, _ in self.unit_log.get(eid, ()) if kind == "died"]
         if deaths:
             end = min(end, min(deaths))
