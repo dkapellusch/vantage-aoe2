@@ -2572,6 +2572,6 @@ export function scrubTime(ev) {
 /** What the newer panels (pulse.js, focus-slot.js, story.js, widgets.js) reuse from here. */
 export const HUD_PARTS = {
   setHtml, delegate, hudEl, ageShield, series, orderedTeams, isDead, productionRowsHtml, productionClick, researchRowsHtml, techClick,
-  eventLi, isHigh, eventText, eventCat, goToBuilding, miniChart, unitRows: () => unitRows,
+  eventLi, isHigh, eventText, eventCat, goToBuilding, miniChart, sideKey, setText, unitRows: () => unitRows,
 };
 export { player, setText };
