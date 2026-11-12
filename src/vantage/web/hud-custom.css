@@ -398,3 +398,8 @@ body.hud-editor #hud .panel[id]:focus-visible { outline: 2px solid #fff !importa
 body.hud-arrange #hud .panel-auto { opacity: 1; pointer-events: auto; }
 body.hud-arrange #hud :is(#ticker, #selchip, #focus).empty { display: block; opacity: 1; min-width: 160px; min-height: 30px; }
 body.hud-editor #hud-hint { display: none; }
+/* Rows of a free-for-all line up in columns. */
+.pulse.multi .pl-age { min-width: 56px; }
+.pulse.multi .pl-stats .pm { min-width: 4.4em; }
+.pulse.multi .pl-stats .pm[data-ui-key="pop"] { min-width: 6em; }
+.pulse.multi .pl-bank .pm { min-width: 6.4em; }

@@ -11,7 +11,7 @@
 // Review cards: six mistake metrics, side against side, the worse side in
 // amber; each opens Statistics on its series.
 
-import { S, SPEEDS, fmtTime, fmtNum, esc, playerMarkColor, playerName, playerStats, isTwoTeamLayout, sideTeams } from './state.js';
+import { S, SPEEDS, fmtTime, fmtNum, esc, playerMarkColor, playerName, plainTeamName, isTwoTeamLayout, sideTeams } from './state.js';
 import { t } from './i18n.js';
 import { HUD_PARTS } from './panels.js';
 import { METRICS } from './metrics.js';
@@ -125,7 +125,7 @@ function leadText() {
   const a = sumStat(sideStats(list[0]), METRICS.army_value.f), b = sumStat(sideStats(list[1]), METRICS.army_value.f);
   if (a == null || b == null || a === b) return t('Army value even');
   const lead = a > b ? list[0] : list[1];
-  return t('{name} ahead by {n} army value', { name: playerName(lead.players[0].id, true), n: fmtNum(Math.abs(a - b)) });
+  return t('{name} ahead by {n} army value', { name: lead.players.length === 1 ? playerName(lead.players[0].id, true) : plainTeamName(lead), n: fmtNum(Math.abs(a - b)) });
 }
 
 function wireTrack(el, ctx) {
