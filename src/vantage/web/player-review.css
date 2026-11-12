@@ -158,9 +158,9 @@
 .review-farm-farmers { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
 .review-farm-grants { max-height: 160px; overflow-y: auto; }
 .review-farm-grants > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 4px 0; }
-#unitpanel:has(.review-farm, .review-healing-lifetime) { max-height: min(650px, 72vh); }
+#unitpanel:has(.review-farm, .review-healing-lifetime, .review-upgrades) { max-height: min(650px, 72vh); }
 @media (max-width: 650px) {
-  body[data-hud-layout="caster"] #unitpanel:not(.hud-custom-size):has(.review-farm, .review-healing-lifetime) {
+  body[data-hud-layout="caster"] #unitpanel:not(.hud-custom-size) {
     right: 8px; bottom: 8px !important; translate: 0 0;
     max-height: 72vh !important; max-width: calc(100vw - 16px);
     z-index: 9; background: var(--panel-solid);

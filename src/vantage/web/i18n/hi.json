@@ -1635,5 +1635,6 @@
  "Kills per death of this selection (units that died while selected count)": "इस चयन की प्रति मौत किल (चयनित रहते मरी इकाइयाँ गिनी जाती हैं)",
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "नगर केंद्र का निष्क्रिय समय: न प्रशिक्षण, न शोध। 1 सेकंड से कम का अंतर काम माना जाता है। आवास या जनसंख्या सीमा से रुकी कतारें शामिल नहीं हैं; आवास की कमी का समय अलग गिना जाता है।",
  "Population limit": "जनसंख्या सीमा",
- "Lifetime healing": "जीवनकाल में उपचार"
+ "Lifetime healing": "जीवनकाल में उपचार",
+ "Relevant upgrades unavailable": "संबंधित उन्नयन उपलब्ध नहीं हैं"
 }

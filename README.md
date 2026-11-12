@@ -118,3 +118,5 @@ Bug reports, translations and pull requests are welcome. See [docs/development.m
 Vantage is an independent, unofficial project. It is not affiliated with, endorsed by or sponsored by Microsoft, Xbox Game Studios, World's Edge, Forgotten Empires or CaptureAge. Age of Empires is a trademark of Microsoft Corporation.
 
 Vantage ships no game assets. It reads graphics, sounds and strings at run time from your own installation of the game. It was made under Microsoft's [Game Content Usage Rules](https://www.xbox.com/en-US/developers/rules) using assets from Age of Empires II: Definitive Edition, and it is not endorsed by or affiliated with Microsoft.
+
+Third-party runtime libraries and their licenses are listed in [THIRD_PARTY.md](THIRD_PARTY.md).

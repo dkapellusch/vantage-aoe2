@@ -1635,5 +1635,6 @@
  "Kills per death of this selection (units that died while selected count)": "此選取的擊殺/陣亡比（被選取時陣亡的單位也計入）",
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "城鎮中心既未訓練也未研究的閒置時間。不到1秒的佇列切換間隔計為工作。住房不足或人口上限造成的等待不計為閒置；住房不足時間單獨統計。",
  "Population limit": "人口上限",
- "Lifetime healing": "生涯治療量"
+ "Lifetime healing": "生涯治療量",
+ "Relevant upgrades unavailable": "相關升級無法使用"
 }

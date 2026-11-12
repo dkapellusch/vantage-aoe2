@@ -2,7 +2,7 @@
 
 Vantage has two halves:
 
-- a **Python server** (`src/vantage/`). It reads the game's spectator stream, keeps the match as a seekable history, and serves JSON and game assets over HTTP. It uses the standard library throughout, except for `grpcio` and `protobuf`, which talk to the game.
+- a **Python server** (`src/vantage/`). It reads the game's spectator stream, keeps the match as a seekable history, and serves JSON and game assets over HTTP. It uses `grpcio` and `protobuf` to talk to the game, pinned `genieutils-py` to read installed upgrade effects, and otherwise the standard library. See [third-party licenses](../THIRD_PARTY.md).
 - a **browser interface** (`src/vantage/web/`). It is plain JavaScript modules with no build step. The browser owns the playback clock, asks the server for the state of the match at the moment it wants to show, and draws it.
 
 The game's stream format is documented separately in [wire-format.md](wire-format.md).
@@ -238,3 +238,13 @@ The page may load sprites from the other loopback name (`localhost` for a page o
 | `GET /audio/{event,taunt,notify}/<id>.ogg?v=&lang=` | A sound, one variant of an event |
 | `GET /images/<file>` | A custom casting image |
 | `GET /skins/<name>/<file>` | A file from a skin |
+
+Upgrade relevance is computed by `gamedata.GameData` and `upgrades.py` from the
+installed dat file. A content-hash cache avoids parsing its full object graph
+on each viewer launch. `/api/techtree/<civ>` supplies `relevant_upgrades` (object
+IDs to ordered tech IDs), `upgrade_techs` (metadata and line membership), and an
+availability flag. Civ JSON gates research before effects are matched. Browser
+layout rows never determine relevance, and failed/unsupported effect parsing
+produces an explicit unavailable state. See `tools/audit_relevant_upgrades.py`
+for the independent review comparison and `tools/extract_upgrade_fixture.py`
+for the installed-data regression fixture.

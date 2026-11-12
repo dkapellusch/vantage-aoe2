@@ -1989,56 +1989,32 @@ function resourcePanel(el, r) {
     <div class="review-gatherers">${who.map(([o, n]) => `<button data-gatherers="${isTreeId(r[0]) ? r[11] : r[0]}" data-owner="${o}" ${tip(t('Select gatherers'), playerName(+o))}>${reviewIcon('workers')}<b style="color:${playerTextColor(+o)}">×${n}</b></button>`).join('') || `<span class="hint">${t('Nobody gathering')}</span>`}</div>`);
 }
 
-// Use the civ's own curated lines to identify upgrades for selected units.
-function relevantUpgrades(rows) {
+// Server-provided game effects and civ availability decide relevance. Layout is
+// presentation only; never infer effects from the full-tree row of a unit.
+export function relevantUpgrades(rows) {
   if (!rows.length) return '';
   const pid = rows[0][1], p = player(pid);
   if (!pid || !p) return '';
   const tree = treeNow(p.civ);
-  if (!tree) { loadTree(p.civ); return ''; }
-  const layout = tree.layout?.rows || [];
-  const selectedLines = new Set(rows.map((r) => lineOf(r[2])));
-  const selectedIds = new Set(rows.map((r) => r[2]));
-  const matchStage = (st) => st.unit != null && (selectedIds.has(st.unit) || selectedLines.has(lineOf(st.unit)));
-  const isWorker = rows.every((r) => unitInfo(r[2], pid, r[0]).cls === 4);
-  const isTC = rows.every((r) => TOWN_CENTERS.includes(r[2]));
-  const groups = [];
-  const common = new Set(['meleeAttack', 'infantryArmor', 'squires', 'arson', 'rangedAttack', 'archerArmor', 'thumbRing', 'cavalryArmor', 'bloodlines', 'husbandry']);
-  for (const row of layout) {
-    const matching = (row.groups || []).filter((g) => g.stages?.some(matchStage));
-    if (matching.length) {
-      groups.push(...matching);
-      groups.push(...row.groups.filter((g) => common.has(g.key)));
-      // Cavalry share melee attack upgrades, including when the tree lists them in Infantry.
-      if (row.key === 'cavalry') groups.push(...layout.flatMap((r) => r.groups || []).filter((g) => g.key === 'meleeAttack'));
-    }
-    if (row.key === 'economy' && (isWorker || isTC)) {
-      const keys = new Set(isTC ? ['loom', 'wheelCart', 'townWatch'] : ['loom', 'wheelCart']);
-      for (const r of rows) { const key = ({ 3: 'lumber', 4: 'goldMining', 5: 'stoneMining' })[r[9]]; if (key) keys.add(key); }
-      groups.push(...row.groups.filter((g) => keys.has(g.key)));
-    }
+  if (!tree) {
+    loadTree(p.civ);
+    return `<section class="review-upgrades"><span>${t('Relevant upgrades')}</span> <span class="hint">${t('Loading…')}</span></section>`;
   }
+  if (!tree.upgrade_relevance_available) return `<section class="review-upgrades"><span>${t('Relevant upgrades unavailable')}</span><button data-full-tree="${pid}">${t('Full tree')} ↗</button></section>`;
   const stats = playerStats(pid) || {}, done = new Set(stats.research_done || []);
   const active = new Map((stats.research_active || []).map((a) => [a.tech, a]));
-  const stages = new Map();
-  for (const group of groups) for (const stage of group.stages || []) {
-    const tid = stage.tech ?? (stage.kind === 'tech' ? stage.id : null);
-    if (tid != null && tid >= 0 && nodeStatus(stage) !== 'hidden') stages.set(tid, stage);
-  }
-  // A building's own research: every technology it researches that this civilisation can get.
-  const buildingIds = new Set(rows.map((r) => r[2]));
-  if (rows.every((r) => unitInfo(r[2], pid, r[0]).kind === 'building')) {
-    for (const node of tree.nodes || []) {
-      if (node.kind === 'tech' && buildingIds.has(node.building) && nodeStatus(node) === 'available' && !stages.has(node.id)) {
-        stages.set(node.id, { ...node, tech: node.id });
-      }
-    }
-  }
-  return `<section class="review-upgrades"><div class="review-upgrades-head"><span>${t('Relevant upgrades')}</span><button data-full-tree="${pid}">${t('Full tree')} ↗</button></div><div class="review-upgrade-list">${[...stages.entries()].map(([tid, stage]) => {
+  const tids = new Set(rows.flatMap(r => tree.relevant_upgrades?.[r[2]] || []));
+  const order = stage => [rows.some(r => stage.line_units?.includes(r[2])) ? 0 : stage.order[0], stage.order[1]];
+  const stages = [...tids].map(tid => [tid, tree.upgrade_techs?.[tid]])
+    .filter(([, stage]) => stage?.status === 'available')
+    .sort((a, b) => order(a[1])[0] - order(b[1])[0] || order(a[1])[1] - order(b[1])[1]);
+  return `<section class="review-upgrades"><div class="review-upgrades-head"><span>${t('Relevant upgrades')}</span><button data-full-tree="${pid}">${t('Full tree')} ↗</button></div><div class="review-upgrade-list">${stages.map(([tid, stage]) => {
     const a = active.get(tid), unavailable = nodeStatus(stage) === 'struck';
     const status = done.has(tid) ? 'done' : a ? 'doing' : unavailable ? 'unavailable' : (stage.age || 1) - 1 > (stats.age || 0) ? 'later' : 'available';
-    const info = techInfoFor(tid, pid), detail = stripMarkup(info.help || info.description || '');
-    return `<button class="review-upgrade ${status}" data-tech="${tid}" data-pid="${pid}" data-building="${a?.building || ''}" ${unavailable ? 'disabled' : ''} ${tip(info.name || stage.name, `${t(status)}${a?.remaining != null ? ' · ' + Math.ceil(a.remaining) + 's' : ''}${detail ? ' · ' + detail : ''}`)}><img src="${techIconFor(tid, pid)}" alt="${esc(info.name || stage.name)}"><small>${done.has(tid) ? '✓' : a?.remaining != null ? Math.ceil(a.remaining) + 's' : unavailable ? '×' : ''}</small></button>`;
+    const info = S.catalog.techs[tid] ? techInfoFor(tid, pid) : stage;
+    const icon = techIconFor(tid, pid) || (stage.icon >= 0 ? `/icon/tech/${stage.icon}.png?g=${S.game}` : '');
+    const detail = stripMarkup(info.help || info.description || '');
+    return `<button class="review-upgrade ${status}" data-tech="${tid}" data-pid="${pid}" data-building="${a?.building || ''}" ${unavailable ? 'disabled' : ''} ${tip(info.name || stage.name, `${t(status)}${a?.remaining != null ? ' · ' + Math.ceil(a.remaining) + 's' : ''}${detail ? ' · ' + detail : ''}`)}><img src="${icon}" alt="${esc(info.name || stage.name)}"><small>${done.has(tid) ? '✓' : a?.remaining != null ? Math.ceil(a.remaining) + 's' : unavailable ? '×' : ''}</small></button>`;
   }).join('')}</div></section>`;
 }
 

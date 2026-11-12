@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A spectator and replay viewer for Age of Empires II: Definitive Edition, in your browser"
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY.md"]
 requires-python = ">=3.12"
 authors = [{ name = "Dan Kapellusch" }]
 keywords = ["aoe2", "age-of-empires", "spectator", "replay", "esports", "casting"]
@@ -19,6 +19,7 @@ classifiers = [
     "Topic :: Games/Entertainment :: Real Time Strategy",
 ]
 dependencies = [
+    "genieutils-py==0.1.2",
     "grpcio>=1.82.1",
     "protobuf>=7.35.0",
 ]
@@ -47,7 +48,7 @@ build-backend = "hatchling.build"
 packages = ["src/vantage"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/vantage", "tests", "docs", "README.md", "LICENSE", "CHANGELOG.md"]
+include = ["src/vantage", "tests", "docs", "README.md", "LICENSE", "CHANGELOG.md", "THIRD_PARTY.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -69,7 +70,7 @@ files = ["src/vantage"]
 exclude = ['src/vantage/rpc/cade_pb2\.py$']
 
 [[tool.mypy.overrides]]
-# grpc, protobuf and the generated stubs ship no type information.
-module = ["grpc.*", "google.protobuf.*", "vantage.rpc.cade_pb2"]
+# grpc, protobuf, the generated stubs and genieutils ship no type information.
+module = ["grpc.*", "google.protobuf.*", "vantage.rpc.cade_pb2", "genieutils.*"]
 ignore_missing_imports = true
 follow_imports = "skip"

@@ -46,7 +46,7 @@ prefix so your main one is untouched:
 uv python list --all-platforms --output-format json   # find the cpython-3.12 windows-x86_64 download URL
 curl -L -o py.tar.gz '<that url>' && tar -xzf py.tar.gz              # unpacks python/python.exe
 uv pip install --python-platform x86_64-pc-windows-msvc --python-version 3.12 \
-    --target winsite grpcio protobuf pytest
+    --target winsite grpcio protobuf genieutils-py==0.1.2 pytest
 export WINEPREFIX="$PWD/wineprefix"
 PYTHONPATH="Z:$PWD/winsite;Z:$PWD/src;Z:$PWD" wine python/python.exe -m pytest -q -p no:cacheprovider
 ```
@@ -91,7 +91,7 @@ docs/wiki/          the user guide (published to the GitHub wiki)
 
 ## Ground rules
 
-- **Runtime dependencies stay minimal.** Only `grpcio` and `protobuf`, for the game connection. Everything else uses the Python standard library. Development-only tools go in the `dev` dependency group.
+- **Runtime dependencies stay minimal.** `grpcio` and `protobuf` serve the game connection; pinned `genieutils-py==0.1.2` reads installed game effects for upgrade relevance. See [third-party license notes](../THIRD_PARTY.md). Other runtime code uses the Python standard library. Development-only tools go in the `dev` dependency group.
 - **No game assets in the repository.** Graphics, sounds and strings are read from the user's installation at run time. Test fixtures must be synthetic or recorded stream data, never files copied from the game.
 - **No certificates in the repository**, nor in issues, logs or test fixtures.
 - **Your own work.** Do not copy code or assets from other software unless its licence allows it. Facts about the game's wire format belong in `cade_schema.json`, `rpc/cade.proto` and [wire-format.md](wire-format.md).

@@ -1635,5 +1635,6 @@
  "Kills per death of this selection (units that died while selected count)": "Uccisioni per morte di questa selezione (contano le unità morte mentre selezionate)",
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Tempo con un centro città inattivo: né addestramento né ricerca. Le pause sotto 1 s contano come lavoro. I blocchi per alloggi o limite di popolazione sono esclusi; il tempo senza alloggi è conteggiato separatamente.",
  "Population limit": "Limite di popolazione",
- "Lifetime healing": "Cure nel corso della vita"
+ "Lifetime healing": "Cure nel corso della vita",
+ "Relevant upgrades unavailable": "Miglioramenti pertinenti non disponibili"
 }

@@ -226,3 +226,12 @@ These instant grants are excluded from gathered-food totals and collection
 rates. Overlapping ranges pay once; when the stream cannot identify which
 Folwark paid, the shared amount is marked separately on the eligible buildings.
 Partial recordings and gaps can only provide observed totals.
+
+Relevant upgrade chips come from the installed game's effects on the selected
+object's ID or class, plus its upgrade line. They are filtered by its owner's
+civilisation. Line upgrades come first, then blacksmith attack and armour,
+other upgrades, and that civ's relevant unique technologies. Chips retain their
+researched, researching, available and later-age states. Research offered by a
+building is shown in its full tree; it is not automatically an upgrade to that
+building. Monastery resource-flag research is included for converters, and
+Faith/Heresy for units whose game help recommends resistance to Monks.

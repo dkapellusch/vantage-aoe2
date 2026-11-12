@@ -1635,5 +1635,6 @@
  "Kills per death of this selection (units that died while selected count)": "이 선택의 사망당 처치 수 (선택된 채 죽은 유닛 포함)",
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "마을 회관이 훈련도 연구도 하지 않는 시간입니다. 1초 미만의 전환 간격은 작업으로 계산합니다. 주택 부족이나 인구 한도로 인한 대기는 제외하며, 주택 부족 시간은 별도로 계산합니다.",
  "Population limit": "인구 한도",
- "Lifetime healing": "평생 치유량"
+ "Lifetime healing": "평생 치유량",
+ "Relevant upgrades unavailable": "관련 업그레이드를 사용할 수 없음"
 }

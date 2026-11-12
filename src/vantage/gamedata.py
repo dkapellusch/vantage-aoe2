@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from vantage.assetcache import SingleFlight, atomic_write
 from vantage.bc7 import decode_bc7
@@ -657,6 +657,7 @@ class GameData:
         self.mods = mods if mods is not None else ModConfig()
         #: Conversions in progress by cache file: concurrent requests convert once.
         self._converting: SingleFlight[Any] = SingleFlight()
+        self._upgrade_tables: dict[int, tuple[dict[str, list[int]], dict[int, dict[str, Any]]]] = {}
 
     def mod_roots(self, kind: str) -> list[Path]:
         """Folders holding ``kind`` content ('graphics', 'sprites', 'terrain',
@@ -892,6 +893,100 @@ class GameData:
                 out.setdefault(mid, key)
         return out
 
+    @cached_property
+    def _upgrade_facts(self) -> dict[str, Any] | None:
+        """Installed effects, cached by dat content and pinned parser version.
+
+        Unsupported/missing data produces an explicit unavailable UI, never a
+        fallback to tree-layout guesses. Concurrent tree requests parse once.
+        """
+
+        def load() -> dict[str, Any] | None:
+            path = self.dat_path("empires2_x2_p1.dat")
+            if path is None:
+                return None
+            try:
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                cache = self.cache_dir / "upgrades" / f"genie-0.1.2-v3-{digest}.json"
+                try:
+                    return json.loads(cache.read_text())  # type: ignore[no-any-return]
+                except (OSError, ValueError):
+                    pass
+                from vantage.upgrades import read_effects
+
+                facts = read_effects(str(path))
+                atomic_write(cache, json.dumps(facts, separators=(",", ":")).encode())
+                return facts
+            except (OSError, ValueError, EOFError, struct.error, zlib.error, NotImplementedError):
+                return None
+
+        return cast(dict[str, Any] | None, self._converting.run("upgrade-facts", load))
+
+    def relevant_upgrades(self, civ_id: int) -> dict[str, list[int]]:
+        """Object ID -> relevant research IDs, already gated and ordered for a civ."""
+        return self._upgrade_table(civ_id)[0]
+
+    def _upgrade_table(self, civ_id: int) -> tuple[dict[str, list[int]], dict[int, dict[str, Any]]]:
+        tables = self._upgrade_tables
+        if civ_id in tables:
+            return tables[civ_id]
+
+        def build() -> tuple[dict[str, list[int]], dict[int, dict[str, Any]]]:
+            facts = self._upgrade_facts
+            if facts is None or not 0 <= civ_id < len(facts["units"]):
+                return {}, {}
+            available: set[int] = set()
+            ages: dict[int, int] = {}
+            for node in self._all_trees.get(civ_id, {}).values():
+                if node.get("Node Status") == "NotAvailable":
+                    continue
+                tid = (
+                    node.get("Node ID")
+                    if node.get("Use Type") == "Tech"
+                    else node.get("Trigger Tech ID")
+                )
+                if tid is not None and int(tid) >= 0:
+                    available.add(int(tid))
+                    ages[int(tid)] = int(node.get("Age ID", 1) or 1)
+            unique = {t for values in self.unique_tech_ids.get(civ_id, {}).values() for t in values}
+            # Always use English game help for the semantic resource-flag rule;
+            # switching the UI language must not change the upgrade IDs.
+            descriptions = {
+                int(uid): self.string(u["help"] - 79000)
+                for uid, u in facts["units"][civ_id].items()
+            }
+            from vantage.upgrades import relevance
+
+            town_centers = {
+                int(uid)
+                for uid, u in facts["units"][civ_id].items()
+                if self.string(u["sid"]) == "Town Center"
+            }
+            mapping, order, line_units = relevance(
+                facts, civ_id, available, unique, descriptions, town_centers
+            )
+            metadata = {}
+            for tid in {t for ids in mapping.values() for t in ids}:
+                tech = facts["techs"][tid]
+                metadata[tid] = {
+                    "id": tid,
+                    "name": self.string(tech["sid"], tech["name"]),
+                    "sid": tech["sid"],
+                    "icon": tech["icon"],
+                    "age": ages.get(tid, 1),
+                    "order": order[tid],
+                    "line_units": line_units.get(tid, []),
+                    "status": "available",
+                }
+            result = mapping, metadata
+            tables[civ_id] = result
+            return result
+
+        return cast(
+            tuple[dict[str, list[int]], dict[int, dict[str, Any]]],
+            self._converting.run(("upgrade-civ", civ_id), build),
+        )
+
     # -- civ tech trees -----------------------------------------------------------
 
     def _tree_raw(self, civ_id: int) -> dict[str, Any] | None:
@@ -1063,6 +1158,7 @@ class GameData:
             desc_id = civ_id + CIV_DESCRIPTION_BASE
         uts = self.unique_tech_ids.get(civ_id, {"castle": [], "imperial": []})
         era = self.civ_era(civ_id)
+        relevant, upgrade_techs = self._upgrade_table(civ_id)
         return {
             "civ": civ_id,
             "name": string(civ.get("name_string_id"), self.civ_name(civ_id)),
@@ -1077,6 +1173,12 @@ class GameData:
             "not_available": sorted(not_available),
             "regional_hidden": sorted(hidden),
             "unique_techs": uts,
+            "relevant_upgrades": relevant,
+            "upgrade_relevance_available": self._upgrade_facts is not None,
+            "upgrade_techs": {
+                tid: {**tech, "name": string(tech["sid"], tech["name"])}
+                for tid, tech in upgrade_techs.items()
+            },
             "layout": None
             if self.game == "ror"
             else self._layout(civ_id, era, uts, not_available, hidden, string),

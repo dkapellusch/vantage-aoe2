@@ -1635,5 +1635,6 @@
  "Kills per death of this selection (units that died while selected count)": "Số hạ gục trên mỗi tử trận của lựa chọn này (tính cả đơn vị chết khi được chọn)",
  "Time with an idle TC: neither training nor researching. Gaps under 1s count as working. Housing and population-limit blocks are excluded; housed time is separate.": "Thời gian trung tâm đô thị không huấn luyện hay nghiên cứu. Khoảng chuyển tiếp dưới 1 giây được tính là làm việc. Không tính lúc bị chặn do thiếu nhà hoặc giới hạn dân số; thời gian thiếu nhà được tính riêng.",
  "Population limit": "Giới hạn dân số",
- "Lifetime healing": "Hồi máu suốt vòng đời"
+ "Lifetime healing": "Hồi máu suốt vòng đời",
+ "Relevant upgrades unavailable": "Không có nâng cấp liên quan"
 }
