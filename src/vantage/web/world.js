@@ -3101,6 +3101,8 @@ function miniTransform(c, W, H) {
 
 export function drawMinimap() {
   refreshMiniTerrain();
+  // A hidden minimap (a preset without it, the phone layout) has no pixels to draw into.
+  if (!mini.width || !mini.height) return;
   const dpr = viewSize.dpr;
   const W = mini.width / dpr, H = mini.height / dpr;
   mctx.setTransform(1, 0, 0, 1, 0, 0);

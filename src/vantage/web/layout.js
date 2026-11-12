@@ -117,8 +117,17 @@ export function scene() {
 
 // -- visibility -------------------------------------------------------------------------------------
 
+// The phone layout shows a fixed set: the Pulse strip, the Match story (its
+// scrubber and playback buttons), and whichever panel the open tab holds.
+const PHONE_PANELS = new Set(['pulse', 'story']);
+const PHONE_TABS = { table: 'overview', unit: 'unitpanel' };
+let phoneOn = false, tab = 'pulse';
+export function phoneTab() { return tab; }
+export function setPhoneTab(next) { tab = next; applyPanels(); }
+
 function wanted(id, preset = activePreset()) {
   const p = byId.get(id), h = hud();
+  if (phoneOn && preset !== 'full') return PHONE_PANELS.has(id) || PHONE_TABS[tab] === id;
   if (preset === 'full') {
     if (p.extra) return ((h.edits.full || {}).panels || []).includes(id);
     if (p.gate && !settings[p.gate]) return false;
@@ -276,7 +285,8 @@ export function renderExtras() {
     if (!r) continue;
     let el = $(p.id);
     if (!el && visible) { el = r.create(context); el.classList.add('panel-fade'); }
-    if (el && visible) r.render(el, context);
+    // A panel that fails must not take the rest of the HUD down with it.
+    if (el && visible) { try { r.render(el, context); } catch (error) { if (!r.failed) { r.failed = true; console.error('Vantage: panel failed to render', p.id, error); } } }
   }
 }
 
@@ -302,6 +312,7 @@ export function applyPanels() {
   body.classList.toggle('hud-paused', !S.playing);
   body.classList.toggle('hud-locked', !!hud().lock || body.classList.contains('overlay-mode'));
   const phone = isPhone();
+  phoneOn = phone;
   if (body.classList.contains('hud-phone') !== phone) body.classList.toggle('hud-phone', phone);
   if (phone && !phoneModule) phoneModule = import('./phone.js').then((m) => { phoneModule = m; m.installPhone(context); context.onChange(); }).catch(console.error);
   if (phoneModule && phoneModule.syncPhone) phoneModule.syncPhone(phone);
