@@ -77,10 +77,20 @@ The **dashboard** at the bottom is a table with a row per player. It has several
 | Layout | Pages |
 |---|---|
 | 1v1 | overview, APM, economy activity, economy info, stockpiles, military, trade |
-| Team games | overview, overview with eco losses, economy info, stockpiles, APM, worker efficiency (overall and broken down), military, trade |
-| Free-for-all | the team-game pages in a free-for-all form (no trade page) |
+| Team games | Overview (including eco losses and total collected), economy info, stockpiles, APM, worker efficiency (overall and broken down), military, trade |
+| Free-for-all | overview, overview with eco losses, economy info, stockpiles, APM, worker efficiency (overall and broken down), military |
 | Battle Royale | top 4, top 8, stockpiles, military, APM |
 | Return of Rome | default, economy efficiency, APM |
+
+Team **Overview** has one page: villagers, idle workers, population, military,
+army value, kills/deaths, economy kills, economy losses, TC idle/housed time,
+town centres/castles, then **Collected** (total resources collected). The
+existing columns keep their order. The former small Overview page is removed;
+<kbd>Alt+C</kbd>/<kbd>Alt+X</kbd> and the tabs cycle the remaining team pages.
+1v1 and FFA pages keep their existing columns and page sets. Saved selections of
+the removed team page open the surviving Overview. The team title uses the
+existing translated **Overview** key in every language; FFA still uses its
+**Overview & eco losses** label.
 
 The columns cover stockpiles, workers per resource, idle workers and idle town-centre time, housed time, worker efficiency, unit counts, army value and peak, kills and deaths, value destroyed, relics and relic gold, trade, tribute, market, conversions, resources collected, and APM (total and effective, split into economy and military). In **Settings → Dashboard pages** you can add, remove, reorder and edit the pages for 1v1, team games and FFA. *Mini dashboard* gives a compact version.
 
@@ -167,3 +177,12 @@ Vantage plays the game's own sounds as playback passes them: notifications, unit
 - <kbd>Ctrl+Alt+Shift+P</kbd>: a performance view (frame times, data fetches, memory).
 
 Settings → Help and the quick reference show Vantage's version, with links to GitHub, this wiki and the issue tracker.
+
+## Opening a match
+
+The first frame stays behind a quiet loading cover while map textures, visible
+sprites, HUD data, icons and fonts are prepared. The recording clock waits at
+the first frame during this step. The laid-out HUD and finished map then fade
+in together; reduced-motion preferences skip the fade and spinner animation.
+A failed or stalled initial load offers **Reload**, without exposing a partial
+map. In the hub the viewer, result table and charts reveal together.

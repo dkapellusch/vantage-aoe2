@@ -247,6 +247,11 @@ export function migrateSettings(s) {
     s.hudLayout = 'caster';
     s.settingsVersion = 9;
   }
+  // Team games now have one Overview. Do not reinterpret a custom page's id.
+  if (s.dashboardSelection?.oppositional === 'overviewSmall'
+    && !s.customDashboardConfig?.oppositional?.length) {
+    s.dashboardSelection = { ...s.dashboardSelection, oppositional: 'overviewEcoLosses' };
+  }
   // "Wonders & relics" folded into the King category.
   if (Array.isArray(s.eventFilterOut) && s.eventFilterOut.includes('victory')) {
     s.eventFilterOut = [...new Set(s.eventFilterOut.filter((k) => k !== 'victory').concat('king'))];

@@ -1327,6 +1327,7 @@ export function defaultMirror(columns) { return !(columns || []).every((c) => ST
 const COMBINED = { idleLm: 'effLm', effLm: 'idleLm' };
 
 const OVERVIEW_COLS = ['wFood', 'wWood', 'wGold', 'wStone', 'build', 'idle', 'pop', 'mil', 'milValue', 'kd', 'tc', 'idleTcHoused'];
+const TEAM_OVERVIEW_COLS = ['vils', 'idle', 'pop', 'mil', 'milValue', 'kd', 'ecoKills', 'ecoDeaths', 'idleTcHoused', 'tcCastle'];
 const BASE_PAGES = [
   // 1v1 (nonOppositional)
   { key: 'overview', title: 'Overview', cols: OVERVIEW_COLS },
@@ -1336,8 +1337,7 @@ const BASE_PAGES = [
   { key: 'overviewT90', title: 'Overview', cols: ['t90EcoKd', 't90Kd', 't90TcIdle', 't90EcoIdle', 't90Relics', 't90RelicGold', 't90ResColl', 't90ValueGold'] },
   { key: 'ecoActivityT90', title: 'Eco activity', cols: ['t90Gather', 't90WeLm', 't90WeAll', 't90ConvDes', 't90ValueDestroyed'] },
   // team games (oppositional)
-  { key: 'overviewSmall', title: 'Overview', cols: ['vils', 'idle', 'popOnly', 'mil', 'milValue', 'kd', 'tcCastle'] },
-  { key: 'overviewEcoLosses', title: 'Overview & eco losses', cols: ['vils', 'idle', 'pop', 'mil', 'milValue', 'kd', 'ecoKills', 'ecoDeaths', 'idleTcHoused', 'tcCastle'] },
+  { key: 'overviewEcoLosses', title: 'Overview', cols: [...TEAM_OVERVIEW_COLS, 'colT'] },
   { key: 'ecoInfo', title: 'Economy', cols: ['vils', 'farm', 'sheep', 'hunt', 'berries', 'fish', 'wWood', 'wGold', 'wStone', 'idle', 'idleTime', 'trade', 'tradeWorkshops'] },
   { key: 'stockpiles', title: 'Stockpiles', cols: ['food', 'wood', 'gold', 'stone', 'colF', 'colW', 'colG', 'colS', 'colT'] },
   { key: 'apmPaired', title: 'APM', cols: ['apm', 'apmEco', 'apmMil', 'apmPeak', 'apmAvg', 'eapm'], paired: true },
@@ -1359,16 +1359,18 @@ const BASE_PAGES = [
   { key: 'default', title: 'Overview', cols: ['wFood', 'wWood', 'wGold', 'wStone', 'build', 'idle', 'pop', 'mil', 'milValue', 'kd', 'tc', 'd3Agg'] },
   { key: 'economyEfficiency', title: 'Economy efficiency', cols: ['eff', 'effLm', 'gatherLm', 'moveLm', 'buildLm', 'idleLm', 'gatherTime', 'tcIdle', 'housed'] },
 ];
-// FFA variants of the team pages: the same columns, rows ranked by score.
-const FFA_OF = ['overviewSmall', 'overviewEcoLosses', 'ecoInfo', 'stockpiles', 'workerEfficiencyOverall', 'workerEfficiencyBreakdown'];
+// Preserve the existing FFA pages independently of the merged team Overview.
+const FFA_OF = ['ecoInfo', 'stockpiles', 'workerEfficiencyOverall', 'workerEfficiencyBreakdown'];
 export const DASH_PAGES = [
   ...BASE_PAGES,
+  { key: 'overviewSmallFfa', title: 'Overview', cols: ['vils', 'idle', 'popOnly', 'mil', 'milValue', 'kd', 'tcCastle'] },
+  { key: 'overviewEcoLossesFfa', title: 'Overview & eco losses', cols: TEAM_OVERVIEW_COLS },
   ...FFA_OF.map((k) => { const p = BASE_PAGES.find((x) => x.key === k); return { ...p, key: `${k}Ffa`, title: p.title }; }),
   { key: 'apmFfa', title: 'APM', cols: ['apm', 'apmEco', 'apmMil', 'apmPeak', 'apmAvg', 'eapm'] },
 ];
 export const DASH_LAYOUTS = {
   nonOppositional: ['overview', 'apm', 'ecoActivity', 'ecoInfo', 'stockpiles', 'military', 'trade'],
-  oppositional: ['overviewSmall', 'overviewEcoLosses', 'ecoInfo', 'stockpiles', 'apmPaired', 'workerEfficiencyOverall', 'workerEfficiencyBreakdown', 'military', 'trade'],
+  oppositional: ['overviewEcoLosses', 'ecoInfo', 'stockpiles', 'apmPaired', 'workerEfficiencyOverall', 'workerEfficiencyBreakdown', 'military', 'trade'],
   ffa: ['overviewSmallFfa', 'overviewEcoLossesFfa', 'ecoInfoFfa', 'stockpilesFfa', 'apmFfa', 'workerEfficiencyOverallFfa', 'workerEfficiencyBreakdownFfa', 'military'],
   battleRoyale: ['top4', 'top8', 'stockpiles', 'military', 'apmBr'],
   miniFfa: ['militaryMiniFfa', 'ecoMiniFfa', 'stockpilesAndWorkersMiniFfa'],
