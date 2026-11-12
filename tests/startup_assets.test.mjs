@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { requestResource, resourceName } from '../src/vantage/web/startup-assets.js';
-import { viewRequestUrl } from '../src/vantage/web/state.js';
+import { viewRequestUrl, pairedOrigin } from '../src/vantage/web/state.js';
 
 test('transient data failures retry without animation frames, visibility or a timer tick', async () => {
   let calls = 0;
@@ -27,4 +27,8 @@ test('worker requests stay with their match even if another tab overwrites the c
   for (const id of ['moykyzcd4ivqs', 'mqbf7pgwd76jh'])
     assert.equal(viewRequestUrl('/api/view?t=727000', `https://hub.test/v/${id}/`), `https://hub.test/v/${id}/api/view?t=727000`);
   assert.equal(viewRequestUrl('/api/view?t=1', 'http://localhost:8740/'), 'http://localhost:8740/api/view?t=1');
+});
+test('hub assets never probe a second unauthenticated origin', () => {
+  assert.equal(pairedOrigin(new URL('http://127.0.0.1:8762/v/moykyzcd4ivqs/')), '');
+  assert.equal(pairedOrigin(new URL('http://127.0.0.1:8740/')), 'http://localhost:8740');
 });

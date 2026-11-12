@@ -334,6 +334,9 @@ export function withAssetVersion(path) {
 }
 export function assetUrl(path) { return assetBase + withAssetVersion(path); }
 export function pairedOrigin(loc) {
+  // A hub match needs its authenticated origin and match-scoped worker. The
+  // desktop's optional second-host connection pool cannot work behind a proxy.
+  if (loc.pathname?.startsWith('/v/')) return '';
   const alt = { '127.0.0.1': 'localhost', localhost: '127.0.0.1' }[loc.hostname];
   return alt && loc.protocol === 'http:' ? `http://${alt}${loc.port ? `:${loc.port}` : ''}` : '';
 }
@@ -341,7 +344,7 @@ export async function probeAssetOrigin() {
   const alt = pairedOrigin(location);
   if (!alt) return '';
   try {
-    const r = await fetch(`${alt}/api/config`, { mode: 'cors', cache: 'no-store' });
+    const r = await fetch(`${alt}/api/config`, { mode: 'cors', cache: 'no-store', signal: AbortSignal.timeout(1500) });
     if (r.ok) assetBase = alt;
   } catch { /* other name unreachable or no CORS: stay on this origin */ }
   return assetBase;

@@ -21,6 +21,7 @@ import { shuttleSpeed, eventIndexAfter, replayBufferWait, matchEnded } from './p
 import { GOTO_BUILDINGS, applyGame } from './games.js';
 import { chooseFight, FightSelection, highlightParticipants } from './autocast-focus.js';
 import { installPanelResizing } from './panel-resize.js';
+import { sessionEvents } from './session-events.js';
 
 const $ = (id) => document.getElementById(id);
 let generation = -1;
@@ -39,7 +40,7 @@ let initialFonts = false;
 let startupLayout = '';
 function reportReady() {
   window.dispatchEvent(new CustomEvent('vantage:ready'));
-  if (window.parent !== window) window.parent.postMessage({ type: 'vantage:ready', degraded: !!initialLoad.degraded }, '*');
+  if (window.parent !== window) window.parent.postMessage({ type: 'vantage:ready', degraded: !!initialLoad.degraded, startup_ms: Math.round(performance.now()), build: serverConfig?.viewer_build, instance: serverConfig?.server_instance }, '*');
 }
 window.addEventListener('message', (event) => {
   if (event.source === window.parent && event.data?.type === 'vantage:ready?'
@@ -273,7 +274,7 @@ function checkViewerBuild(desc) {
   // A deployment changes the JS graph as well as its API. Reload once, retaining
   // the playhead and selection; never combine old data caches with new code.
   try { sessionStorage.setItem(`vantage:resume:${location.pathname}`, JSON.stringify({
-    t: S.t, selected: [...S.selection], at: Date.now(),
+    t: S.t, selected: [...S.selection], playing: S.playing, at: Date.now(),
   })); } catch { /* private browsing may deny storage */ }
   location.reload(); return true;
 }
@@ -532,11 +533,12 @@ function renderCertsCard(el, certs) {
 }
 
 function subscribe() {
-  const es = new EventSource('/api/stream');
-  es.onmessage = (m) => { const desc = JSON.parse(m.data); if (!checkViewerBuild(desc)) refreshSession(desc).catch(console.error); };
-  // Skin files changed (the server watches the enabled skins).
-  es.addEventListener('skins', () => { if (settings.toggleHTMLServer) reloadSkins(); });
-  es.onerror = () => { $('status-line').textContent = `⚠ ${t('server unreachable')}`; };
+  const stop = sessionEvents('/api/stream', {
+    message: m => { const desc = JSON.parse(m.data); if (!checkViewerBuild(desc)) refreshSession(desc).catch(console.error); },
+    skins: () => { if (settings.toggleHTMLServer) reloadSkins(); },
+    error: () => { $('status-line').textContent = `⚠ ${t('server unreachable')}`; },
+  });
+  window.addEventListener('pagehide', stop, { once: true });
 }
 
 // -- skin debugging ---------------------------------------------------------------------
@@ -2310,7 +2312,9 @@ async function boot() {
     const image = e.target;
     if (image?.tagName !== 'IMG' || image._startupRetry) return;
     image._startupRetry = true;
-    trackedImage(image, image.currentSrc || image.src,
+    const source = image.getAttribute('src');
+    if (!source?.trim()) return;
+    trackedImage(image, image.currentSrc || source,
       () => { image.style.visibility = ''; }, () => { image.style.visibility = 'hidden'; });
   }, true);
   document.addEventListener('load', e => { if (e.target?.tagName === 'IMG') queueStartup(); }, true);
@@ -2373,7 +2377,7 @@ async function boot() {
         // saved late-game playhead to the first few seconds already ingested.
         while (S.end < saved.t && !S.complete) await new Promise(r => setTimeout(r, 250));
         await initialViewPromise;
-        S.selection = new Set(saved.selected || []); seek(saved.t);
+        S.selection = new Set(saved.selected || []); S.playing = saved.playing ?? false; seek(saved.t);
       })().catch(console.error);
     }
   } catch { /* invalid/denied storage is harmless */ }
