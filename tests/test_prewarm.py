@@ -20,6 +20,15 @@ def test_neutral_map_objects_cannot_exhaust_the_starting_units_budget() -> None:
     assert len([job for job in jobs if job[0] == 42]) == 6
 
 
+def test_engine_container_graphics_warm_the_actual_building_parts() -> None:
+    row = [1, 1, 109, 0, 0, 1, 1, 2, [[100, 0, 0, 0]], 0]
+    jobs = first_sprite_jobs(
+        {"entities": [row]}, {1: {"color_id": 3}}, deltas={100: [[101, 0, 0], [102, 4, 5]]}
+    )
+    assert {job[0] for job in jobs} == {101, 102}
+    assert len(jobs) == 12
+
+
 def test_optional_missing_art_does_not_fail_a_valid_analysis(tmp_path, monkeypatch) -> None:
     from types import SimpleNamespace
 

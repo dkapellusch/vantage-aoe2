@@ -7,14 +7,17 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
-from vantage.sprites import SpriteInfo, SpriteStore
+from vantage.sprites import SpriteInfo, SpriteStore, sprite_deltas
 
 if TYPE_CHECKING:
     from vantage.timeline import Timeline
 
 
 def first_sprite_jobs(
-    view: dict[str, Any], players: dict[int, Any], limit: int = 256
+    view: dict[str, Any],
+    players: dict[int, Any],
+    limit: int = 256,
+    deltas: dict[int, list[list[int]]] | None = None,
 ) -> list[tuple[Any, ...]]:
     jobs: set[tuple[Any, ...]] = set()
     # Player objects first. Terrain/resources still warm, but cannot crowd out
@@ -24,7 +27,8 @@ def first_sprite_jobs(
         owner, facet = row[1], row[7]
         color = int((players.get(owner) or {}).get("color_id", owner - 1)) if owner > 0 else -1
         variants = [(color, False), (-1, True)] if owner > 0 else [(-1, False)]
-        for sid, *_ in row[8]:
+        sprites = [part[0] for layer in row[8] for part in (deltas or {}).get(layer[0], [layer])]
+        for sid in sprites:
             for shade, mask in variants:
                 for layer in ("all", "main", "shadow"):
                     job = sid, facet, shade, mask, not bool(row[6] & 1), layer
@@ -39,7 +43,11 @@ def warm_assets(timeline: Timeline, *, workers: int = 2) -> dict[str, Any]:
         return {"prepared": 0, "missing": 0, "seconds": 0}
     started = time.monotonic()
     view = timeline.keyframe_at(timeline.start) or {}
-    jobs = first_sprite_jobs(view, timeline.match.get("players", {}))
+    jobs = first_sprite_jobs(
+        view,
+        timeline.match.get("players", {}),
+        deltas=sprite_deltas(getattr(timeline.catalog, "world_sprites", [])),
+    )
     mods = list(dict.fromkeys(data.mod_roots("graphics") + data.mod_roots("sprites")))
     store = SpriteStore(data.game_dir, data.cache_dir, data.mode, extra_dirs=mods, workers=workers)
 
