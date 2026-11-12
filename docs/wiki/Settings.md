@@ -30,7 +30,9 @@ The tables below give each control's label, the setting's name (the key you use 
 | Keep dead units in selection | `keepDeadInSelection` | on |
 | Autocast highlights: replay the most exciting moments automatically | `autocastHighlights` | on |
 
-Which panels are hidden or collapsed from the Panels menu is kept in `hiddenPanels` and `collapsedPanels`. The layout (Panels menu → Layout) is `hudLayout` (`caster`, the default, or `classic`). Moved and resized panels are kept in `panelSizes`, and the team board's view and folded sections in `teamBoardView` and `teamBoardCollapsed`.
+Which Full panels are hidden or collapsed is kept in `hiddenPanels` and `collapsedPanels`. The placement (Customize → Layout) is `hudLayout` (`caster`, the default, or `classic`). Moved and resized panels are kept in `panelSizes` as an anchor and fractions of the window (`{anchor, x, y, w, h}`; pixel rectangles from older versions convert when first used), and the Team board's view and folded sections in `teamBoardView` and `teamBoardCollapsed`.
+
+The customizable HUD is one object, `hud`: `preset` (`minimal`, `caster`, `review`, `analyst`, `full` or `custom`), `edits` (what you changed in each preset: its `panels` and Pulse `metrics`), `lock`, `focus` (the Focus slot's card), `scene` and `sceneHide` (panel → scenes it is hidden in), `reserved` (the webcam zone), `hiddenRows` (Team board rows ticked off), `dedupe`, `widgets` (widget content), `layouts` (saved layouts by name) and `hintSeen`. `statsWindow` holds whether the Statistics window is docked. The **Minimal UI** checkbox is the Minimal preset.
 
 ### Scoreboard
 

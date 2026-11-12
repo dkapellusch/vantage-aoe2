@@ -12,40 +12,87 @@ The default **Caster** layout:
 |---|---|
 | Top | Scoreboard, across the full width |
 | Top left | Techs, production and composition |
-| Bottom left | Team overview |
+| Bottom left | Team board |
 | Bottom centre | Dashboard |
 | Top right | Event log |
 | Bottom right | Minimap with the time controls above it, the selection (unit) panel beside it |
 
-**Classic** (Panels menu → Layout) is the earlier arrangement: the team overview top left and the minimap bottom left.
+**Classic** (Customize → Layout → Placement) is the earlier arrangement: the Team board top left and the minimap bottom left.
+
+## HUD presets
+
+How much is on screen is a preset, one key each:
+
+| Key | Preset | Shows |
+|---|---|---|
+| <kbd>F6</kbd> | **Minimal** | The Pulse strip and the minimap. A selection shows as a one-line chip; the time controls appear when the pointer nears the bottom edge and while paused |
+| <kbd>F7</kbd> | **Caster** | Pulse strip, one Focus card, the Event ticker, the Selection chip, the minimap |
+| <kbd>F8</kbd> | **Review** | Pulse strip (compact), Review cards, the Match story timeline, the Selection panel, the minimap |
+| <kbd>F9</kbd> | **Analyst** | Scoreboard, Team board, Dashboard, Selection panel, time controls, minimap, and Statistics docked right |
+| <kbd>Shift+F6</kbd> | **Full** | Every panel, exactly as your settings have them |
+
+Hold <kbd>`</kbd> to peek at Full while the key is down. Full is your own HUD and no preset changes it. Each of the others keeps its own edits: tick a panel on in Caster and Review is untouched; a changed preset shows a dot in Customize, with **Restore default** beside it.
+
+A new viewer starts on Minimal when Vantage is embedded in another page or hosted by a hub, and on Full in the desktop app. Saved settings always keep the preset they had.
+
+The panels the presets add:
+
+- **Pulse strip**: one row per side. Name, age, villagers, military, army value (with the lead printed on the leading side), idle villagers (amber at two or more per player), population (flashing when housed), and each banked resource with its per-minute rate beside it. Every value is a button that opens Statistics on that series; the clock pauses and plays.
+- **Focus slot**: one card at a time (production, research, economy, the last fight). <kbd>Alt+C</kbd> / <kbd>Alt+X</kbd> cycle it while the Dashboard is hidden; empty is a valid state.
+- **Event ticker**: key events only (age-ups, a town centre or castle lost, wonders, resignations), two lines, fading after about 8 seconds.
+- **Selection chip**: one line for the selection; press it for the full Selection panel.
+- **Match story timeline**: the army-value lead (above the centre line the left side leads), age-ups, fights sized by the resources lost, idle town centres and bookmarks on one time axis, with the playback buttons. Click to jump, drag across a span to open Investigate on it, arrow keys step 5 seconds.
+- **Review cards**: idle town centre time, housed time, idle villagers, worker efficiency, banked resources and eAPM, side against side, the worse side in amber.
+
+On a phone (any preset but Full) the HUD is the map, two Pulse rows, the Match story and a tab bar. The tabs open a bottom sheet with the bank, the Team board, the selection, and **More** (Customize, Statistics, replays, settings).
+
+## Customize
+
+The ▣ button by the minimap (or <kbd>Alt+V</kbd>, or <kbd>Esc</kbd> → **Customize**) opens a drawer with three levels; most people stop at the first.
+
+1. **Presets**: pick one.
+2. **Panels**: tick what you want to see. Each panel's toggle key is listed beside it.
+3. **Metrics**: tick the Pulse strip's metrics and the Team board's rows.
+
+Below that:
+
+- **Layout**: Edit layout, Reset layout, **Lock panels outside Edit layout** (nothing moves by accident while watching), **Hide dashboard columns the Team board shows**, the scene in use, and saved layouts (save under a name, load, delete, export to a file, import, and **Publish for OBS**).
+- **Share link**: a link that opens the same HUD for anyone (`#hud=caster`, or `#hud=c1.pu-fo-mm.age-vil-army` for a custom one), and the same for the OBS overlay page. A link applies to that visit; it becomes your own HUD only once you change something.
+- **Stream check**: lists panels whose text is below 18 px (values) or 14 px (labels) at 1080p, that sit outside the safe area, or that cover more than 15 % of the map.
+- **Reset HUD to defaults**.
 
 ## Moving and resizing panels
 
-Hover a panel and drag the ⠿ button in its toolbar to move it, or drag one of its corners to resize it. Panels snap to the window edges and to the edges of other panels, or 6 px beside them; hold <kbd>Shift</kbd> while dragging to place a panel freely. <kbd>Esc</kbd> during a drag puts the panel back. With the ⠿ button focused, the arrow keys move a panel 10 px at a time (1 px with <kbd>Shift</kbd>).
+Hover a panel: a small toolbar shows its name, ⠿ to move it, a button to collapse it to its top strip, and ✕ to hide it. Drag any edge or corner to resize it; the bottom-right corner has a visible grip. Panels snap to the window edges and to the edges of other panels, or 6 px beside them; hold <kbd>Shift</kbd> while dragging to place a panel freely. <kbd>Esc</kbd> during a drag puts the panel back. With the ⠿ button focused, the arrow keys move a panel 10 px at a time (1 px with <kbd>Shift</kbd>). Double-click ⠿ to put a panel back in its place.
 
-**Arrange panels** (<kbd>Alt+L</kbd>, or Panels menu → **Arrange**) outlines every panel so you can drag any of them by its body; <kbd>Esc</kbd> or **Done** ends it. Double-click a panel's ⠿ button to put it back in its place, or use **Reset layout** in the Panels menu for every panel.
+Positions are kept as an anchor (a corner or edge of the window) and fractions of the window, so a layout made on a large monitor lands in the same place in a 1080p OBS source.
 
-## Panels menu
+## Edit layout
 
-The ▣ button by the minimap (or <kbd>Alt+V</kbd>, or <kbd>Esc</kbd> → **Panels**) lists every HUD panel. From there you can show, hide or collapse each one, and there are two presets:
+<kbd>Alt+L</kbd> (or Customize → **Edit layout**) is a separate mode with a visible exit (<kbd>Esc</kbd> or **Done**):
 
-- **Clean**: scoreboard, selection, time controls and minimap.
-- **Everything**: every panel, none collapsed.
+- **The bar**: the scene shown while editing (Live, In-game, Fight, Break, Post-game), **Snap** (an 8 px grid as well as panel edges), **Safe area** (a title-safe frame to snap to), **Webcam zone** (a reserved rectangle panels are pushed out of), Undo (<kbd>Ctrl+Z</kbd>), Reset.
+- **The library** (left): every panel, six single metrics (army value, villagers, bank and rate, idle TC, kills / losses, eAPM), a chart of any series, the series score, and a text or image. Press a name to add it, or to select it when it is already on screen.
+- **The inspector** (right), for the selected panel: width, height, scale, opacity, the anchor, the scenes it shows in, its content, and the stream check.
 
-Each panel also has a small toolbar that appears when you hover it: ⠿ moves the panel, one button collapses it to its top strip, the other hides it. When you hide a panel, Vantage tells you how to bring it back.
+Every drag has a keyboard equivalent: <kbd>Tab</kbd> reaches a panel, the arrows move it, <kbd>Alt</kbd>+arrows resize it, <kbd>Delete</kbd> hides it. Both side panes fold away to reach what is under them.
 
-## Scoreboard and team overview
+**Scenes** tie a panel to parts of a broadcast. With no scene forced, Vantage follows the match: Fight while kills cluster, Post-game once it ends, Break with nothing open, In-game otherwise.
+
+When you hide a panel from its toolbar, Vantage tells you how to bring it back.
+
+## Scoreboard and Team board
 
 The **scoreboard** shows team and player names, the score, and the series score when a series is set up (see [Casting and OBS](Casting-and-OBS.md)). Hover the score for its parts: military, economy, technology and society.
 
 In team games and 1v1s, each side shows its team name and team score (Settings → Interface → *Team score*: total, average or off), with its players beneath as chips: civilisation emblem, name and score. Under the clock, a bar shows each side's share of the score, and the lead says by how much the leader is ahead. Team names are shortened: copies of one AI are named once with a count ("v0d10f ×2"), words both teams share are dropped ("Immortal v0d10f" vs "Immortal v0d9" reads "v0d10f" vs "v0d9"), and a team of different players shows two names and a count. Players who share a name with a teammate are labelled by civilisation. Hover a name for the full one. Alliances are listed only when they cross the lobby teams.
 
-In team games and 1v1s the **team overview** (<kbd>Alt+Shift+R</kbd>) is a team board with two views, switched in its header or with <kbd>Ctrl+Alt+R</kbd>:
+In team games and 1v1s the **Team board** (<kbd>Alt+Shift+R</kbd>) is a board with two views, switched in its header or with <kbd>Ctrl+Alt+R</kbd>:
 
 - **Teams**: one row per stat, comparing the two sides. Each side has its value and a bar, and the difference between them is in the leader's colour. Rows cover age, villagers, military, army value, idle villagers, resources banked with their workers, the **collection rate** (resources collected per minute over the last game minute), **resources collected** over the whole game, population, kills and losses. Fewer idle villagers and fewer losses count as ahead. Click a section heading to fold it.
 - **Players**: a table with a row per player, grouped by team with a Σ total row. The best value in each column is marked, and five or more idle villagers is red. Under each player is the progress to the next age.
 
-In free-for-all games the team overview has a row per player:
+In free-for-all games the Team board has a row per player:
 
 - the civilisation emblem. Hover it to see that civilisation's **tech tree**, with what the player has researched.
 - the player name. Click it to cycle the player's colour.

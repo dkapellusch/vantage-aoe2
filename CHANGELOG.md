@@ -8,6 +8,32 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Added
 
+- HUD presets: **Minimal** (<kbd>F6</kbd>), **Caster** (<kbd>F7</kbd>), **Review** (<kbd>F8</kbd>),
+  **Analyst** (<kbd>F9</kbd>) and **Full** (<kbd>Shift+F6</kbd>, the HUD as it was), with a hold-to-peek
+  key (<kbd>`</kbd>) that shows Full while it is down. Each preset keeps its own edits; Full is never
+  rewritten by another. A new viewer starts on Minimal when Vantage is embedded or hosted by a hub and
+  on Full in the desktop app; saved settings keep what they had.
+- The **Pulse strip**, a new panel beside the Scoreboard: one row per side with age, villagers,
+  military, army value (the lead on the leading side), idle villagers, population, and each banked
+  resource with its per-minute rate. Every value is a labelled button that opens Statistics.
+- The **Focus slot** (one card at a time: production, research, economy, the last fight), the
+  **Event ticker** (key events, two lines, fading), the **Selection chip**, the **Match story
+  timeline** (army lead, age-ups, fights sized by resources lost, idle town centres and bookmarks on
+  one axis, with the playback buttons; drag a span to investigate it) and **Review cards** (six
+  mistake metrics side against side).
+- **Customize** (<kbd>Alt+V</kbd>) replaces the Panels menu: presets, panels with their toggle keys,
+  Pulse metrics, Team board rows, saved layouts (save, load, export, import, publish for OBS), a
+  stream check, and a share link. The link (`#hud=caster`, `#hud=c1.pu-fo-mm.age-vil`) opens the same
+  HUD for anyone and drives the `?overlay=1` OBS page, with a scene per OBS source (`#hud=caster.fight`).
+- **Edit layout** (<kbd>Alt+L</kbd>): a separate mode with a library of panels and widgets (six single
+  metrics, a chart of any series, the series score, a text or image), an inspector (size, scale,
+  opacity, anchor, scenes, content, stream checks), a snap grid, a safe-area frame, a reserved webcam
+  zone and undo. Every drag has a keyboard equivalent.
+- A phone layout for every preset but Full: the map, two Pulse rows, the Match story and tabs that
+  open a bottom sheet (a right-hand drawer in landscape).
+- Toggle keys for the Dashboard (<kbd>Alt+B</kbd>), Event log (<kbd>Alt+E</kbd>), Selection panel
+  (<kbd>Alt+U</kbd>), Scoreboard or Pulse strip (<kbd>Alt+G</kbd>), Focus slot (<kbd>Alt+K</kbd>) and
+  Match story (<kbd>Alt+Y</kbd>).
 - The recordings list says who played each recording, on what map and (once it has been opened)
   for how long, instead of only its file name. The match is read from each recording's first
   snapshot by a low-priority helper process and cached per file, so the list appears at once and
@@ -51,6 +77,22 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Changed
 
+- **Statistics is a window**, not a page over the map: no dimming, a title bar that drags, resize
+  from every edge and corner, **Dock right** (<kbd>Ctrl+Alt+D</kbd>), a remembered rectangle, and a
+  chart that follows its size. Its own playback bar is gone (the main time controls are beside it);
+  it remains where Statistics fills the screen, on a phone.
+- Placed panels are stored as an anchor and fractions of the window, so a layout survives a resize
+  and an OBS source of another size. Pixel rectangles from older versions convert on first use.
+- Panels resize from all four edges as well as the corners, the bottom-right grip is visible, and
+  the hover toolbar names its panel.
+- One name per metric everywhere: Army value (was also "MIL VALUE" and "Military value"), Military,
+  Villagers, Idle villagers, Collected, Kills / Losses. The "Team overview" panel is the Team board.
+- The **Minimal UI** checkbox picks the Minimal preset (it wrote a setting nothing read).
+- Shortcuts work while a button has the focus (it keeps Tab, Enter, Space and plain arrows), and Esc
+  closes the top layer from wherever the focus is. With nothing selected, Tab moves the focus into
+  the HUD instead of doing nothing (hold-Tab still peeks at the selection owner's fog).
+- Selection panel: "Idle for" and "Raid idle" instead of "Idle" beside the clock and "Forced".
+  Bonus resources: a player with no bonus income is one line. Composition rows carry a colour bar.
 - `vantage serve` and the server take plugins (`cli.main(argv, plugin=...)`,
   `server.App(..., plugins=[...])`): code outside this package can add `serve` options, a
   session class and routes of its own.

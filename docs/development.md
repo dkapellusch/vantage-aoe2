@@ -33,6 +33,13 @@ node --test tests/*.test.mjs # the browser tests on their own
 - Live mode is tested against an in-process fake gRPC server. SLD, SMX and DDS decoding is tested with synthetic files. Windows-only code paths (registry, link handlers) are tested with fakes, so the suite also runs on Linux.
 - `tests/test_web.py` runs the DOM-free browser tests (`tests/*.test.mjs`) with Node's built-in test runner. It is skipped if `node` is not on your `PATH`. These tests cover playback timing, interpolation, the view cache, ground-cache invalidation, sprite readiness and GPU atlas packing.
 
+- `tests/test_hud_browser.py` drives the customizable HUD in headless Chromium (presets and their keys, the Customize drawer, the share link, the Statistics window, the layout editor, saved layouts, the phone layout, focus and text sizes). It needs [Playwright](https://playwright.dev/python/), which is not a dependency of Vantage, and is skipped without it:
+
+  ```sh
+  uv run --with playwright python -m playwright install chromium   # once
+  uv run --with playwright pytest tests/test_hud_browser.py
+  ```
+
 All tests must pass before a change is merged. CI runs them on Linux and Windows. Tests of
 Linux-only behaviour (Proton paths, the freedesktop link handler) pin `sys.platform` or are skipped on
 Windows, so the suite passes on both.

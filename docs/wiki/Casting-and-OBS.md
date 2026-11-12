@@ -66,7 +66,7 @@ Put pictures (PNG, JPEG, GIF, WebP or SVG) in the `images` folder of Vantage's d
 |---|---|
 | <kbd>Alt+O</kbd> | Hide the whole interface |
 | <kbd>Alt+Shift+O</kbd> | Keep the minimap while the interface is hidden |
-| <kbd>Alt+V</kbd> → **Clean** | Only the scoreboard, selection, time controls and minimap |
+| <kbd>F6</kbd> / <kbd>F7</kbd> | The Minimal or Caster HUD preset; hold <kbd>`</kbd> to peek at Full |
 | <kbd>Alt+A</kbd> | Autocast: let Vantage direct the camera |
 | <kbd>F11</kbd> | Full screen |
 
@@ -98,6 +98,30 @@ http://127.0.0.1:8740/?overlay=1
 ```
 
 This page draws the interface (scoreboard, panels, minimap) without the map, on a transparent background. Place it above a capture of the game itself.
+
+### The same HUD in OBS, by link
+
+The overlay page takes the HUD from its address, so it does not need a profile loaded by hand. In your own browser open **Customize** (<kbd>Alt+V</kbd>) → **Share link** and copy the second link into the Browser source:
+
+```
+http://127.0.0.1:8740/?overlay=1#hud=caster
+http://127.0.0.1:8740/?overlay=1#hud=c1.pu-fo-et-mm.age-vil-mil-army-idle-bank-rate
+```
+
+The first is a stock preset, the second a HUD you ticked together (panels, then Pulse strip metrics, as short codes). Positions do not travel in the link. For those, save the layout under a name in Customize → **Layout**, press **Publish for OBS**, and add its name:
+
+```
+http://127.0.0.1:8740/?overlay=1#hud=caster&layout=Spring%20Cup
+```
+
+**A HUD per OBS scene.** In **Edit layout** (<kbd>Alt+L</kbd>) each panel has **Show in scenes**: In-game, Fight, Break, Post-game. Give each OBS scene its own Browser source and name the scene after the preset:
+
+```
+http://127.0.0.1:8740/?overlay=1#hud=caster.fight
+http://127.0.0.1:8740/?overlay=1#hud=caster.post
+```
+
+Without a scene in the link the page follows the match by itself (Fight while kills cluster, Post-game once it ends). On the overlay page nothing can be dragged or resized, no hover toolbars appear, and the first-run hint is never shown.
 
 ### Each browser has its own settings and clock
 

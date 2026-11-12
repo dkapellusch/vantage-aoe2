@@ -74,7 +74,13 @@ The **Name** column is the action's name, which you use when rebinding keys as J
 | <kbd>Alt+Shift+P</kbd> | Production & composition | `toggleProduction` |
 | <kbd>Alt+R</kbd> | Resources left | `toggleResourcesLeft` |
 | <kbd>Ctrl+Alt+R</kbd> | Team board: switch Teams / Players | `togglePlayerResources` |
-| <kbd>Alt+Shift+R</kbd> | Show/hide team overview | `toggleOverview` |
+| <kbd>Alt+Shift+R</kbd> | Show/hide Team board | `toggleOverview` |
+| <kbd>Alt+B</kbd> | Show/hide Dashboard | `toggleDashboard` |
+| <kbd>Alt+E</kbd> | Show/hide Event log | `toggleEvents` |
+| <kbd>Alt+U</kbd> | Show/hide Selection panel | `toggleSelectionPanel` |
+| <kbd>Alt+G</kbd> | Show/hide Scoreboard (the Pulse strip in presets that use it) | `toggleScoreboard` |
+| <kbd>Alt+K</kbd> | Show/hide Focus slot | `toggleFocusSlot` |
+| <kbd>Alt+Y</kbd> | Show/hide Match story timeline | `toggleStory` |
 | <kbd>PageUp</kbd> | Events: page up | `notificationsPageUp` |
 | <kbd>PageDown</kbd> | Events: page down | `notificationsPageDown` |
 | <kbd>Shift+PageUp</kbd> | Events: oldest | `notificationsTopPage` |
@@ -84,8 +90,22 @@ The **Name** column is the action's name, which you use when rebinding keys as J
 | <kbd>Shift+F1</kbd> | Documentation | `openDocs` |
 | <kbd>Escape</kbd> | Close the top layer, or open the menu | `escape` |
 | <kbd>F1</kbd> | Tutorial | `showTutorial` |
-| <kbd>Alt+V</kbd> | Panels: show, hide and collapse HUD panels | `togglePanelsMenu` |
-| <kbd>Alt+L</kbd> | Arrange panels: drag any panel to move it | `arrangePanels` |
+
+### HUD presets and layout
+
+| Key | Action | Name |
+|---|---|---|
+| <kbd>F6</kbd> | HUD preset: Minimal | `hudPresetMinimal` |
+| <kbd>F7</kbd> | HUD preset: Caster | `hudPresetCaster` |
+| <kbd>F8</kbd> | HUD preset: Review | `hudPresetReview` |
+| <kbd>F9</kbd> | HUD preset: Analyst | `hudPresetAnalyst` |
+| <kbd>Shift+F6</kbd> | HUD preset: Full | `hudPresetFull` |
+| <kbd>`</kbd> (hold) | Peek at the Full HUD | `peekFullHud` |
+| <kbd>Alt+V</kbd> | Customize: presets, panels and metrics | `togglePanelsMenu` |
+| <kbd>Alt+L</kbd> | Edit layout: move, resize and place panels | `arrangePanels` |
+| <kbd>Ctrl+Alt+D</kbd> | Statistics window: dock right / float | `toggleStatsDock` |
+
+<kbd>F6</kbd>–<kbd>F9</kbd> are free in browsers and in the game. Full sits on <kbd>Shift+F6</kbd> because <kbd>F10</kbd> shows the frame rate. If a Stream Deck or OBS already uses these keys, rebind them in Settings → Hotkeys. <kbd>Alt+C</kbd> / <kbd>Alt+X</kbd> cycle the Focus slot's card while the Dashboard is hidden.
 
 ### Display
 

@@ -166,7 +166,17 @@ The game install is found from `$VANTAGE_GAME_DIR`, the folder the running game 
 | `view-worker.js` | Fetching and parsing keyframe views off the main thread |
 | `panels.js` | HUD panels: scoreboard, overview, techs, production, dashboard, events, selection panel, resources left, time bar |
 | `overlays.js` | Full-screen windows: home screen and replay browser, statistics, settings, quick reference, end of game |
-| `layout.js` | The Panels menu: hiding and collapsing HUD panels |
+| `hud-model.js` | The customizable HUD's rules, DOM-free: presets and per-preset edits, the `#hud=` share hash, the first preset for a viewer, anchors and fractions for placed panels, saved layouts, scenes, stream-safe checks |
+| `layout.js` | Applies the HUD model to the page: which panels show (preset, scene, the old flags in Full), hold-to-peek, the hover toolbar, loading the newer panels on first use |
+| `panel-resize.js` | Moving and resizing panels: snapping, edge and corner handles, anchored rectangles, the layout editor's grid, safe frame and reserved zone |
+| `metrics.js` | One name per metric: label, short label, series key and value for every panel that shows it |
+| `pulse.js`, `pulse-model.js` | The Pulse strip and what each of its cells shows and says |
+| `focus-slot.js`, `fights.js` | The Focus slot, Event ticker and Selection chip; fights and key events found in the event log |
+| `story.js`, `story-model.js` | The Match story timeline and Review cards; their series helpers |
+| `widgets.js`, `compare-table.js` | Single-metric, chart, series-score and text widgets; side-against-side tables |
+| `customize.js` | The Customize drawer: presets, panels, metrics, saved layouts, share link (loaded on first use) |
+| `layout-editor.js`, `stream-check.js` | Edit layout: library, inspector, scenes, undo; the stream-safe checks on a placed panel (loaded on first use) |
+| `phone.js` | The phone layout: tabs and a bottom sheet |
 | `hotkeys.js` | The default key table, rebinding and conflict detection |
 | `audio.js` | Game sound playback as playback passes events |
 | `games.js` | Per-game rules for Age of Empires II and Return of Rome |
