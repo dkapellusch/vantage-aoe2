@@ -102,3 +102,41 @@
 .review-investigate > .review-investigation { margin: 8px 0 4px; }
 .review-details > summary { font-size: 12px; font-weight: 600; letter-spacing: .02em; padding: 2px 0; }
 .review-details > summary:hover { color: var(--text); }
+
+/* Team Overview keeps all eleven metrics in their original order. One player
+   list replaces the mirrored 22-column table; paired values share a column. */
+#dashboard[data-overview-fit] { container-type: inline-size; container-name: dashboard; }
+.dash-card-label { display: none; }
+#dashboard[data-overview-fit] #dash-table { table-layout: fixed; font-size: 11px; }
+#dashboard[data-overview-fit] #dash-table th,
+#dashboard[data-overview-fit] #dash-table td { padding-left: 2px; padding-right: 2px; white-space: normal; overflow-wrap: anywhere; }
+#dashboard[data-overview-fit] #dash-table th { height: 40px; font-size: 9px; letter-spacing: 0; line-height: 1.15; }
+#dashboard[data-overview-fit] #dash-table th:first-child { width: 15%; text-align: left; }
+#dashboard[data-overview-fit] #dash-table th[data-dash-column="milValue"],
+#dashboard[data-overview-fit] #dash-table th[data-dash-column="colT"] { width: 10%; }
+#dashboard[data-overview-fit] #dash-table th[data-dash-column="idleTcHoused"] { width: 12%; }
+#dashboard[data-overview-fit] #dash-table th[data-dash-column="pop"],
+#dashboard[data-overview-fit] #dash-table th[data-dash-column="kd"],
+#dashboard[data-overview-fit] #dash-table th[data-dash-column="tcCastle"] { width: 7%; }
+#dashboard[data-overview-fit] #dash-table .pname { white-space: nowrap; padding-left: 4px; text-align: left; }
+#dashboard[data-overview-fit] .review-dash-value { padding: 0 !important; white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+#dashboard[data-overview-fit] .team-start td { border-top: 1px solid var(--line); }
+@media (max-width: 650px) {
+  #dashboard[data-overview-fit] {
+    height: min(340px, 50vh, var(--overview-phone-height, 340px));
+    bottom: var(--overview-phone-bottom, 8px);
+    background: var(--panel-solid); z-index: 7;
+  }
+}
+@container dashboard (max-width: 390px) {
+  #dashboard[data-overview-fit] #dash-table,
+  #dashboard[data-overview-fit] #dash-table tbody { display: block; }
+  #dashboard[data-overview-fit] #dash-table thead { display: none; }
+  #dashboard[data-overview-fit] #dash-table tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 8px; padding: 6px 2px 10px; border-bottom: 1px solid var(--line); }
+  #dashboard[data-overview-fit] #dash-table td { display: flex; flex-direction: column; align-items: flex-start; height: auto; min-width: 0; padding: 2px; text-align: left; background: none; }
+  #dashboard[data-overview-fit] #dash-table td.pname { grid-column: 1 / -1; display: block; max-width: none; font-size: 12px; padding-left: 6px; }
+  #dashboard[data-overview-fit] #dash-table .team-start td { border-top: 0; }
+  #dashboard[data-overview-fit] .dash-card-label { display: block; font: 9px var(--font); color: var(--muted); margin-bottom: 3px; }
+  #dashboard[data-overview-fit] .dash-sub { display: inline; margin-left: 3px; }
+  #dashboard[data-overview-fit] .dash-sub::before { content: '/ '; }
+}

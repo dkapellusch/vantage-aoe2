@@ -1475,6 +1475,11 @@ export function renderDashboard() {
   // Longer tables scroll inside it without moving the tabs.
   el.style.setProperty('--dash-rows', Math.min(4, players().length));
   const { page: base, index } = selectedPage(layout, pages);
+  // Eleven columns per side cannot fit the caster panel. Keep this page in
+  // player order instead; its compact table becomes labelled cards when narrow.
+  const fitOverview = layout === 'oppositional' && base.key === 'overviewEcoLosses' && !base.custom;
+  if (fitOverview) el.dataset.overviewFit = 'true';
+  else delete el.dataset.overviewFit;
   // Older per-page column edits still apply to built-in pages.
   const legacy = base.custom ? null : (settings.dashboardColumns || {})[base.key];
   // The truce column only appears in games that had a truce (D3 mode).
@@ -1489,19 +1494,26 @@ export function renderDashboard() {
   const th = (c) => {
     const m = COL[c];
     const icons = headerIcons(c);
-    return `<th ${tip(t(m.h), t(m.tip || ''))}>${icons || t(m.abbr || m.h)}</th>`;
+    const short = fitOverview && { colT: 'Coll.', ecoKills: 'Eco K', ecoDeaths: 'Eco D', tcCastle: 'TC/C' }[c];
+    const label = short ? t(short) : icons || t(m.abbr || m.h);
+    return `<th data-dash-column="${c}" scope="col" ${tip(t(m.h), t(m.tip || ''))}>${label}</th>`;
   };
-  const nameTd = (pid, right) => `<td class="pname${right ? ' r' : ''}" style="border-color:${playerMarkColor(pid)}">${esc(playerName(pid))}</td>`;
+  const nameTd = (pid, right) => `<td class="pname${right ? ' r' : ''}" style="border-color:${playerMarkColor(pid)}" ${tip(playerName(pid))}>${esc(playerName(pid))}</td>`;
   const two = isTwoTeamLayout() && teams().length === 2;
   const combine = layout === 'nonOppositional';
   const td = (c, s, pid) => {
-    const value = cellHtml(c, s, pid, combine && !cols.includes(COMBINED[c]));
-    return `<td>${DASH_HISTORY[c] || DASH_SELECTIONS.has(c) ? `<button class="review-dash-value" data-dash-metric="${c}" data-pid="${pid}" ${tip(t(COL[c].h), t('Inspect'))}>${value}</button>` : value}</td>`;
+    let value = cellHtml(c, s, pid, combine && !cols.includes(COMBINED[c]));
+    if (fitOverview && ['pop', 'kd', 'tcCastle'].includes(c)) {
+      const parts = value.split(/\s*\/\s*/);
+      value = `${parts[0]}<small class="dash-sub">${parts[1]}</small>`;
+    }
+    const label = fitOverview ? `<span class="dash-card-label">${esc(t(COL[c].h))}</span>` : '';
+    return `<td data-dash-column="${c}">${label}${DASH_HISTORY[c] || DASH_SELECTIONS.has(c) ? `<button class="review-dash-value" data-dash-metric="${c}" data-pid="${pid}" ${tip(t(COL[c].h), t('Inspect'))}>${value}</button>` : value}</td>`;
   };
   // Team games mirror by default (unless every column is a stockpile one): left
   // team, a divider, then the right team's columns reversed.
   let mirror = false;
-  if (two && layout === 'oppositional' && !base.paired) {
+  if (two && layout === 'oppositional' && !base.paired && !fitOverview) {
     const m = base.custom ? base.mirror : (settings.dashboardMirror || {})[base.key];
     mirror = m == null ? defaultMirror(cols) : !!m;
   }
@@ -1536,10 +1548,11 @@ export function renderDashboard() {
     const body = order.map((pid, i) => {
       const s = playerStats(pid);
       if (!s) return '';
-      const cls = [isDead(pid) ? 'dead' : '', two && base.paired && i % 2 === 1 ? 'pair-end' : ''].join(' ').trim();
+      const cls = [isDead(pid) ? 'dead' : '', two && base.paired && i % 2 === 1 ? 'pair-end' : '',
+        fitOverview && i > 0 && teamOf(pid)?.key !== teamOf(order[i - 1])?.key ? 'team-start' : ''].join(' ').trim();
       return `<tr data-ui-key="player-${pid}" class="${cls}">${nameTd(pid)}${cols.map((c) => td(c, s, pid)).join('')}</tr>`;
     });
-    html = head + body.join('');
+    html = fitOverview ? `<thead>${head}</thead><tbody>${body.join('')}</tbody>` : head + body.join('');
   }
   const table = $('dash-table');
   if (table._html !== html) { table._html = html; patchHtml(table, html); }

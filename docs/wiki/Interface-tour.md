@@ -92,6 +92,12 @@ the removed team page open the surviving Overview. The team title uses the
 existing translated **Overview** key in every language; FFA still uses its
 **Overview & eco losses** label.
 
+Team Overview uses a single player list, grouped by team, so all eleven columns
+fit the caster panel. Population/cap, kills/deaths and town centres/castles stack
+their two values in the same column. **Coll.** means total resources collected;
+hover the heading for its full name. Narrow panels show labelled player cards
+with the same metrics in the same order; scroll vertically for more players.
+
 The columns cover stockpiles, workers per resource, idle workers and idle town-centre time, housed time, worker efficiency, unit counts, army value and peak, kills and deaths, value destroyed, relics and relic gold, trade, tribute, market, conversions, resources collected, and APM (total and effective, split into economy and military). In **Settings → Dashboard pages** you can add, remove, reorder and edit the pages for 1v1, team games and FFA. *Mini dashboard* gives a compact version.
 
 ## Event log

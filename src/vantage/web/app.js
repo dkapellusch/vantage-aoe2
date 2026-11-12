@@ -850,7 +850,17 @@ function placeDashboard() {
   const shown = (el) => el && !el.classList.contains('hidden') && !el.classList.contains('panel-off') && el.getClientRects().length;
   const tb = $('timebar');
   let left;
-  if (document.body.dataset.hudLayout === 'caster') {
+  if (d.dataset.overviewFit && vw < 650) {
+    // On a phone there is no band between the board and the minimap. The team
+    // Overview uses cards across the viewport instead of landing offscreen.
+    d.style.maxWidth = `${vw - 16}px`;
+    left = 8;
+    const floor = Math.min(window.innerHeight - 8,
+      ...[m, tb].filter(shown).map((p) => p.getBoundingClientRect().top));
+    const ceiling = shown($('scoreboard')) ? $('scoreboard').getBoundingClientRect().bottom + 8 : 8;
+    d.style.setProperty('--overview-phone-bottom', `${window.innerHeight - floor + 8}px`);
+    d.style.setProperty('--overview-phone-height', `${Math.max(120, floor - ceiling - 8)}px`);
+  } else if (document.body.dataset.hudLayout === 'caster') {
     // Between the panels stacked bottom left and the minimap bottom right.
     const band = window.innerHeight - 8 - d.offsetHeight;
     let lo = 8, hi = vw - 8;

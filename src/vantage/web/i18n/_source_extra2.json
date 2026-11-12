@@ -1210,5 +1210,9 @@
  "Live games and replays go through the running game, which accepts only a spectator app holding its client certificate. Vantage cannot ship it: the home screen says which files are missing and where they go, and the Live-games page of the Vantage wiki has the details. Recordings (.vrec) play without them.",
  "Go to the next building",
  "Select every building of a type",
- "Control groups"
+ "Control groups",
+ "Coll.",
+ "Eco K",
+ "Eco D",
+ "TC/C"
 ]

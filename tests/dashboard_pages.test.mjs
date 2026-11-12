@@ -26,7 +26,7 @@ test('Overview and Collected already have translations in every shipped locale',
   const dir = new URL('../src/vantage/web/i18n/', import.meta.url);
   for (const name of readdirSync(dir).filter(n => !n.startsWith('_') && n.endsWith('.json'))) {
     const dict = JSON.parse(readFileSync(new URL(name, dir), 'utf8'));
-    for (const key of ['Overview', 'Collected', 'Overview & eco losses']) assert.ok(dict[key], `${name}: ${key}`);
+    for (const key of ['Overview', 'Collected', 'Coll.', 'Eco K', 'Eco D', 'TC/C', 'Overview & eco losses']) assert.ok(dict[key], `${name}: ${key}`);
   }
 });
 
