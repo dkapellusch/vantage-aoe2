@@ -1767,13 +1767,49 @@ function chunkCanvas(cx, cy, gpu = false) {
   const t0 = performance.now();
   try { return buildChunk(cx, cy, gpu); } finally { drawTimes.chunks += performance.now() - t0; }
 }
+// The cache holds at least what one picture needs (chunkLimit, set by each
+// paint) and drops the chunk drawn longest ago. A fixed 96 was fewer than a
+// zoomed-out view of a large map uses: the ground then never completed, and
+// was repainted, with 64 chunks rebuilt, four times a second for as long as
+// the camera stayed there.
+let chunkLimit = 96;
 function keepChunk(key, entry) {
-  if (chunkCache.size > 96) {
+  if (chunkCache.size > chunkLimit) {
     const [old, v] = chunkCache.entries().next().value;
     chunkCache.delete(old);
     if (v.canvas && v.canvas.composed) TG.dropChunks([old]);
   }
   chunkCache.set(key, entry);
+}
+// The chunks of the picture being painted, in drawing order: those of the tile
+// range that reach into the picture. The range is the picture's bounding box in
+// map space, a square standing on its corner around it: about half its chunks
+// lie wholly outside the picture, and were built and drawn all the same.
+function chunksInView([minX, maxX, minY, maxY]) {
+  const z = S.camera.zoom;
+  const [left, top, right, bottom] = groundClip || [0, 0, viewSize.w, viewSize.h];
+  // The ground stands up to the map's highest elevation above its flat position.
+  if (S.map._maxElev == null) S.map._maxElev = (S.map._elev || []).reduce((a, b) => Math.max(a, b), 0);
+  const lift = (S.map._maxElev + 1) * TH / 2 * z;
+  const out = [];
+  for (let cy = Math.floor(minY / CHUNK); cy <= Math.floor(maxY / CHUNK); cy++) {
+    for (let cx = Math.floor(minX / CHUNK); cx <= Math.floor(maxX / CHUNK); cx++) {
+      // One tile wider than the chunk on every side.
+      const x0 = cx * CHUNK - 1, y0 = cy * CHUNK - 1, x1 = x0 + CHUNK + 2, y1 = y0 + CHUNK + 2;
+      if (toScreen(x1, y1)[0] < left || toScreen(x0, y0)[0] > right) continue;
+      if (toScreen(x0, y1)[1] < top || toScreen(x1, y0)[1] - lift > bottom) continue;
+      out.push(cx, cy);
+    }
+  }
+  // A whole picture sets the limit (a patch of it draws only a few chunks).
+  if (!groundClip) chunkLimit = Math.max(96, out.length / 2 + 32);
+  return out;
+}
+// A cached chunk about to be drawn: the most recently used is dropped last.
+function cachedChunk(key) {
+  const c = chunkCache.get(key);
+  if (c) { chunkCache.delete(key); chunkCache.set(key, c); }
+  return c;
 }
 // One byte per indicator texel: 255 where the tile (clamped to the map) is `t`.
 function indicator(tiles, x0, y0, pad, t) {
@@ -1938,16 +1974,16 @@ function drawTexturedTerrain() {
   ctx.setTransform(dpr * TW / 2 * z * k, -dpr * TH / 2 * z * k, dpr * TW / 2 * z * k, dpr * TH / 2 * z * k, dpr * ox, dpr * oy);
   ctx.imageSmoothingEnabled = filt('terrain');
   let built = 0;
-  for (let cy = Math.floor(minY / CHUNK); cy <= Math.floor(maxY / CHUNK); cy++) {
-    for (let cx = Math.floor(minX / CHUNK); cx <= Math.floor(maxX / CHUNK); cx++) {
-      const cached = chunkCache.get(`${cx},${cy}`);
-      if (!cached && built >= 3) { groundIncomplete = true; continue; } // spread chunk building over frames
-      if (!cached) built++;
-      const c = chunkCanvas(cx, cy);
-      if (!c) { groundIncomplete = true; continue; }
-      // A hair of overlap hides seams between chunks.
-      ctx.drawImage(c, cx * CHUNK * CHUNK_PX - 0.5, cy * CHUNK * CHUNK_PX - 0.5, c.width + 1, c.height + 1);
-    }
+  const chunks = chunksInView([minX, maxX, minY, maxY]);
+  for (let i = 0; i < chunks.length; i += 2) {
+    const cx = chunks[i], cy = chunks[i + 1];
+    const cached = cachedChunk(`${cx},${cy}`);
+    if (!cached && built >= 3) { groundIncomplete = true; groundMissing = 'terrain being built'; continue; } // spread chunk building over frames
+    if (!cached) built++;
+    const c = chunkCanvas(cx, cy);
+    if (!c) { groundIncomplete = true; groundMissing = 'terrain textures'; continue; }
+    // A hair of overlap hides seams between chunks.
+    ctx.drawImage(c, cx * CHUNK * CHUNK_PX - 0.5, cy * CHUNK * CHUNK_PX - 0.5, c.width + 1, c.height + 1);
   }
   ctx.restore();
 }
@@ -2221,15 +2257,15 @@ function drawTexturedTerrainGL(view, [minX, maxX, minY, maxY]) {
   // view needs at once (on a canvas, three per frame and one stale per repaint).
   const gpu = settings.gpuSprites !== false && TG.canCompose();
   if (gpu) staleBudget = 64;
-  for (let cy = Math.floor(minY / CHUNK); cy <= Math.floor(maxY / CHUNK); cy++) {
-    for (let cx = Math.floor(minX / CHUNK); cx <= Math.floor(maxX / CHUNK); cx++) {
-      const cached = chunkCache.get(`${cx},${cy}`);
-      if (!cached && built >= (gpu ? 64 : 3)) { groundIncomplete = true; continue; } // spread chunk building over frames
-      if (!cached) built++;
-      const c = chunkCanvas(cx, cy, gpu);
-      if (!c) { groundIncomplete = true; continue; }
-      TG.drawChunk(cx, cy, CHUNK, c, S.camera, view, linear);
-    }
+  const chunks = chunksInView([minX, maxX, minY, maxY]);
+  for (let i = 0; i < chunks.length; i += 2) {
+    const cx = chunks[i], cy = chunks[i + 1];
+    const cached = cachedChunk(`${cx},${cy}`);
+    if (!cached && built >= (gpu ? 64 : 3)) { groundIncomplete = true; groundMissing = 'terrain being built'; continue; } // spread chunk building over frames
+    if (!cached) built++;
+    const c = chunkCanvas(cx, cy, gpu);
+    if (!c) { groundIncomplete = true; groundMissing = 'terrain textures'; continue; }
+    TG.drawChunk(cx, cy, CHUNK, c, S.camera, view, linear);
   }
 }
 
