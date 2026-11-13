@@ -201,3 +201,50 @@ test('the reserved zone pushes a panel out by the shortest way; the grid rounds 
   assert.deepEqual(M.avoidZone({ left: 1500, top: 650, width: 200, height: 100 }, zone), { left: 1500, top: 600, width: 200, height: 100 });
   assert.deepEqual(M.snapToGrid({ left: 13, top: 20, width: 101, height: 55 }), { left: 16, top: 24, width: 101, height: 55 });
 });
+
+test('a natural-size panel holds on to a corner, so a taller or shorter content moves one edge only', () => {
+  const vp = { width: 1920, height: 1080 };
+  // Dragged to the middle of the screen: not the centre anchor (both edges would move).
+  const dragged = { left: 559, top: 284, width: 320, height: 349, moved: true, auto: true };
+  const a = M.toAnchored(dragged, vp);
+  assert.equal(a.anchor, 'tl');
+  for (const height of [349, 506, 264]) {
+    const r = M.fromAnchored(a, vp, { width: 320, height });
+    assert.equal(r.top, 284); assert.equal(r.left, 559);
+  }
+  // In the lower right it holds its bottom-right corner instead.
+  const low = M.toAnchored({ left: 1164, top: 589, width: 320, height: 349, moved: true, auto: true }, vp);
+  assert.equal(low.anchor, 'br');
+  for (const height of [349, 506]) { const r = M.fromAnchored(low, vp, { width: 320, height }); assert.equal(r.top + r.height, 938); }
+  assert.equal(M.cornerAnchor({ left: 1700, top: 100, width: 100, height: 100 }, vp), 'tr');
+  assert.equal(M.cornerAnchor({ left: 100, top: 900, width: 100, height: 100 }, vp), 'bl');
+  // A panel with a size of its own still takes the nearest of the nine anchors.
+  assert.equal(M.toAnchored({ ...dragged, auto: false }, vp).anchor, 'c');
+});
+
+test('natural-size panels saved on a centre or edge anchor move to a corner, where they were dragged to', () => {
+  const vp = { width: 1920, height: 1080 };
+  const old = { unitpanel: { anchor: 'c', x: -0.12552, y: -0.07556, w: 0.16667, h: 0.32335, moved: true, auto: true },
+    focus: { anchor: 'bl', x: 0.1, y: 0.1, w: 0.2, h: 0.1, moved: true, auto: true },
+    events: { anchor: 'c', x: 0, y: 0, w: 0.2, h: 0.3, moved: true },
+    pulse: { anchor: 't', x: 0, y: 0.05, w: 0.5, h: 0.06, moved: true, auto: true, fixed: true } };
+  const next = M.reanchorAutoPanels(old, vp);
+  assert.equal(next.unitpanel.anchor, 'tl');
+  assert.deepEqual(M.fromAnchored(next.unitpanel, vp), M.fromAnchored(old.unitpanel, vp), 'the same rectangle on screen');
+  assert.equal(next.focus, old.focus); assert.equal(next.events, old.events, 'a sized panel keeps its anchor');
+  assert.equal(next.pulse, old.pulse, 'an anchor chosen by hand stays');
+  assert.deepEqual(M.reanchorAutoPanels(next, vp), next, 'idempotent');
+});
+
+test('the Selection panel memory is normalised and travels with a saved layout', () => {
+  assert.deepEqual(M.normalizeSelectionPanel(undefined), { open: {}, upgrades: null, scope: 'life', expanded: false });
+  assert.deepEqual(M.normalizeSelectionPanel({ open: { details: true, junk: 'yes', 'group-units': false }, upgrades: true, scope: 'fight', expanded: 1 }),
+    { open: { details: true, 'group-units': false }, upgrades: true, scope: 'life', expanded: false });
+  assert.deepEqual(M.normalizeSelectionPanel({ scope: 'minute', expanded: true, open: [] }), { open: {}, upgrades: null, scope: 'minute', expanded: true });
+  const settings = { hud: M.defaultHud(), selectionPanel: { open: { details: true }, upgrades: true, scope: 'minute', expanded: false }, panelSizes: { unitpanel: { anchor: 'tl', x: 0.3, y: 0.3, w: 0.2, h: 0.4, moved: true } } };
+  const snap = M.snapshotLayout(settings, 'Review');
+  assert.deepEqual(snap.selectionPanel, settings.selectionPanel);
+  const patch = M.layoutPatch(snap, { hud: M.defaultHud() });
+  assert.deepEqual(patch.selectionPanel.open, { details: true });
+  assert.equal(patch.panelSizes.unitpanel.anchor, 'tl');
+});

@@ -261,9 +261,21 @@ function extras(rect) {
   return out;
 }
 
-/** A pixel rectangle as an anchored one (anchor: keep this anchor; default: the nearest). */
+/**
+ * The corner a natural-size panel holds on to: the half of the window its
+ * centre is in, never the middle. Its content changes height from one moment
+ * (or one selection) to the next; anchored to a corner, one edge stays where
+ * the viewer put it and the panel grows away from it. Anchored to the centre,
+ * both edges would move.
+ */
+export function cornerAnchor(rect, viewport) {
+  const cx = (rect.left + rect.width / 2) / viewport.width, cy = (rect.top + rect.height / 2) / viewport.height;
+  return `${cy <= 0.5 ? 't' : 'b'}${cx <= 0.5 ? 'l' : 'r'}`;
+}
+
+/** A pixel rectangle as an anchored one (anchor: keep this anchor; default: the nearest, a corner for a natural-size panel). */
 export function toAnchored(rect, viewport, anchor = null) {
-  const a = ANCHORS.includes(anchor) ? anchor : nearestAnchor(rect, viewport);
+  const a = ANCHORS.includes(anchor) ? anchor : rect.auto ? cornerAnchor(rect, viewport) : nearestAnchor(rect, viewport);
   const W = viewport.width || 1, H = viewport.height || 1;
   const right = W - rect.left - rect.width, bottom = H - rect.top - rect.height;
   const x = a.includes('l') ? rect.left : a.includes('r') ? right : rect.left + rect.width / 2 - W / 2;
@@ -283,6 +295,20 @@ export function fromAnchored(rect, viewport, size = null) {
   return { left: Math.round(left), top: Math.round(top), width: Math.round(width), height: Math.round(height), ...extras(rect) };
 }
 
+/**
+ * Natural-size panels saved on an edge or centre anchor (before they were
+ * always corner-anchored) move to the corner anchor, at the place they were
+ * dragged to. One whose anchor was chosen by hand keeps it.
+ */
+export function reanchorAutoPanels(sizes, viewport) {
+  const out = {};
+  for (const [id, rect] of Object.entries(sizes || {})) {
+    const corner = isAnchored(rect) && rect.anchor.length === 2;
+    out[id] = isAnchored(rect) && rect.auto && !rect.fixed && !corner ? toAnchored(fromAnchored(rect, viewport), viewport) : rect;
+  }
+  return out;
+}
+
 /** Every saved rectangle in schema v2 (pixel ones converted against this window). */
 export function migratePanelSizes(sizes, viewport) {
   const out = {};
@@ -294,11 +320,28 @@ export function migratePanelSizes(sizes, viewport) {
   return out;
 }
 
+// -- the Selection panel's memory (selection-memory.js) ------------------------------------------------
+
+export const SELECTION_DEFAULTS = { open: {}, upgrades: null, scope: 'life', expanded: false };
+
+/** A stored selectionPanel object made safe (unknown shapes dropped). */
+export function normalizeSelectionPanel(raw) {
+  const out = { ...SELECTION_DEFAULTS, open: {} };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  if (raw.open && typeof raw.open === 'object' && !Array.isArray(raw.open)) {
+    for (const [key, value] of Object.entries(raw.open)) if (typeof value === 'boolean' && key.length <= 40) out.open[key] = value;
+  }
+  if (typeof raw.upgrades === 'boolean') out.upgrades = raw.upgrades;
+  if (raw.scope === 'minute') out.scope = 'minute';
+  if (raw.expanded === true) out.expanded = true;
+  return out;
+}
+
 // -- saved layouts ----------------------------------------------------------------------------------
 
 /** The settings keys that make up a layout (what a saved layout or a profile's layout carries). */
 export const LAYOUT_KEYS = ['hud', 'panelSizes', 'panelOrder', 'hudLayout', 'hiddenPanels', 'collapsedPanels',
-  'showProduction', 'showDashboard', 'showEvents', 'showStaticTechs', 'disableScoreboard'];
+  'showProduction', 'showDashboard', 'showEvents', 'showStaticTechs', 'disableScoreboard', 'selectionPanel'];
 
 /** A named layout: the layout keys of the settings, without the list of saved layouts itself. */
 export function snapshotLayout(settings, name = '') {

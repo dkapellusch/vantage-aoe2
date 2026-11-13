@@ -1,6 +1,6 @@
 import { settings, saveSettings } from './state.js';
 import { t } from './i18n.js';
-import { isAnchored, toAnchored, fromAnchored, migratePanelSizes, snapToGrid, avoidZone, safeFrame } from './hud-model.js';
+import { isAnchored, toAnchored, fromAnchored, migratePanelSizes, reanchorAutoPanels, snapToGrid, avoidZone, safeFrame } from './hud-model.js';
 
 // HUD panel rectangles the user set: resized from a corner handle, or moved by
 // the ⠿ grip in the hover toolbar (layout.js) or anywhere on a panel in arrange
@@ -188,6 +188,8 @@ export function applyPanelSizes() {
     migrated = true;
     // Schema v2: pixel rectangles from older builds become anchors and fractions (saved with the next change).
     if (Object.values(settings.panelSizes || {}).some((r) => r && !isAnchored(r))) settings.panelSizes = migratePanelSizes(settings.panelSizes, viewport());
+    // A natural-size panel holds on to a corner, so its content changing height (another selection) moves one edge only.
+    if (Object.values(settings.panelSizes || {}).some((r) => r && r.auto && !r.fixed && String(r.anchor).length !== 2)) settings.panelSizes = reanchorAutoPanels(settings.panelSizes, viewport());
   }
   for (const [id, rect] of Object.entries(settings.panelSizes || {})) {
     const el = document.getElementById(id);
