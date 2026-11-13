@@ -1673,5 +1673,15 @@
  "None researched yet": "Ninguna investigada aún",
  "+{n} more": "+{n} más",
  "Hide {n} upgrades": "Ocultar {n} mejoras",
- "Research progress": "Progreso de investigación"
+ "Research progress": "Progreso de investigación",
+ "Two-finger scrolling": "Desplazamiento con dos dedos",
+ "Moves the map on a trackpad, zooms with a mouse wheel": "Mueve el mapa en un trackpad, hace zoom con la rueda del ratón",
+ "Always moves the map": "Siempre mueve el mapa",
+ "Always zooms": "Siempre hace zoom",
+ "A pinch on a trackpad always zooms": "Pellizcar en un trackpad siempre hace zoom",
+ "Map resolution": "Resolución del mapa",
+ "As the display (sharpest)": "La de la pantalla (más nítida)",
+ "Balanced (1.5x on a high-density display)": "Equilibrada (1,5x en pantallas de alta densidad)",
+ "Fast (1x)": "Rápida (1x)",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Menos píxeles que dibujar en pantallas de alta densidad (Retina); los paneles siguen nítidos"
 }

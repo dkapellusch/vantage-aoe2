@@ -120,3 +120,20 @@ test('a thousand changed tiles coalesce quickly and stay covered', () => {
   for (const [x0, y0, x1, y1] of rs) assert.ok(out.some(([a, b, c, d]) => a <= x0 && b <= y0 && c >= x1 && d >= y1));
   assert.ok(out.length <= 64);
 });
+
+test('strips are asked for ahead of the camera, further the slower they arrive', async () => {
+  const { prefetchRoom } = await import('../src/vantage/web/render-cache.js');
+  const still = { vx: 0, vy: 0, vz: 0 };
+  assert.equal(prefetchRoom(still, 20, 1440, 900), null);
+  // Panning right at 1500 px/s: only the right side, 0.15 s ahead locally...
+  const local = prefetchRoom({ vx: 1500, vy: 0, vz: 0 }, 20, 1440, 900);
+  assert.deepEqual(local.map(Math.round), [0, 0, 225, 0]);
+  // ...and further through a slow link (200 ms a strip), up to most of a screen.
+  const remote = prefetchRoom({ vx: 1500, vy: -400, vz: 0 }, 200, 1440, 900);
+  assert.deepEqual(remote.map(Math.round), [0, 168, 630, 0]);
+  assert.deepEqual(prefetchRoom({ vx: 9000, vy: 0, vz: 0 }, 400, 1440, 900).map(Math.round), [0, 0, 1080, 0]);
+  // Zooming out to half the zoom shows twice as much: half a screen more on each side.
+  assert.deepEqual(prefetchRoom(still, 20, 1440, 900, 1, 2).map(Math.round), [720, 450, 720, 450]);
+  // Zooming in needs nothing.
+  assert.equal(prefetchRoom({ vx: 0, vy: 0, vz: 1.5 }, 200, 1440, 900, 3, 1.5), null);
+});

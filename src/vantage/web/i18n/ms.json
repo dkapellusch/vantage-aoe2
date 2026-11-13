@@ -1655,5 +1655,15 @@
  "None researched yet": "Belum ada penyelidikan selesai",
  "+{n} more": "+{n} lagi",
  "Hide {n} upgrades": "Sembunyikan {n} naik taraf",
- "Research progress": "Kemajuan penyelidikan"
+ "Research progress": "Kemajuan penyelidikan",
+ "Two-finger scrolling": "Tatal dua jari",
+ "Moves the map on a trackpad, zooms with a mouse wheel": "Menggerakkan peta pada pad jejak, zum dengan roda tetikus",
+ "Always moves the map": "Sentiasa menggerakkan peta",
+ "Always zooms": "Sentiasa zum",
+ "A pinch on a trackpad always zooms": "Cubitan pada pad jejak sentiasa zum",
+ "Map resolution": "Resolusi peta",
+ "As the display (sharpest)": "Seperti paparan (paling tajam)",
+ "Balanced (1.5x on a high-density display)": "Seimbang (1.5x pada paparan berketumpatan tinggi)",
+ "Fast (1x)": "Pantas (1x)",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Kurang piksel untuk dilukis pada paparan berketumpatan tinggi (Retina); panel kekal tajam"
 }

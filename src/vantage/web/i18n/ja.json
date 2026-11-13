@@ -1655,5 +1655,15 @@
  "None researched yet": "研究済みのものはありません",
  "+{n} more": "ほか{n}件",
  "Hide {n} upgrades": "強化{n}件を隠す",
- "Research progress": "研究の進捗"
+ "Research progress": "研究の進捗",
+ "Two-finger scrolling": "2本指スクロール",
+ "Moves the map on a trackpad, zooms with a mouse wheel": "トラックパッドではマップを移動、マウスホイールではズーム",
+ "Always moves the map": "常にマップを移動",
+ "Always zooms": "常にズーム",
+ "A pinch on a trackpad always zooms": "トラックパッドのピンチは常にズーム",
+ "Map resolution": "マップの解像度",
+ "As the display (sharpest)": "ディスプレイと同じ（最も鮮明）",
+ "Balanced (1.5x on a high-density display)": "バランス（高密度ディスプレイで1.5倍）",
+ "Fast (1x)": "高速（1倍）",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "高密度（Retina）ディスプレイで描画するピクセルを減らします。パネルは鮮明なままです"
 }

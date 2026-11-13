@@ -1673,5 +1673,15 @@
  "None researched yet": "Aucune recherche terminée",
  "+{n} more": "+{n} autres",
  "Hide {n} upgrades": "Masquer {n} améliorations",
- "Research progress": "Progression de la recherche"
+ "Research progress": "Progression de la recherche",
+ "Two-finger scrolling": "Défilement à deux doigts",
+ "Moves the map on a trackpad, zooms with a mouse wheel": "Déplace la carte sur un pavé tactile, zoome avec la molette de la souris",
+ "Always moves the map": "Déplace toujours la carte",
+ "Always zooms": "Zoome toujours",
+ "A pinch on a trackpad always zooms": "Un pincement sur un pavé tactile zoome toujours",
+ "Map resolution": "Résolution de la carte",
+ "As the display (sharpest)": "Celle de l'écran (la plus nette)",
+ "Balanced (1.5x on a high-density display)": "Équilibrée (1,5x sur un écran haute densité)",
+ "Fast (1x)": "Rapide (1x)",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Moins de pixels à dessiner sur un écran haute densité (Retina) ; les panneaux restent nets"
 }

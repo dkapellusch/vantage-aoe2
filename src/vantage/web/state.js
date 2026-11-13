@@ -70,6 +70,8 @@ export const DEFAULT_SETTINGS = {
   edgeScroll: true,           // scroll at the screen edges
   edgeScrollSpeed: 1,
   zoomSpeed: 1,
+  mapResolution: 0,           // most device pixels per CSS pixel the map is drawn at (0: the display's own; 1.5, 1: fewer pixels on a Retina display)
+  twoFingerScroll: 'auto',    // wheel events in pixels (a trackpad): 'auto' moves the map and leaves zoom to a mouse wheel; 'pan' / 'zoom' force one
   showElo: true,
   hideScore: false,
   teamScore: 'sum',            // two-team scoreboard: sum | average | off

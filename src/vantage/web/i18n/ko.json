@@ -1655,5 +1655,15 @@
  "None researched yet": "아직 연구 완료 없음",
  "+{n} more": "+{n}개 더",
  "Hide {n} upgrades": "업그레이드 {n}개 숨기기",
- "Research progress": "연구 진행률"
+ "Research progress": "연구 진행률",
+ "Two-finger scrolling": "두 손가락 스크롤",
+ "Moves the map on a trackpad, zooms with a mouse wheel": "트랙패드에서는 지도를 이동하고 마우스 휠로는 확대/축소",
+ "Always moves the map": "항상 지도 이동",
+ "Always zooms": "항상 확대/축소",
+ "A pinch on a trackpad always zooms": "트랙패드의 핀치는 항상 확대/축소",
+ "Map resolution": "지도 해상도",
+ "As the display (sharpest)": "디스플레이와 동일(가장 선명)",
+ "Balanced (1.5x on a high-density display)": "균형(고밀도 디스플레이에서 1.5배)",
+ "Fast (1x)": "빠름(1배)",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "고밀도(Retina) 디스플레이에서 그릴 픽셀을 줄입니다. 패널은 선명하게 유지됩니다"
 }

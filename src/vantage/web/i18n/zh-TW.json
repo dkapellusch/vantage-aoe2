@@ -1655,5 +1655,15 @@
  "None researched yet": "尚未完成任何研究",
  "+{n} more": "另有{n}項",
  "Hide {n} upgrades": "隱藏{n}項升級",
- "Research progress": "研究進度"
+ "Research progress": "研究進度",
+ "Two-finger scrolling": "雙指捲動",
+ "Moves the map on a trackpad, zooms with a mouse wheel": "在觸控板上移動地圖，滑鼠滾輪縮放",
+ "Always moves the map": "一律移動地圖",
+ "Always zooms": "一律縮放",
+ "A pinch on a trackpad always zooms": "在觸控板上捏合一律縮放",
+ "Map resolution": "地圖解析度",
+ "As the display (sharpest)": "與顯示器相同（最清晰）",
+ "Balanced (1.5x on a high-density display)": "均衡（高密度顯示器上為 1.5 倍）",
+ "Fast (1x)": "快速（1 倍）",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "在高密度（Retina）顯示器上繪製較少的像素；面板保持清晰"
 }

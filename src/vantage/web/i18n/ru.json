@@ -1655,5 +1655,15 @@
  "None researched yet": "Пока ничего не изучено",
  "+{n} more": "Ещё {n}",
  "Hide {n} upgrades": "Скрыть улучшения: {n}",
- "Research progress": "Прогресс исследования"
+ "Research progress": "Прогресс исследования",
+ "Two-finger scrolling": "Прокрутка двумя пальцами",
+ "Moves the map on a trackpad, zooms with a mouse wheel": "На трекпаде двигает карту, колесо мыши масштабирует",
+ "Always moves the map": "Всегда двигает карту",
+ "Always zooms": "Всегда масштабирует",
+ "A pinch on a trackpad always zooms": "Щипок на трекпаде всегда масштабирует",
+ "Map resolution": "Разрешение карты",
+ "As the display (sharpest)": "Как у экрана (самое чёткое)",
+ "Balanced (1.5x on a high-density display)": "Сбалансированное (1,5x на экране высокой плотности)",
+ "Fast (1x)": "Быстрое (1x)",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Меньше пикселей на экране высокой плотности (Retina); панели остаются чёткими"
 }

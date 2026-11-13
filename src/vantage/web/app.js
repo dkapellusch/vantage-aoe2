@@ -773,6 +773,21 @@ function gameOver(live) {
   return S.events.some((e) => e.cat === 'status' && e.kind === 'won');
 }
 
+// Arrow keys held down scroll the map at the edge-scrolling speed, from 150 ms
+// after the press (a tap is one step).
+const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+const arrowsHeld = new Map(); // key -> when it went down
+function arrowScroll(now, dt) {
+  if (!arrowsHeld.size) return;
+  const step = 900 * (settings.edgeScrollSpeed || 1) * dt;
+  let dx = 0, dy = 0;
+  for (const [key, since] of arrowsHeld) {
+    if (now - since < 150) continue;
+    dx += ARROWS[key][0] * step; dy += ARROWS[key][1] * step;
+  }
+  if (dx || dy) world.pan(dx, dy);
+}
+
 const GFX_HOLD_MS = 5000; // a stuck request must not freeze playback; any real strip arrives well within it
 let gfxHoldSince = 0;
 function tick(now) {
@@ -842,6 +857,7 @@ function tick(now) {
   world.refreshTerrain(S.t); // no-op unless a throttled terrain change is still waiting
   world.refreshTrees(S.t); // likewise for the forest
   world.edgeScroll(mouse.x, mouse.y, dt);
+  arrowScroll(performance.now(), dt);
   autocastTick(now, dt);
   audio.tick(world.toScreen);
   world.draw(dt);
@@ -2344,12 +2360,16 @@ function wire() {
       return;
     }
     if (a && ACTIONS[a]) { e.preventDefault(); ACTIONS[a](); renderHud(); return; }
-    const pan = 28;
-    if (e.key === 'ArrowLeft') world.pan(-pan, 0);
-    if (e.key === 'ArrowRight') world.pan(pan, 0);
-    if (e.key === 'ArrowUp') world.pan(0, -pan);
-    if (e.key === 'ArrowDown') world.pan(0, pan);
+    // The arrows: a step at once, then (arrowScroll, every frame) a steady scroll
+    // while held. The keyboard's own repeat started after half a second and came
+    // 30 times a second in 28 px steps.
+    if (ARROWS[e.key] && !e.repeat && !arrowsHeld.has(e.key)) {
+      arrowsHeld.set(e.key, performance.now());
+      world.pan(ARROWS[e.key][0] * 28, ARROWS[e.key][1] * 28);
+    }
   });
+  window.addEventListener('keyup', (e) => { arrowsHeld.delete(e.key); });
+  window.addEventListener('blur', () => { arrowsHeld.clear(); });
   // Lock the cursor on the first click into the world (settings.clipCursorInGame).
   window.addEventListener('mousedown', (e) => {
     if (!settings.clipCursorInGame || e.button !== 0 || e.target !== $('world') || document.pointerLockElement) return;

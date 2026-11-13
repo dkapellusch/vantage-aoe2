@@ -36,7 +36,7 @@ Live games and replays need the game running and the API [certificates](Live-gam
 
 - Press <kbd>?</kbd> for the quick reference, which lists every key and mouse action.
 - Press <kbd>Esc</kbd> to close the top window. With nothing open, <kbd>Esc</kbd> opens the ⛨ menu (Home, Statistics, Settings, Panels, Quick reference, Documentation, Tutorial, Full screen).
-- Right-drag or middle-drag pans the map, and the wheel zooms at the cursor. Click the minimap to jump.
+- Right-drag or middle-drag pans the map, and the wheel zooms at the cursor. On a trackpad, two fingers move the map and a pinch zooms. Click the minimap to jump.
 - Click a unit to see its stats. Drag a box to select a group.
 - <kbd>F3</kbd> pauses. <kbd>[</kbd> and <kbd>]</kbd> change speed (below pause, playback runs backwards). Click the time bar to seek.
 - <kbd>Ctrl+Alt+S</kbd> opens the statistics.

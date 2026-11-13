@@ -1655,5 +1655,15 @@
  "None researched yet": "अभी कोई शोध पूरा नहीं हुआ",
  "+{n} more": "+{n} और",
  "Hide {n} upgrades": "{n} उन्नयन छिपाएँ",
- "Research progress": "शोध की प्रगति"
+ "Research progress": "शोध की प्रगति",
+ "Two-finger scrolling": "दो उंगलियों से स्क्रॉल",
+ "Moves the map on a trackpad, zooms with a mouse wheel": "ट्रैकपैड पर नक्शा खिसकाता है, माउस व्हील से ज़ूम करता है",
+ "Always moves the map": "हमेशा नक्शा खिसकाता है",
+ "Always zooms": "हमेशा ज़ूम करता है",
+ "A pinch on a trackpad always zooms": "ट्रैकपैड पर पिंच हमेशा ज़ूम करता है",
+ "Map resolution": "नक्शे का रिज़ॉल्यूशन",
+ "As the display (sharpest)": "डिस्प्ले जैसा (सबसे साफ़)",
+ "Balanced (1.5x on a high-density display)": "संतुलित (उच्च-घनत्व डिस्प्ले पर 1.5x)",
+ "Fast (1x)": "तेज़ (1x)",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "उच्च-घनत्व (Retina) डिस्प्ले पर कम पिक्सेल बनाने पड़ते हैं; पैनल साफ़ रहते हैं"
 }

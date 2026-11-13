@@ -1655,5 +1655,15 @@
  "None researched yet": "Henüz araştırılmadı",
  "+{n} more": "+{n} tane daha",
  "Hide {n} upgrades": "{n} yükseltmeyi gizle",
- "Research progress": "Araştırma ilerlemesi"
+ "Research progress": "Araştırma ilerlemesi",
+ "Two-finger scrolling": "İki parmakla kaydırma",
+ "Moves the map on a trackpad, zooms with a mouse wheel": "Dokunmatik yüzeyde haritayı kaydırır, fare tekerleğiyle yakınlaştırır",
+ "Always moves the map": "Her zaman haritayı kaydırır",
+ "Always zooms": "Her zaman yakınlaştırır",
+ "A pinch on a trackpad always zooms": "Dokunmatik yüzeyde kıstırma her zaman yakınlaştırır",
+ "Map resolution": "Harita çözünürlüğü",
+ "As the display (sharpest)": "Ekranınki gibi (en keskin)",
+ "Balanced (1.5x on a high-density display)": "Dengeli (yüksek yoğunluklu ekranda 1,5x)",
+ "Fast (1x)": "Hızlı (1x)",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Yüksek yoğunluklu (Retina) ekranda çizilecek daha az piksel; paneller keskin kalır"
 }

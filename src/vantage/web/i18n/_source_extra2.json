@@ -1256,5 +1256,15 @@
  "None researched yet",
  "+{n} more",
  "Hide {n} upgrades",
- "Research progress"
+ "Research progress",
+ "Two-finger scrolling",
+ "Moves the map on a trackpad, zooms with a mouse wheel",
+ "Always moves the map",
+ "Always zooms",
+ "A pinch on a trackpad always zooms",
+ "Map resolution",
+ "As the display (sharpest)",
+ "Balanced (1.5x on a high-density display)",
+ "Fast (1x)",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp"
 ]

@@ -177,13 +177,15 @@ The **Name** column is the action's name, which you use when rebinding keys as J
 
 | Key | Action |
 |---|---|
-| Arrow keys | Scroll the map |
+| Arrow keys | Scroll the map: a step for a tap, steadily while held |
 
 ## Mouse
 
 | Mouse | Action |
 |---|---|
 | Right-drag / middle-drag | Pan |
+| Two fingers on a trackpad | Pan (a setting can make it zoom) |
+| Pinch on a trackpad | Zoom at the pointer |
 | Wheel | Zoom at the cursor |
 | Click / drag | Select / box select |
 | Double-click | Select all units of the same type on screen |

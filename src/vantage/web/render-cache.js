@@ -145,3 +145,25 @@ export function coalesceRects(rects, waste = 1.5) {
   }
   return out;
 }
+
+/**
+ * Where to ask for strips ahead of a moving camera: the room beyond the screen on
+ * each side, [left, top, right, bottom] px, or null when it is (nearly) still.
+ * `motion`: { vx, vy } screen px/s and vz, the zoom's logarithmic rate per second;
+ * `delayMs`: how long a strip takes to arrive; `zoomTo`: where an eased zoom ends.
+ */
+export function prefetchRoom(motion, delayMs, w, h, zoomTo = 0, zoom = 1) {
+  const lead = Math.min(1, 0.12 + 1.5 * delayMs / 1000);
+  const cap = 0.75;
+  let left = Math.max(0, -motion.vx * lead), right = Math.max(0, motion.vx * lead);
+  let top = Math.max(0, -motion.vy * lead), bottom = Math.max(0, motion.vy * lead);
+  // Zooming out shows more on every side: as far as the zoom is going (an eased
+  // wheel step knows its end), else as far as it gets within the delay.
+  const shrink = zoomTo > 0 && zoomTo < zoom ? zoom / zoomTo : motion.vz < 0 ? Math.exp(-motion.vz * lead) : 1;
+  if (shrink > 1) {
+    const grow = Math.min(2, shrink) - 1;
+    left += w / 2 * grow; right += w / 2 * grow; top += h / 2 * grow; bottom += h / 2 * grow;
+  }
+  if (Math.max(left, right, top, bottom) < 48) return null;
+  return [Math.min(left, w * cap), Math.min(top, h * cap), Math.min(right, w * cap), Math.min(bottom, h * cap)];
+}

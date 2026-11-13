@@ -21,9 +21,10 @@ import * as TG from './terrain-gl.js';
 import * as SG from './sprite-gl.js';
 import { RowInterpolator, sortByKey } from './playback.js';
 import { followRows } from './camera-follow.js';
-import { changedTilesInRegion, terrainRegion, changedTreeTiles, groundProjection, mergeDirtyRect, treeSpriteState, OutlineCache, coalesceRects } from './render-cache.js';
+import { changedTilesInRegion, terrainRegion, changedTreeTiles, groundProjection, mergeDirtyRect, treeSpriteState, OutlineCache, coalesceRects, prefetchRoom } from './render-cache.js';
 import { ViewGraphics, SpriteHistory } from './graphics-cache.js';
 import { requestResource, trackAsset, trackedImage, notifyAssetsChanged } from './startup-assets.js';
+import { wheelKind, pinchFactor } from './wheel-input.js';
 
 const TW = 32, TH = 16;           // tile size on screen at zoom 1
 const TERRAIN_TW = 16, TERRAIN_TH = 8; // pre-rendered terrain resolution
@@ -230,6 +231,7 @@ function spriteStrip(sid, facet, color, opts) {
   // One request: the PNG, its layout in the X-Sprite-Meta header (an older server
   // without it gets the .json as before), decoded off the main thread.
   const url = assetUrl(`/sprite/${path}.png?${query}`);
+  const asked = performance.now();
   trackAsset(url, () => requestResource(url, {}, async (r) => {
       const hdr = r.headers.get('X-Sprite-Meta');
       const m = hdr ? JSON.parse(hdr) : await requestResource(assetUrl(`/sprite/${path}.json?${query}`));
@@ -242,6 +244,7 @@ function spriteStrip(sid, facet, color, opts) {
       // A server that ignores ?layer= answers with the full strip: stop asking.
       if (opts && opts.layer) layerSplit = m.layer === opts.layer;
       e.img = img; e.bytes = img.width * img.height * 4; spriteBytes += e.bytes; spriteRequests--;
+      stripDelay += (Math.min(2000, performance.now() - asked) - stripDelay) * 0.2;
       if (e.wakesGround) wakeGround();
       // A colourless strip asked for in a player's colour, or with the player mask
       // (before the sprite was known to be colourless), also answers for the plain
@@ -277,8 +280,48 @@ function prefetchUpcoming() {
   if (now - upcomingCheckAt > 100) {
     upcomingCheckAt = now;
     for (const n of [S.nextView, ...(S.upcoming || [])]) if (n && n.time > S.t && spriteRequests < 24) viewReady(n);
+    prefetchAhead();
   }
 }
+
+// Strips for where the camera is going. A strip takes its request, its decode
+// and a frame to appear (stripDelay, measured: ~20 ms on this machine, 150-300 ms
+// through a hosted hub), and the rows of a place are asked for only once they
+// are within 60 px of the screen: panning or zooming out faster than that showed
+// placeholders at the leading edge, for longer the further away the server is.
+// While the camera moves, the rows it will reach within that delay (and a
+// margin) are asked for early: the screen's box grown on the sides it is
+// heading for, by its speed times the delay, at most most of a screen.
+let stripDelay = 0; // ms from asking for a strip to having it decoded (smoothed)
+const cameraMotion = { x: 0, y: 0, zoom: 0, vx: 0, vy: 0, vz: 0, at: 0 };
+function trackCamera(now) {
+  const c = S.camera, m = cameraMotion;
+  const dt = (now - m.at) / 1000;
+  if (m.zoom && dt > 0 && dt < 0.25) {
+    // Screen px per second, and the zoom's rate (per second, logarithmic).
+    const ix = ((c.x + c.y) - (m.x + m.y)) * TW / 2 * c.zoom / dt;
+    const iy = ((c.y - c.x) - (m.y - m.x)) * TH / 2 * c.zoom / dt;
+    const iz = Math.log(c.zoom / m.zoom) / dt;
+    // A jump (the minimap, a hotkey) is not a speed.
+    if (Math.abs(ix * dt) > viewSize.w || Math.abs(iy * dt) > viewSize.h) { m.vx = 0; m.vy = 0; m.vz = 0; }
+    else { m.vx += (ix - m.vx) * 0.3; m.vy += (iy - m.vy) * 0.3; m.vz += (iz - m.vz) * 0.3; }
+  } else { m.vx = 0; m.vy = 0; m.vz = 0; }
+  m.x = c.x; m.y = c.y; m.zoom = c.zoom; m.at = now;
+}
+function prefetchAhead() {
+  if (!S.view || !S.catalog) return;
+  const room = prefetchRoom(cameraMotion, stripDelay, viewSize.w, viewSize.h, zoomAnim ? zoomAnim.z1 : 0, S.camera.zoom);
+  if (!room) return;
+  const { core, extra } = collectViewSprites(S.view, room);
+  for (const list of [core, extra]) {
+    for (const r of list) {
+      if (spriteRequests >= 24) return;
+      if (!spriteRequirementLoaded(r)) requestSpriteRequirement({ ...r, core: false });
+    }
+  }
+}
+/** For the benchmark and the performance view. */
+export function prefetchState() { return { delay: stripDelay, vx: cameraMotion.vx, vy: cameraMotion.vy, vz: cameraMotion.vz }; }
 /** The sprites a row's layers draw: composite roots expand into their parts
  * (catalog sprite_deltas), as drawSprites does. */
 function layerSprites(layers) {
@@ -393,7 +436,7 @@ export function framePending() {
   return pending;
 }
 
-function collectViewSprites(n) {
+function collectViewSprites(n, ahead = null) {
   const deltas = S.catalog.sprite_deltas;
   const split = layerSplit !== false && filt('unitShadow') !== filt('unitColor');
   // Core: 120 px around the screen, what playback waits for (graphics buffering).
@@ -410,7 +453,12 @@ function collectViewSprites(n) {
     if (!old) requests.set(key, { sid, facet, color, opts, query, key, pin, core });
     else { if (pin) old.pin = true; if (core) old.core = true; }
   };
-  const outside = (px, py, k, bottom) => px < -k || py < -k || px > viewSize.w + k || py > viewSize.h + bottom;
+  // `ahead`: more room on each side ([left, top, right, bottom] px), where the
+  // camera is heading (prefetchAhead). Only the widest test uses it.
+  const [aL, aT, aR, aB] = ahead || [0, 0, 0, 0];
+  const outside = (px, py, k, bottom) => (k > m
+    ? px < -k - aL || py < -k - aT || px > viewSize.w + k + aR || py > viewSize.h + bottom + aB
+    : px < -k || py < -k || px > viewSize.w + k || py > viewSize.h + bottom);
   for (const rows of [n.entities, n.remains || []]) {
     for (const r of rows) {
       if (r[0] < 0) continue;
@@ -1242,8 +1290,16 @@ let entityRows = [];   // interpolated rows used for drawing and picking
 let groundClip = null; // screen rectangle while updating part of the cached ground
 const viewSize = { w: 0, h: 0, dpr: 1 };
 
+// Device pixels per CSS pixel the map is drawn at: the display's own, unless the
+// "Map resolution" setting caps it (a Retina display is four times the pixels of
+// the same window at 1x, on every canvas layer; the panels stay sharp either way).
+function mapDpr() {
+  const cap = Number(settings.mapResolution);
+  const own = window.devicePixelRatio || 1;
+  return cap > 0 ? Math.min(own, cap) : own;
+}
 export function resize() {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = mapDpr();
   viewSize.w = window.innerWidth || 1280; viewSize.h = window.innerHeight || 800; viewSize.dpr = dpr;
   canvas.width = Math.round(viewSize.w * dpr);
   canvas.height = Math.round(viewSize.h * dpr);
@@ -2434,6 +2490,7 @@ function growOnScreen() {
   }
 }
 export function draw(dt = 1 / 60) {
+  if (viewSize.dpr !== mapDpr()) resize(); // the setting changed, or the window moved to another display
   frameSerial++;
   recencyFrame = frameSerial;
   groundGraded = false; bakeGradeThisFrame = false;
@@ -2444,6 +2501,7 @@ export function draw(dt = 1 / 60) {
   ctx.fillStyle = WORLD_BACKGROUND;
   ctx.fillRect(0, 0, viewSize.w, viewSize.h);
   stepCamera(performance.now());
+  trackCamera(performance.now());
   // Follow the same interpolated positions that this frame will draw.
   entityRows = interpolatedRows();
   followSelection(dt);
@@ -3511,6 +3569,7 @@ function stepCamera(now) {
 }
 
 export function centerOn(x, y, zoom) {
+  cameraSentAt = performance.now();
   const z1 = zoom ? clampZoom(zoom) : null;
   const dur = smoothMs();
   zoomAnim = null;
@@ -3538,6 +3597,7 @@ function applyZoom(z, anchorPx, anchorPy) {
 /** Put the camera at (x, y) with an optional zoom at once, cancelling any
  * smooth move (the autocast director drives the camera every frame). */
 export function setCamera(x, y, zoom) {
+  cameraSentAt = performance.now();
   camAnim = null; zoomAnim = null;
   S.camera.x = x; S.camera.y = y;
   if (zoom) S.camera.zoom = clampZoom(zoom);
@@ -3558,6 +3618,31 @@ export function zoomTo(z) {
   if (camAnim) camAnim.z1 = null; // this zoom takes over, without replacing the pan
   if (!dur) { setZoom(target); return; }
   zoomAnim = { z0: S.camera.zoom, z1: target, ax: null, ay: null, t0: performance.now(), dur };
+}
+
+// When the camera was last put somewhere at once or sent somewhere (a minimap
+// click, a jump to an event, a hotkey): two-finger scrolling still coasting from
+// before that moment does not drag it away again (wheelInput).
+let cameraSentAt = 0;
+const wheelMemory = {};
+let ctrlHeld = false; // a Control key is really down (installInput): ctrl + wheel is then not a pinch
+
+// A wheel event over the map (wheel-input.js says which of the three it is):
+// a mouse wheel zooms with the usual easing; two fingers on a trackpad move the
+// map by exactly what they scrolled; a pinch zooms about the pointer at once,
+// following the fingers (easing each of its many small steps lagged behind them).
+function wheelInput(e) {
+  const kind = wheelKind(e, wheelMemory, performance.now(), settings.twoFingerScroll || 'auto', ctrlHeld);
+  if (kind === 'zoom') { wheelZoom(e); return; }
+  if (kind === 'pinch') {
+    setZoom(S.camera.zoom * pinchFactor(e.deltaY, settings.zoomSpeed || 1), e.clientX, e.clientY);
+    return;
+  }
+  // Inertia from a scroll that began before the camera was sent somewhere.
+  if (wheelMemory.started < cameraSentAt) return;
+  const lines = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? viewSize.h : 1;
+  pan(e.deltaX * lines, e.deltaY * lines);
+  zoomAnim = null;
 }
 
 function wheelZoom(e) {
@@ -3798,15 +3883,27 @@ export function installInput(onSelect) {
     const r = pick(e.clientX, e.clientY);
     if (r) onSelect({ rows: rowsOnScreenOfType(r[2], r[1]), shift: e.shiftKey });
   });
+  window.addEventListener('keydown', (e) => { if (e.key === 'Control') ctrlHeld = true; });
+  window.addEventListener('keyup', (e) => { if (e.key === 'Control') ctrlHeld = false; });
+  window.addEventListener('blur', () => { ctrlHeld = false; });
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    wheelZoom(e);
+    wheelInput(e);
   }, { passive: false });
+  // Safari reports a pinch as gesture events (and no ctrl + wheel).
+  let pinchFrom = 0;
+  canvas.addEventListener('gesturestart', (e) => { e.preventDefault(); pinchFrom = S.camera.zoom; });
+  canvas.addEventListener('gesturechange', (e) => {
+    e.preventDefault();
+    if (pinchFrom && e.scale > 0) setZoom(pinchFrom * e.scale, e.clientX, e.clientY);
+  });
+  canvas.addEventListener('gestureend', (e) => { e.preventDefault(); pinchFrom = 0; });
   let miniDrag = false;
   // The minimap is a diamond in a rectangle: its corners are off the map.
   const miniMove = (e) => {
     const [x, y] = minimapToWorld(e);
     S.camera.x = Math.max(0, Math.min(mapW, x)); S.camera.y = Math.max(0, Math.min(mapH, y)); camAnim = null;
+    cameraSentAt = performance.now();
   };
   mini.addEventListener('mousedown', (e) => { if (e.button === 0) { miniDrag = true; miniMove(e); } });
   window.addEventListener('mousemove', (e) => { if (miniDrag) miniMove(e); });

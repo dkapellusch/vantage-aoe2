@@ -70,6 +70,8 @@ All notable changes to Vantage are documented here. The format follows
   starting resources, collected, bonus, trade, market, tribute, refunds and spending, which add up
   to the stockpile; an increase nothing explains is shown as **Unexplained gain**.
   `tools/reconcile_resources.py` checks a recording.
+- A new kind of smoke, dust or fire no longer stalls the map the first time it appears (30-40 ms,
+  far more on a laptop): particles are drawn from cut-outs of their atlas, not from the whole of it.
 - After a seek, the event log could keep the unit names of the moment left behind (a Longbowman
   where the game by then had an Elite Longbowman) for the rows it wrote before the new moment's
   view arrived.
@@ -105,6 +107,17 @@ All notable changes to Vantage are documented here. The format follows
   and Caster the full panel opened from the chip stays the full panel until you press "compact".
   Customize → Layout has **Reset Selection panel**, and saved layouts carry all of it. Statistics
   reopens on the tab and series last looked at.
+- **Trackpads.** Two fingers move the map and a pinch zooms at the pointer, following the fingers;
+  before, both zoomed, eased over a second, and the map could only be moved with a two-finger
+  click-drag. A mouse wheel zooms as it did. *Settings → Camera → Two-finger scrolling* can make
+  two-finger scrolling zoom again, or pan whatever the device looks like.
+- Arrow keys held down scroll the map steadily (a tap is still one step).
+- **Map resolution** (Settings → Camera): draw the map at 1.5x or 1x on a high-density (Retina)
+  display, for a laptop whose graphics chip struggles with four times the pixels. Off by default.
+- **Through a hosted hub or any slower connection**: sprite strips are asked for ahead of a moving
+  or zooming-out camera, further ahead the longer they take to arrive; and an interface update no
+  longer makes every browser fetch all game graphics again (their cache key now follows the
+  server-side code only).
 - **Smoother playback and faster seeking in large games.** The panels' refresh no longer costs
   the map a frame or two four times a second (it is spread over the frames that follow), a
   zoomed-in view no longer pays for the rows off screen, and after a seek or a jump to another

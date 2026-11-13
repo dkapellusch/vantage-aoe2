@@ -1655,5 +1655,15 @@
  "None researched yet": "Chưa nghiên cứu xong nâng cấp nào",
  "+{n} more": "+{n} mục nữa",
  "Hide {n} upgrades": "Ẩn {n} nâng cấp",
- "Research progress": "Tiến độ nghiên cứu"
+ "Research progress": "Tiến độ nghiên cứu",
+ "Two-finger scrolling": "Cuộn bằng hai ngón",
+ "Moves the map on a trackpad, zooms with a mouse wheel": "Di chuyển bản đồ trên bàn di chuột, thu phóng bằng con lăn chuột",
+ "Always moves the map": "Luôn di chuyển bản đồ",
+ "Always zooms": "Luôn thu phóng",
+ "A pinch on a trackpad always zooms": "Chụm ngón trên bàn di chuột luôn thu phóng",
+ "Map resolution": "Độ phân giải bản đồ",
+ "As the display (sharpest)": "Theo màn hình (sắc nét nhất)",
+ "Balanced (1.5x on a high-density display)": "Cân bằng (1,5x trên màn hình mật độ cao)",
+ "Fast (1x)": "Nhanh (1x)",
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Ít điểm ảnh phải vẽ hơn trên màn hình mật độ cao (Retina); các bảng vẫn sắc nét"
 }

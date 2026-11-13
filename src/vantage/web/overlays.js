@@ -1667,6 +1667,8 @@ function interfaceTab() {
     ${chk('edgeScroll', 'Edge scrolling')}
     ${rng('edgeScrollSpeed', 'Edge scroll speed', 0.25, 3, 0.25)}
     ${rng('zoomSpeed', 'Zoom speed', 0.25, 3, 0.25)}
+    ${sel('twoFingerScroll', 'Two-finger scrolling', [['auto', 'Moves the map on a trackpad, zooms with a mouse wheel'], ['pan', 'Always moves the map'], ['zoom', 'Always zooms']], 'A pinch on a trackpad always zooms')}
+    ${sel('mapResolution', 'Map resolution', [['0', 'As the display (sharpest)'], ['1.5', 'Balanced (1.5x on a high-density display)'], ['1', 'Fast (1x)']], 'Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp')}
     ${rng('cameraSmoothMs', 'Zoom / camera move duration', 0, 3000, 50, 'How long smooth zooms and camera moves take; 0 = instant')}
     ${numIn('zoomLevels.one', 'Zoom preset 1 (Alt+1)', 0.1, 6, 0.05)}${numIn('zoomLevels.two', 'Zoom preset 2 (Alt+2)', 0.1, 6, 0.05)}${numIn('zoomLevels.three', 'Zoom preset 3 (Alt+3)', 0.1, 6, 0.05)}
     ${chk('clipCursorInGame', 'Lock the mouse to the window', 'Keeps edge scrolling working on multi-monitor setups (Alt+Shift+C)')}

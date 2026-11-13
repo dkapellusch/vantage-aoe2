@@ -66,6 +66,8 @@ The tab also links the OBS overlay page, `/?overlay=1`. See [Casting and OBS](Ca
 | Edge scrolling | `edgeScroll` | on |
 | Edge scroll speed (0.25–3) | `edgeScrollSpeed` | 1 |
 | Zoom speed (0.25–3) | `zoomSpeed` | 1 |
+| Two-finger scrolling: *Moves the map on a trackpad, zooms with a mouse wheel* / *Always moves the map* / *Always zooms*. A pinch always zooms | `twoFingerScroll` | `auto` |
+| Map resolution: *As the display (sharpest)* / *Balanced (1.5x)* / *Fast (1x)*. Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp | `mapResolution` | `0` (the display's own) |
 | Zoom / camera move duration (0–3000 ms; 0 = instant) | `cameraSmoothMs` | 1250 |
 | Zoom presets 1, 2, 3 (Alt+1/2/3) | `zoomLevels.one`, `.two`, `.three` | 1.6, 1.0, 0.55 |
 | Lock the mouse to the window (Alt+Shift+C): keeps edge scrolling working on several monitors | `clipCursorInGame` | off |
