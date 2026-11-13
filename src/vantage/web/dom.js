@@ -5,18 +5,27 @@ const keys = ['data-ui-key', 'data-panel-detail', 'data-dash-page', 'data-review
   'data-dash-metric', 'data-tech', 'data-mid', 'data-inspect', 'data-full-tree',
   'data-moment', 'data-bookmark', 'data-delete', 'data-cat', 'data-hl', 'data-hero', 'data-line', 'data-pid'];
 
+const keyRank = new Map(keys.map((name, i) => [name, i]));
+
+// Called several times per node of every patched panel, four times a second:
+// one pass over the node's own attributes (most have one or two), not a
+// hasAttribute call per key name (17 of them, a third of a HUD render).
 function key(node) {
   if (node.nodeType !== 1) return null;
   if (node.id) return `id:${node.id}`;
-  for (const attr of keys) if (node.hasAttribute(attr)) {
-    return `${attr}:${node.getAttribute(attr)}:${node.getAttribute('data-pid') || node.getAttribute('data-owner') || node.getAttribute('data-team') || ''}`;
+  const attrs = node.attributes;
+  let best = -1;
+  for (let i = 0; i < attrs.length; i++) {
+    const rank = keyRank.get(attrs[i].name);
+    if (rank !== undefined && (best < 0 || rank < best)) best = rank;
   }
-  return null;
+  if (best < 0) return null;
+  const attr = keys[best];
+  return `${attr}:${node.getAttribute(attr)}:${node.getAttribute('data-pid') || node.getAttribute('data-owner') || node.getAttribute('data-team') || ''}`;
 }
 
-function compatible(a, b) {
-  return a && a.nodeType === b.nodeType && a.nodeName === b.nodeName
-    && a.namespaceURI === b.namespaceURI && key(a) === key(b);
+function sameKind(a, b) {
+  return a.nodeType === b.nodeType && a.nodeName === b.nodeName && a.namespaceURI === b.namespaceURI;
 }
 
 function patchNode(node, next) {
@@ -25,26 +34,46 @@ function patchNode(node, next) {
     return;
   }
   // Details are user-controlled. New selections explicitly reset their nodes.
-  const preserve = name => node.nodeName === 'DETAILS' && name === 'open';
-  for (const attr of [...node.attributes]) {
-    if (!preserve(attr.name) && !next.hasAttribute(attr.name)) node.removeAttribute(attr.name);
+  const details = node.nodeName === 'DETAILS';
+  const have = node.attributes, want = next.attributes;
+  for (let i = have.length - 1; i >= 0; i--) {
+    const name = have[i].name;
+    if (!(details && name === 'open') && !next.hasAttribute(name)) node.removeAttribute(name);
   }
-  for (const attr of [...next.attributes]) {
-    if (!preserve(attr.name) && node.getAttribute(attr.name) !== attr.value) node.setAttribute(attr.name, attr.value);
+  for (let i = 0; i < want.length; i++) {
+    const { name, value } = want[i];
+    if (!(details && name === 'open') && node.getAttribute(name) !== value) node.setAttribute(name, value);
   }
   patchChildren(node, next);
 }
 
 export function patchChildren(parent, next) {
-  const keyed = new Map([...parent.childNodes].map(node => [key(node), node]).filter(([k]) => k != null));
+  // Keyed children are looked up only when a wanted node does not line up with
+  // the current one: the map (of the children not yet placed) is built on first
+  // need, and most patches never need it.
+  let keyed = null;
   let current = parent.firstChild;
-  for (const wanted of [...next.childNodes]) {
-    let node = compatible(current, wanted) ? current : keyed.get(key(wanted));
-    if (!compatible(node, wanted)) node = wanted.cloneNode(true);
+  const lookup = (k) => {
+    if (!keyed) {
+      keyed = new Map();
+      for (let n = current; n; n = n.nextSibling) { const nk = key(n); if (nk != null) keyed.set(nk, n); }
+    }
+    return keyed.get(k);
+  };
+  let wanted = next.firstChild;
+  while (wanted) {
+    const following = wanted.nextSibling; // before a clone or a move can change it
+    const k = key(wanted);
+    let node = current && sameKind(current, wanted) && key(current) === k ? current : null;
+    if (!node) {
+      const found = lookup(k);
+      node = found && sameKind(found, wanted) && key(found) === k ? found : wanted.cloneNode(true);
+    }
     if (node !== current) parent.insertBefore(node, current);
     patchNode(node, wanted);
-    keyed.delete(key(wanted));
+    if (keyed) keyed.delete(k);
     current = node.nextSibling;
+    wanted = following;
   }
   while (current) { const nextSibling = current.nextSibling; parent.removeChild(current); current = nextSibling; }
 }
