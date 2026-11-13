@@ -138,6 +138,16 @@ test('the share hash describes what is on screen and a link applies without bein
   assert.equal(saved().hud.preset, 'custom');
   assert.deepEqual(saved().hud.edits.custom.panels, ['pulse', 'minimap', 'focus']);
   assert.equal(saved().hud.scene, 'auto', 'a link\'s scene is never saved');
+  // Reloading the page on the same link keeps their change; following the link afresh applies it again.
+  assert.equal(saved().hud.link, 'c1.pu-mm.age-army.fight');
+  const timing = performance.getEntriesByType;
+  performance.getEntriesByType = () => [{ type: 'reload' }];
+  L.readLink(); L.applyPanels();
+  assert.deepEqual(visible(), ['pulse', 'minimap', 'focus'], 'a reload does not drop the Focus slot they added');
+  performance.getEntriesByType = () => [{ type: 'navigate' }];
+  L.readLink(); L.applyPanels();
+  assert.deepEqual(visible(), ['pulse', 'minimap'], 'the link, followed again, is the link');
+  performance.getEntriesByType = timing;
   location.hash = '#hud=bogus';
   L.readLink(); L.applyPreset('full');
   assert.equal(L.activePreset(), 'full');

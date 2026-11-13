@@ -42,3 +42,22 @@ test('the quick reference files every action under exactly one section', () => {
   assert.ok(of('Selecting and following').includes('Go to king'));
   assert.ok(of('Panels').includes('Statistics'));
 });
+
+test('player names read on the panels: at least 4.5:1, the game\'s blue included', async () => {
+  const { playerTextColor } = await import('../src/vantage/web/state.js');
+  S.match = { players: {
+    1: { id: 1, color: '#0000ff', color_id: 0, team_key: 101 }, 2: { id: 2, color: '#ff0000', color_id: 1, team_key: 102 },
+    3: { id: 3, color: '#00ff00', color_id: 2, team_key: 103 }, 6: { id: 6, color: '#ff00ff', color_id: 5, team_key: 106 },
+    7: { id: 7, color: '#434343', color_id: 6, team_key: 107 },
+  } };
+  const lum = (rgb) => { const lin = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]); };
+  const panel = lum([0x14, 0x18, 0x1e]);
+  for (const pid of [1, 2, 3, 6, 7]) {
+    const rgb = playerTextColor(pid).match(/\d+/g).map(Number);
+    const ratio = (lum(rgb) + 0.05) / (panel + 0.05);
+    assert.ok(ratio >= 4.5, `player ${pid}: ${playerTextColor(pid)} is ${ratio.toFixed(2)}:1`);
+  }
+  const blue = playerTextColor(1).match(/\d+/g).map(Number);
+  assert.ok(blue[2] === 255 && blue[0] < 160, 'still a blue');
+});

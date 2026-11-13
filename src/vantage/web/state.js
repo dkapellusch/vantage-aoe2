@@ -278,13 +278,15 @@ export function migrateSettings(s) {
 // Where this page runs: inside another page (a hub embed) or under a hub match
 // path. A new viewer there starts on Minimal; the desktop app starts on Full.
 export function hudEnvironment() {
-  let embedded = false, hosted = false, requested = null;
+  let embedded = false, hosted = false, phone = false, requested = null;
   try { embedded = typeof window !== 'undefined' && window.self !== window.top; } catch (e) { embedded = true; }
   try {
     hosted = typeof location !== 'undefined' && /^\/v\//.test(location.pathname || '');
     requested = typeof location !== 'undefined' ? new URLSearchParams(location.search || '').get('hud') : null;
   } catch (e) { /* no location: a test or a worker */ }
-  return { embedded, hosted, requested };
+  // A phone: a touch screen that is narrow, or short (held sideways).
+  try { phone = typeof matchMedia === 'function' && matchMedia('(pointer: coarse) and (max-width: 700px), (pointer: coarse) and (max-height: 500px)').matches; } catch (e) { /* no media queries */ }
+  return { embedded, hosted, phone, requested };
 }
 
 /** True when this browser had saved settings when the page loaded. */
@@ -630,13 +632,20 @@ export function playerMarkColor(pid) {
 }
 
 // Player colour lifted towards white, for text on dark panels.
+const PANEL_LUMINANCE = 0.0075; // --panel-solid (#14181e), the lightest ground the names sit on
 export function playerTextColor(pid) {
   const bright = skinColor(pid, 'primaryBright', (S.colorOverride[pid] ?? (player(pid) || {}).color_id));
   if (bright) return bright;
   const c = playerColor(pid);
   const n = parseInt(c.slice(1), 16);
-  const mix = (v) => Math.round(v + (255 - v) * 0.38);
-  return `rgb(${mix((n >> 16) & 255)},${mix((n >> 8) & 255)},${mix(n & 255)})`;
+  // Lightened towards white until it reads on a dark panel: at least 4.5:1 against
+  // the panel background (the game's blue at the old fixed 38 % was 4.15:1).
+  const lin = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+  const lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+  const base = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  let k = 0.38, rgb = base.map((v) => Math.round(v + (255 - v) * k));
+  while (k < 0.8 && (lum(rgb) + 0.05) / (PANEL_LUMINANCE + 0.05) < 4.6) { k += 0.04; rgb = base.map((v) => Math.round(v + (255 - v) * k)); }
+  return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
 }
 
 export function cyclePlayerColor(pid) {

@@ -16,6 +16,8 @@ const PANEL_BY_CODE = Object.fromEntries(Object.entries(PANEL_CODES).map(([id, c
 
 /** The Pulse strip's metrics, in display order: id -> code in a share hash. */
 export const PULSE_METRICS = ['age', 'vil', 'mil', 'army', 'idle', 'pop', 'bank', 'rate', 'banksum', 'ratesum', 'kd', 'score', 'eapm'];
+/** What the strip itself prints for a metric, where that is not the start of its name. */
+export const PULSE_METRIC_SHORT = { banksum: 'Bank', ratesum: '/min', kd: 'K / L', rate: '+n/min', pop: 'Pop', army: 'Army', vil: 'Vil', mil: 'Mil', idle: 'Idle' };
 export const PULSE_METRIC_LABELS = {
   age: 'Age', vil: 'Villagers', mil: 'Military', army: 'Army value', idle: 'Idle villagers', pop: 'Population',
   bank: 'Banked resources', rate: 'Collection rate beside each resource', banksum: 'Banked, total', ratesum: 'Collection rate, total',
@@ -68,6 +70,8 @@ export function defaultHud() {
     widgets: {},        // widget id -> its content ({ series }, { text, image })
     layouts: {},        // name -> a saved layout (snapshotLayout)
     layoutName: '',
+    drawerLeft: false,  // the Customize drawer on the left edge (it covers what is under it)
+    link: '',           // the share link the viewer last made their own (not re-applied over their changes)
   };
 }
 
@@ -92,7 +96,7 @@ export function normalizeHud(raw) {
     }
   }
   if (out.preset === CUSTOM && !out.edits[CUSTOM]) out.preset = 'full';
-  for (const key of ['hintSeen', 'lock', 'snap', 'safeArea', 'dedupe']) if (typeof raw[key] === 'boolean') out[key] = raw[key];
+  for (const key of ['hintSeen', 'lock', 'snap', 'safeArea', 'dedupe', 'drawerLeft']) if (typeof raw[key] === 'boolean') out[key] = raw[key];
   if (['production', 'techs', 'eco', 'fight', 'none'].includes(raw.focus)) out.focus = raw.focus;
   if (raw.scene === 'auto' || SCENE_IDS.includes(raw.scene)) out.scene = raw.scene;
   if (raw.sceneHide && typeof raw.sceneHide === 'object') {
@@ -109,6 +113,7 @@ export function normalizeHud(raw) {
   if (raw.widgets && typeof raw.widgets === 'object' && !Array.isArray(raw.widgets)) out.widgets = { ...raw.widgets };
   if (raw.layouts && typeof raw.layouts === 'object' && !Array.isArray(raw.layouts)) out.layouts = { ...raw.layouts };
   if (typeof raw.layoutName === 'string') out.layoutName = raw.layoutName.slice(0, 40);
+  if (typeof raw.link === 'string') out.link = raw.link.slice(0, 400);
   return out;
 }
 
@@ -118,12 +123,13 @@ function clamp01(n) { return Math.max(0, Math.min(1, n)); }
  * The preset a viewer starts on. Saved settings always win (an existing setup
  * keeps Full, today's HUD); a link (?hud= or #hud=) picks for this visit; a
  * new viewer gets Minimal when the viewer is hosted (a hub embed or a hub
- * match page) and Full in the desktop app.
+ * match page) or on a phone (a narrow touch screen), and Full in the desktop app.
  */
-export function initialPreset({ hasSaved = false, savedPreset = null, embedded = false, hosted = false, requested = null } = {}) {
+export function initialPreset({ hasSaved = false, savedPreset = null, embedded = false, hosted = false, phone = false, requested = null } = {}) {
   if (requested && isPreset(requested) && requested !== CUSTOM) return requested;
   if (hasSaved) return isPreset(savedPreset) ? savedPreset : 'full';
-  return embedded || hosted ? 'minimal' : 'full';
+  // Full has no phone layout: on a narrow touch screen it would be cut off at both edges.
+  return embedded || hosted || phone ? 'minimal' : 'full';
 }
 
 // -- panels and metrics of a preset ------------------------------------------------------------

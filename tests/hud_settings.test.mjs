@@ -4,13 +4,15 @@ import { test } from 'node:test';
 // state.js reads localStorage, window and location when it is imported, so each
 // case imports a fresh copy (a query string makes a new module instance).
 let n = 0;
-async function load({ saved = null, embedded = false, pathname = '/', search = '', broken = false } = {}) {
+async function load({ saved = null, embedded = false, pathname = '/', search = '', broken = false, phone = false } = {}) {
   const store = new Map(saved == null ? [] : [['vantage.settings.v1', typeof saved === 'string' ? saved : JSON.stringify(saved)]]);
   const self = { addEventListener() {} };
   self.self = self; self.top = embedded ? {} : self;
   globalThis.window = self;
   globalThis.document = { getElementById() { return null; }, addEventListener() {} };
   globalThis.location = { pathname, search, hash: '' };
+  // The only media query asked at load is "a narrow or short touch screen".
+  globalThis.matchMedia = (query) => ({ matches: phone && /pointer: coarse/.test(query) });
   globalThis.localStorage = broken
     ? { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } }
     : { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => { store.set(k, v); } };
@@ -32,7 +34,15 @@ test('a brand-new viewer on a hub match page starts on Minimal', async () => {
 test('the desktop app (vantage serve, not embedded) starts on Full', async () => {
   const { mod } = await load();
   assert.equal(mod.settings.hud.preset, 'full');
-  assert.deepEqual(mod.hudEnvironment(), { embedded: false, hosted: false, requested: null });
+  assert.deepEqual(mod.hudEnvironment(), { embedded: false, hosted: false, phone: false, requested: null });
+});
+
+test('a brand-new viewer on a phone (a narrow touch screen) starts on Minimal, the preset with a phone layout', async () => {
+  const { mod } = await load({ phone: true });
+  assert.equal(mod.hudEnvironment().phone, true);
+  assert.equal(mod.settings.hud.preset, 'minimal');
+  const saved = await load({ phone: true, saved: { settingsVersion: 10, hud: { preset: 'full' } } });
+  assert.equal(saved.mod.settings.hud.preset, 'full', 'a saved Full stays Full on a phone too');
 });
 
 test('existing saved settings keep Full, even inside a hub embed', async () => {

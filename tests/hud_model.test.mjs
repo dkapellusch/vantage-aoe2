@@ -20,6 +20,8 @@ test('a new viewer starts on Minimal when hosted or embedded and on Full in the 
   assert.equal(M.initialPreset({ hasSaved: false, embedded: true }), 'minimal');
   assert.equal(M.initialPreset({ hasSaved: false, hosted: true }), 'minimal');
   assert.equal(M.initialPreset({ hasSaved: false }), 'full');
+  assert.equal(M.initialPreset({ hasSaved: false, phone: true }), 'minimal');
+  assert.equal(M.initialPreset({ hasSaved: true, phone: true }), 'full');
   assert.equal(M.initialPreset({ hasSaved: true, embedded: true, hosted: true }), 'full');
   assert.equal(M.initialPreset({ hasSaved: true, savedPreset: 'review', embedded: true }), 'review');
   assert.equal(M.initialPreset({ hasSaved: true, savedPreset: 'nonsense' }), 'full');

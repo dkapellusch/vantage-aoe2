@@ -63,6 +63,7 @@ export function panelInfo(id) { return byId.get(id) || null; }
 // -- the HUD object: saved settings, plus a link's choice for this visit ---------------------------
 
 let link = null;        // a decoded #hud= / ?hud= link: applies until the viewer changes the HUD
+let linkText = '';      // that link as written
 let linkScene = null;   // the scene a link asks for (an OBS scene's browser source)
 let peek = false;       // hold-to-peek: the Full HUD while the key is down
 let editorScene = null; // the scene being edited (layout editor)
@@ -76,8 +77,10 @@ export function hud() {
 
 /** Replace the HUD (immutably) and save it. A link's choice becomes the viewer's own once they edit. */
 export function setHud(next, { save = true } = {}) {
+  // The link's HUD is the viewer's own from here on: reloading the same link keeps their changes.
+  const adopted = link ? linkText : (next && next.link) || '';
   link = null;
-  settings.hud = normalizeHud(next);
+  settings.hud = normalizeHud({ ...next, link: adopted });
   if (save) saveSettings();
   applyPanels();
   document.dispatchEvent(new CustomEvent('vantage:hud-changed'));
@@ -86,8 +89,15 @@ export function setHud(next, { save = true } = {}) {
 /** Read #hud= (and ?hud=) once at start, and again when the hash changes. */
 export function readLink() {
   const hash = parseHash(typeof location !== 'undefined' ? location.hash : '');
-  const decoded = decodeHud(hash.hud || hudEnvironment().requested || '');
-  link = decoded && !(decoded.preset === (settings.hud || {}).preset && !decoded.panels) ? decoded : null;
+  const text = hash.hud || hudEnvironment().requested || '';
+  const decoded = decodeHud(text);
+  // A link the viewer already made their own is not applied over their changes when the page is
+  // reloaded; following it afresh applies it again.
+  let reloaded = false;
+  try { reloaded = ['reload', 'back_forward'].includes(performance.getEntriesByType('navigation')[0].type); } catch (e) { /* no navigation timing */ }
+  const mine = reloaded && !!text && (settings.hud || {}).link === text;
+  link = decoded && !mine && !(decoded.preset === (settings.hud || {}).preset && !decoded.panels) ? decoded : null;
+  linkText = link ? text : '';
   linkScene = decoded && decoded.scene ? decoded.scene : null;
   return { decoded, layout: hash.layout || null };
 }
@@ -352,7 +362,7 @@ export function maybeHint(used = false) {
   el.id = 'hud-hint'; el.className = 'panel'; el.setAttribute('role', 'status');
   const keys = PRESET_ORDER.map((name) => `<span><kbd>${binding(STOCK[name].action)}</kbd> ${t(STOCK[name].label)}</span>`).join('');
   el.innerHTML = `<b>${t('Pick how much HUD you want')}</b>
-    <span class="hint-keys">${keys}<span><kbd>${binding('peekFullHud')}</kbd> ${t('hold: peek at Full')}</span></span>
+    <span class="hint-keys">${keys}<span><kbd class="wide">${binding('peekFullHud')}</kbd> ${t('hold (the key left of 1): peek at Full')}</span></span>
     <span class="hint-phone">${t('The tabs below open the tables; More has Customize.')}</span>
     <button type="button" data-hint="customize">${t('Customize…')}</button>
     <button type="button" data-hint="dismiss" aria-label="${t('Dismiss this hint')}">${t('Got it')}</button>`;
