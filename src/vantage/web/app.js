@@ -1063,7 +1063,7 @@ const noRoomNoted = new Set();
 const leftColObserver = new ResizeObserver(() => layoutLeftColumn());
 
 let hudTimer = null;
-let hintChecked = false;
+let hintChecked = false, tutorialShown = false;
 let tooltipMode = null;
 // While a mouse button is held on the UI, the 250 ms re-render waits: a panel
 // rebuilt between mousedown and mouseup loses the click.
@@ -1103,7 +1103,8 @@ function renderHud() {
   // The newer panels (Pulse strip, Focus slot, Match story, widgets): only the visible ones render.
   layout.renderExtras();
   layout.applyPanels();
-  if (!hintChecked && document.body.dataset.startup === 'ready' && !document.querySelector('.overlay:not(.hidden)')) { hintChecked = true; layout.maybeHint(); }
+  // The presets hint waits for a visit without the tutorial: two introductions in a row is one too many.
+  if (!hintChecked && document.body.dataset.startup === 'ready' && !document.querySelector('.overlay:not(.hidden)')) { hintChecked = true; if (!tutorialShown) layout.maybeHint(); }
   const pp = settings.post || {};
   const g = pp.gamma || 1;
   // Only on change: rewriting the SVG filter invalidates the CSS filter using it.
@@ -1383,7 +1384,7 @@ function onSelect(sel) {
   if (sel.rows.length && !sel.ctrl) audio.selectionSound(sel.rows[0][2]);
   panels.rememberSelection();
   // A hidden selection panel looks like a broken click: say where it went, once.
-  if (S.selection.size && !layout.isVisible('unitpanel') && !hiddenSelectionHinted) {
+  if (S.selection.size && !layout.isVisible('unitpanel') && !layout.isVisible('selchip') && !layout.isPhone() && !hiddenSelectionHinted) {
     hiddenSelectionHinted = true;
     toast(t('{p} hidden · ▣ Customize (Alt+V) brings it back', { p: t('Selection panel') }));
   }
@@ -1884,6 +1885,7 @@ const ROR_TUTORIAL = [
 ];
 let tutorialSkip = null;
 function showTutorial(i, steps = TUTORIAL, seenKey = 'seenTutorial') {
+  tutorialShown = true;
   const el = $('overlay-help');
   tutorialSkip = () => showTutorial(steps.length, steps, seenKey);
   if (i >= steps.length) {
@@ -2049,7 +2051,12 @@ const BASE_COLOR_NAMES = { default: 'Game colours', coldWarm: 'Cold / warm colou
 
 const ACTIONS = {
   // Full: the scrub bar folds away (as before). Other presets: the time controls show or hide.
-  toggleScrubbingBar: () => { if (layout.activePreset() === 'full') $('timebar').classList.toggle('compact'); else layout.toggleVisible('timebar'); },
+  toggleScrubbingBar: () => {
+    if (layout.activePreset() === 'full') { $('timebar').classList.toggle('compact'); return; }
+    layout.toggleVisible('timebar');
+    // Say what changed: while paused the bar shows either way, so the key would look dead.
+    toast(t(layout.isVisible('timebar') ? 'Time controls: always shown' : layout.isAuto('timebar') ? 'Time controls: shown near the bottom edge and while paused' : 'Time controls hidden'));
+  },
   pause: togglePause,
   playPause: togglePause,
   speedStepUp: () => setSpeed(S.speedIndex + 1),
@@ -2348,6 +2355,23 @@ function wire() {
   window.addEventListener('hashchange', () => { layout.readLink(); renderHud(); });
   installPanelResizing(renderHud);
   $('btn-help').onclick = ACTIONS.openHelp;
+  // Skip links: the first Tab stops. They take the keyboard straight to the time controls, the
+  // toolbar, Customize or Statistics instead of through every panel on the way.
+  $('skip-links').onclick = (e) => {
+    const to = e.target.closest('[data-skip]')?.dataset.skip;
+    if (!to) return;
+    if (to === 'customize') layout.togglePanelsMenu();
+    else if (to === 'stats') overlays.openStats(seek);
+    else if (to === 'tools') $('btn-menu').focus();
+    else {
+      // The Match story carries the playback buttons where it is shown; else the time controls
+      // (pinned on screen first where they only appear by themselves).
+      const story = document.querySelector('#story:not(.panel-off) .st-play');
+      if (story) story.focus();
+      else { if (layout.isAuto('timebar')) layout.setVisible('timebar', true); renderHud(); $('tc-play').focus(); }
+    }
+    renderHud();
+  };
   $('highlight-bar').onclick = (e) => {
     const b = e.target.closest('[data-hl]');
     if (!b) return;

@@ -114,7 +114,7 @@ export function performanceCells(data, grouped, scope = 'life', productionOnly =
     ['kills', totals ? fmtNum(totals.kills) : '–', t('Kills'), t('Enemy units and buildings killed in this time window')],
     ['deaths', totals ? fmtNum(totals.deaths) : '–', t('Losses'), t('Losses among the pinned selection in this time window')],
     ['value', destroyed, t('Destroyed'), `${t('Victim resource cost at the kill')}${resources ? ` · ${resources}` : ''}${data?.destroyed_unknown ? ` · ${t('Unknown costs')}: ${data.destroyed_unknown}` : ''}`],
-    ['idle', idle, grouped ? t('Idle · unit·min') : t('Idle for'), building ? buildingMethod : t('Observed idle time; groups sum the time of their selected units')],
+    ['idle', idle, grouped ? t('Idle · unit·min') : t('Idle time'), building ? buildingMethod : t('Observed idle time; groups sum the time of their selected units')],
     ['pressure', data?.forced_idle_seconds != null ? `≈${(data.forced_idle_seconds / 60).toFixed(1)}` : '–', t('Raid idle · vil·min'), t('Estimated downtime of directly attacked workers moving, idle or garrisoned within 15 seconds and 12 tiles; excludes unhit workers and avoids double counting')],
   ];
   const duration = seconds => grouped ? `${((seconds || 0) / 60).toFixed(1)} ${t('unit·min')}` : fmtTime((seconds || 0) * 1000);

@@ -29,6 +29,10 @@ All notable changes to Vantage are documented here. The format follows
   metrics, a chart of any series, the series score, a text or image), an inspector (size, scale,
   opacity, anchor, scenes, content, stream checks), a snap grid, a safe-area frame, a reserved webcam
   zone and undo. Every drag has a keyboard equivalent.
+- A new viewer on a phone (a narrow touch screen) starts on Minimal, as embeds do: Full has no
+  phone layout.
+- Skip links (the first Tab stops) to the time controls, the toolbar, Customize and Statistics;
+  spoken names for the controls drawn as a glyph (time controls, paging, event filters).
 - A phone layout for every preset but Full: the map, two Pulse rows, the Match story and tabs that
   open a bottom sheet (a right-hand drawer in landscape).
 - Toggle keys for the Dashboard (<kbd>Alt+B</kbd>), Event log (<kbd>Alt+E</kbd>), Selection panel
@@ -85,6 +89,12 @@ All notable changes to Vantage are documented here. The format follows
   and an OBS source of another size. Pixel rectangles from older versions convert on first use.
 - Panels resize from all four edges as well as the corners, the bottom-right grip is visible, and
   the hover toolbar names its panel.
+- In a small window (a 720p stream, a 1366x768 laptop) no text is drawn under 12 px. At 1080p and
+  up sizes are unchanged.
+- Player names are lightened until they reach 4.5:1 on the panels (the game's blue was 4.15:1).
+- Farms name their working farmers instead of listing entity ids; a villager group has one row
+  per role; armour rows say "Arm"; tooltips no longer show the game's unused armour classes or an
+  empty cost slot.
 - One name per metric everywhere: Army value (was also "MIL VALUE" and "Military value"), Military,
   Villagers, Idle villagers, Collected, Kills / Losses. The "Team overview" panel is the Team board.
 - The **Minimal UI** checkbox picks the Minimal preset (it wrote a setting nothing read).

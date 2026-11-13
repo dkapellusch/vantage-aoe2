@@ -33,7 +33,7 @@ How much is on screen is a preset, one key each:
 
 Hold <kbd>`</kbd> to peek at Full while the key is down. Full is your own HUD and no preset changes it. Each of the others keeps its own edits: tick a panel on in Caster and Review is untouched; a changed preset shows a dot in Customize, with **Restore default** beside it.
 
-A new viewer starts on Minimal when Vantage is embedded in another page or hosted by a hub, and on Full in the desktop app. Saved settings always keep the preset they had.
+A new viewer starts on Minimal when Vantage is embedded in another page, hosted by a hub, or opened on a phone (a narrow touch screen), and on Full in the desktop app. Saved settings always keep the preset they had.
 
 The panels the presets add:
 

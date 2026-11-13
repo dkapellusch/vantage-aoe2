@@ -17,9 +17,10 @@ import { METRICS } from './metrics.js';
 import { sumStat } from './team-board.js';
 import { fightsOf, fightForRecap, tickerEvents } from './fights.js';
 import { compareTableHtml, sideStats } from './compare-table.js';
-import { hud, setHud, expandSelection, isVisible } from './layout.js';
+import { hud, setHud, expandSelection, selectionExpanded, isVisible } from './layout.js';
 
-const CARDS = [['production', 'Prod', 'Production & composition'], ['techs', 'Tech', 'Research'], ['eco', 'Eco', 'Economy'], ['fight', 'Fight', 'Last fight']];
+// The card titles say "Focus": the production card is not the Production & composition panel.
+const CARDS = [['production', 'Prod', 'Focus: production'], ['techs', 'Tech', 'Focus: research'], ['eco', 'Eco', 'Focus: economy'], ['fight', 'Fight', 'Focus: last fight']];
 
 function sides() {
   const teams = HUD_PARTS.orderedTeams();
@@ -97,9 +98,20 @@ function renderTicker(el, ctx) {
 
 function renderChip(el, ctx) {
   HUD_PARTS.delegate(el, 'click', '[data-chip]', () => { expandSelection(true); ctx.onChange(); });
+  HUD_PARTS.delegate(el, 'click', '[data-chip-back]', () => { expandSelection(false); ctx.onChange(); });
   const rows = S.view ? selectedRows() : [];
   // The full panel replaces the chip once it is open (or when the preset shows it anyway).
-  if (!rows.length || isVisible('unitpanel')) { el.classList.add('empty'); HUD_PARTS.setHtml(el, ''); if (!rows.length) expandSelection(false); return; }
+  if (!rows.length) { el.classList.add('empty'); el.classList.remove('back'); HUD_PARTS.setHtml(el, ''); expandSelection(false); return; }
+  // Opened into the full panel from the chip: the chip becomes the way back, just above the panel.
+  if (selectionExpanded()) {
+    const up = document.getElementById('unitpanel'), r = up && up.getClientRects().length ? up.getBoundingClientRect() : null;
+    el.classList.remove('empty'); el.classList.add('back');
+    if (r && !el.classList.contains('hud-custom-size')) { el.style.bottom = `${Math.round(window.innerHeight - r.top + 6)}px`; el.style.right = `${Math.round(window.innerWidth - r.right)}px`; }
+    HUD_PARTS.setHtml(el, `<button type="button" data-chip-back aria-label="${esc(t('Back to the one-line selection chip'))}">▾ ${esc(t('compact'))}</button>`);
+    return;
+  }
+  el.classList.remove('back'); el.style.bottom = ''; el.style.right = '';
+  if (isVisible('unitpanel')) { el.classList.add('empty'); HUD_PARTS.setHtml(el, ''); return; }
   el.classList.remove('empty');
   const r = rows[0], info = unitInfo(r[2], r[1], r[0]);
   const owners = [...new Set(rows.map((x) => x[1]))];

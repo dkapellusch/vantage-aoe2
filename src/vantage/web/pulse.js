@@ -41,7 +41,7 @@ function bankHtml(stats, pid, showBank, showRate) {
     const bank = sumStat(stats, (s) => s.resources?.[r]), rate = sumStat(stats, (s) => s.collected_rate?.[r]);
     if (bank == null && rate == null) return '';
     const spoken = `${t(RES_LABEL[r])}${showBank && bank != null ? ` ${fmtStock(bank)} ${t('banked')}` : ''}${showRate && rate != null ? `, ${t('{n} per minute', { n: fmtNum(rate) })}` : ''}`;
-    return `<button type="button" class="pm res ${r}" data-ui-key="res-${r}" data-series="${showBank ? `res_${r}` : `rate_${r}`}" data-pid="${pid}" aria-label="${esc(spoken)}"><img src="/ui/resource_${r}.png" alt="">${showBank && bank != null ? `<b class="pm-v">${fmtStock(bank)}</b>` : ''}${showRate && rate != null ? `<small class="pm-rate">+${fmtNum(rate)}</small>` : ''}</button>`;
+    return `<button type="button" class="pm res ${r}" data-ui-key="res-${r}" data-series="${showBank ? `res_${r}` : `rate_${r}`}" data-pid="${pid}" aria-label="${esc(spoken)}"><img src="/ui/resource_${r}.png" alt="">${showBank && bank != null ? `<b class="pm-v">${fmtStock(bank)}</b>` : ''}${showRate && rate != null ? `<small class="pm-rate">+${fmtNum(rate)}<span class="pm-unit">/${t('min')}</span></small>` : ''}</button>`;
   }).join('');
 }
 

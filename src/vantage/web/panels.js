@@ -1621,7 +1621,7 @@ export function eventCat(e) {
 
 export function renderEventFilters(onChange) {
   const el = $('event-filters');
-  patchHtml(el, EVENT_CATS.map(([k, icon, title]) => `<button data-cat="${k}" ${tip(t(title), t('click: show or hide'))} class="${settings.eventFilterOut.includes(k) ? '' : 'on'}">${icon}</button>`).join(''));
+  patchHtml(el, EVENT_CATS.map(([k, icon, title]) => `<button data-cat="${k}" aria-label="${esc(t('Events: {kind}', { kind: t(title) }))}" aria-pressed="${!settings.eventFilterOut.includes(k)}" ${tip(t(title), t('click: show or hide'))} class="${settings.eventFilterOut.includes(k) ? '' : 'on'}">${icon}</button>`).join(''));
   el.querySelectorAll('button').forEach((b) => { b.onclick = () => {
     const k = b.dataset.cat;
     const i = settings.eventFilterOut.indexOf(k);
@@ -1991,9 +1991,12 @@ function modRows(rows, pairs) {
   return (rows || []).map(([c, b, cur]) => [+c, b, m.has(+c) ? m.get(+c) : (has(cur) ? cur : b)]);
 }
 function classTip(rows) {
-  return (rows || []).map(([c, b, cur]) => `${className(c)} ${baseDeltaText(b, cur)}`).join('\n');
+  // The game's data names some classes it never uses ("Unused Armor 31"): they are left out.
+  return (rows || []).filter(([c]) => !/^unused\b/i.test(className(c))).map(([c, b, cur]) => `${className(c)} ${baseDeltaText(b, cur)}`).join('\n');
 }
-const stripMarkup = (s) => String(s || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+// The game's help texts carry a <cost> placeholder ("Advance to Feudal Age (<cost>; two …)"):
+// with no cost to put there, the empty slot and its separator go too.
+const stripMarkup = (s) => String(s || '').replace(/<br\s*\/?>/gi, '\n').replace(/<cost>\s*[;,]?\s*/gi, '').replace(/<[^>]+>/g, '').replace(/\(\s*\)/g, '').replace(/\(\s*[;,]\s*/g, '(');
 // The live modifiers of one entity from the keyframe (power-ups, stingers, charge…).
 function unitMods(id) {
   const m = S.view && S.view.unit_mods;
@@ -2103,6 +2106,8 @@ function singlePanel(el, r) {
   const hpMax = has(mods.hp_max) ? mods.hp_max : (sv('hp') || u.hp);
   const base = (us && us.base) || {};
   const row = (label, value, detail = '') => (value === '' || value == null ? '' : `<div ${tip(t(label), detail)}><span>${t(label)}</span> ${value}</div>`);
+  // Armour is labelled as armour ("Arm Melee"), so it is not read as a second attack figure.
+  const armRow = (kind, value) => (value === '' || value == null ? '' : `<div ${tip(`${t(kind)} ${t('armor')}`, armTip)}><span>${t('Arm')} ${t(kind)}</span> ${value}</div>`);
   const nonZero = (v) => has(v) && v !== 0;
   // Attack / armour rows in the game's order as [class, base, current]; older
   // servers send only the master's pairs.
@@ -2142,8 +2147,8 @@ function singlePanel(el, r) {
   const chargeFillHtml = ch && chargeShown && has(mods.charge_fill) ? `<div class="hint">${t('Charge')}</div>${bar(mods.charge_fill, 'var(--accent)', t('Charge'))}` : '';
   const chargeRow = chargeShown ? row('Charge', Math.round(chargeVal), t('Charge attack') + (has(rechargeS) ? ` · ${t('Recharges in {n}s', { n: r2(rechargeS) })}` : '')) : '';
   const statsHtml = `${atk ? row('Atk', baseDelta(atk[1], atk[2]), atkTip) : ''}
-    ${mArm ? row('Melee', baseDelta(mArm[1], mArm[2]), armTip) : nonZero(sv('melee_armor')) ? row('Melee', sv('melee_armor'), armTip) : ''}
-    ${pArm ? row('Pierce', baseDelta(pArm[1], pArm[2]), armTip) : nonZero(sv('pierce_armor')) ? row('Pierce', sv('pierce_armor'), armTip) : ''}
+    ${mArm ? armRow('Melee', baseDelta(mArm[1], mArm[2])) : nonZero(sv('melee_armor')) ? armRow('Melee', sv('melee_armor')) : ''}
+    ${pArm ? armRow('Pierce', baseDelta(pArm[1], pArm[2])) : nonZero(sv('pierce_armor')) ? armRow('Pierce', sv('pierce_armor')) : ''}
     ${nonZero(rng.cur) || nonZero(rng.base) ? row('Range', baseDelta(rng.base, rng.cur)) : ''}${nonZero(sv('min_range')) ? row('Min range', sv('min_range')) : ''}
     ${nonZero(sp.cur) ? row('Speed', baseDelta(sp.base, sp.cur), mods.charging && us && us.charge_speed > 1 ? t('Charging') : '') : ''}
     ${nonZero(rel.cur) ? row('Reload', baseDelta(rel.base, rel.cur), t('Seconds between attacks')) : ''}
@@ -2209,7 +2214,7 @@ function singlePanel(el, r) {
     <div class="hint">${t('HP')} ${numbersReady ? `${Math.round(r[5] * hpMax)} / ${baseDelta(base.hp ?? (sv('hp') || u.hp), hpMax)}` : '– / –'}${r[6] & 8 && u.cls !== 49 ? ` · <b style="color:var(--bad)">${t('idle')}</b>` : doing}${r[6] & 16 && !consHtml ? ` · ${t('under construction')}` : ''}</div>
     ${consHtml}${faithHtml}${healingCells(us?.healing, { lifetime: true })}${chargeFillHtml}${gateHtml}
     ${farmReviewHtml(us, { techName: id => techInfoFor(id, owner).name,
-      farmers: Object.entries(S.view?.gather_targets || {}).filter(([id, target]) => +target === r[0] && rowForEntityId(+id)?.[9] === 2).map(([id]) => +id) })}
+      farmers: Object.entries(S.view?.gather_targets || {}).filter(([id, target]) => +target === r[0] && rowForEntityId(+id)?.[9] === 2).map(([id]) => { const fr = rowForEntityId(+id); return { id: +id, name: fr ? unitInfo(fr[2], fr[1], fr[0]).name : '' }; }) })}
     ${economic && u.kind === 'building' ? (nonZero(rng.cur) || us?.kills || us?.dealt) ? militaryCard([r[0]]) : isProductionBuilding(r[2]) ? militaryCard([r[0]], { healing: false, productionOnly: true }) : '' : ''}${workingHtml}${economic ? `<details class="review-details" data-panel-detail="mechanics"><summary>${t('Details')}</summary>${resourceTotalsHtml(us?.resource_totals, u.cls === 4)}${mechanics}${eff}${combatHtml(us)}</details>` : `${militaryCard([r[0]], { healing: false })}${mechanics}`}
     ${garHtml}${us?.farm ? '' : relevantUpgrades([r])}
     ${r[1] > 0 && u.cost && Object.keys(u.cost).length ? `<div class="hint" style="margin-top:4px">${t('Cost')}: ${costText(u.cost)}</div>` : ''}
@@ -2292,7 +2297,7 @@ function groupHtml(rows, deadIds, compact = false) {
     // By name: a villager's task variants (male/female gold miners) are one row.
     const resolved = groupEntityStats(gs, r);
     const st = resolved.stats || {}, authoritative = resolved.authoritative;
-    const k = `${r[1]}:${u.name}:${u.icon}:${u.kind}${authoritative ? ':' + groupStatKey(resolved.stats, true) : ''}`;
+    const k = `${r[1]}:${u.name}:${u.kind}${authoritative ? ':' + groupStatKey(resolved.stats, true) : ''}`;
     let e = types.get(k);
     if (!e) types.set(k, (e = { o: r[1], mid: r[2], mids: new Set(), ids: [], n: 0, hp: 0, max: 0, u, st, authoritative }));
     e.mids.add(r[2]); e.ids.push(r[0]);

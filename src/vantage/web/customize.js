@@ -13,9 +13,9 @@ import { binding } from './hotkeys.js';
 import {
   PANELS, PRESETS, PRESET_ORDER, hud, setHud, applyPreset, isVisible, setVisible, isCollapsed, setCollapsed, presetIsChanged,
   restorePresetDefault, pulseMetrics, setPulseMetric, shareHash, LAYOUTS, hudLayout, setHudLayout, toggleEditLayout,
-  showEverything, resetHud, applyPanels, scene,
+  showEverything, resetHud, applyPanels, scene, headlinePanel, isAuto,
 } from './layout.js';
-import { PULSE_METRICS, PULSE_METRIC_LABELS, CUSTOM, snapshotLayout, layoutPatch, SCENES } from './hud-model.js';
+import { PULSE_METRICS, PULSE_METRIC_LABELS, PULSE_METRIC_SHORT, CUSTOM, snapshotLayout, layoutPatch, SCENES } from './hud-model.js';
 import { METRICS } from './metrics.js';
 import { SECTIONS } from './team-board.js';
 import { resetPanelSizes, syncPanelSizes } from './panel-resize.js';
@@ -36,12 +36,16 @@ function presetsHtml() {
   const cur = PRESETS[h.preset] || { detail: 'From a shared link' };
   const restore = h.preset !== CUSTOM && presetIsChanged(h.preset) ? `<button type="button" data-cz="restore">${esc(t('Restore default'))}</button>` : '';
   return `<div class="cz-presets" role="radiogroup" aria-label="${esc(t('HUD preset'))}">${buttons}</div>
-    <p class="hint cz-detail">${esc(t(cur.detail))}. ${restore} ${t('Hold {key} to peek at the Full HUD.', { key: `<kbd>${esc(binding('peekFullHud'))}</kbd>` })}</p>`;
+    <p class="hint cz-detail">${esc(t(cur.detail))}. ${restore} <span class="cz-keys">${t('Hold {key} to peek at the Full HUD.', { key: `<kbd>${esc(binding('peekFullHud'))}</kbd>` })}</span></p>`;
 }
 
 function panelRow(p) {
   const on = isVisible(p.id);
-  return `<div class="cz-row"><label ${p.detail ? tip(t(p.label), t(p.detail)) : ''}><input type="checkbox" data-cz-show="${p.id}" ${on ? 'checked' : ''}> ${esc(t(p.label))}</label>${key(p.action)}${p.collapse ? `<button type="button" data-cz-collapse="${p.id}" aria-pressed="${isCollapsed(p.id)}" aria-label="${esc(t('Collapse {p} to its top strip', { p: t(p.label) }))}">${isCollapsed(p.id) ? '▾' : '▴'}</button>` : ''}</div>`;
+  // Alt+G is listed beside the one panel it toggles in this preset (the Pulse strip or the Scoreboard).
+  const action = p.action === 'toggleScoreboard' && p.id !== headlinePanel() ? null : p.action;
+  // Why a box and the screen can differ: a panel that shows by itself, or only with a selection.
+  const note = !on && isAuto(p.id) ? t('shows while paused or near the bottom edge') : ['unitpanel', 'selchip'].includes(p.id) && on ? t('with a selection') : '';
+  return `<div class="cz-row"><label ${p.detail ? tip(t(p.label), t(p.detail)) : ''}><input type="checkbox" data-cz-show="${p.id}" ${on ? 'checked' : ''}> <span>${esc(t(p.label))}${note ? ` <small class="cz-note">${esc(note)}</small>` : ''}</span></label>${key(action)}${p.collapse ? `<button type="button" data-cz-collapse="${p.id}" aria-pressed="${isCollapsed(p.id)}" aria-label="${esc(t('Collapse {p} to its top strip', { p: t(p.label) }))}">${isCollapsed(p.id) ? '▾' : '▴'}</button>` : ''}</div>`;
 }
 
 function panelsHtml() {
@@ -53,7 +57,9 @@ function panelsHtml() {
 
 function metricsHtml() {
   const on = pulseMetrics(), pulse = isVisible('pulse');
-  return `<div class="cz-grid" ${pulse ? '' : `title="${esc(t('Shown when the Pulse strip is on'))}"`}>${PULSE_METRICS.map((id) => `<label><input type="checkbox" data-cz-metric="${id}" ${on.includes(id) ? 'checked' : ''}> ${esc(t(PULSE_METRIC_LABELS[id]))}</label>`).join('')}</div>`;
+  // Each name is followed by what the strip prints for it ("Bank", "/min", "K / L").
+  const short = (id) => (PULSE_METRIC_SHORT[id] ? ` <small class="cz-note">${esc(t(PULSE_METRIC_SHORT[id]))}</small>` : '');
+  return `${pulse ? '' : `<p class="hint cz-off">${esc(t('The Pulse strip is off: tick it under Panels to see these.'))}</p>`}<div class="cz-grid${pulse ? '' : ' off'}">${PULSE_METRICS.map((id) => `<label><input type="checkbox" data-cz-metric="${id}" ${on.includes(id) ? 'checked' : ''}> <span>${esc(t(PULSE_METRIC_LABELS[id]))}${short(id)}</span></label>`).join('')}</div>`;
 }
 
 function rowsHtml() {
@@ -65,7 +71,7 @@ function layoutHtml() {
   const h = hud(), full = h.preset === 'full';
   const names = Object.keys(h.layouts || {}).sort();
   return `${full ? `<div class="cz-line"><span class="hint">${esc(t('Placement'))}</span>${LAYOUTS.map(([k, l]) => `<button type="button" data-cz-layout="${k}" aria-pressed="${hudLayout() === k}">${esc(t(l))}</button>`).join('')}<button type="button" data-cz="everything" ${tip(t('Everything'), t('Every panel, none collapsed'))}>${esc(t('Everything'))}</button></div>` : ''}
-    <div class="cz-line"><button type="button" data-cz="edit" class="cz-primary" ${tip(t('Edit layout'), t('Drag panels, resize them, add widgets, set anchors and scenes'))}>${esc(t('Edit layout…'))} ${key('arrangePanels')}</button><button type="button" data-cz="reset-layout" ${tip(t('Reset layout'), t('Every panel back to its place and size'))}>${esc(t('Reset layout'))}</button></div>
+    <div class="cz-line"><button type="button" data-cz="reset-layout" ${tip(t('Reset layout'), t('Every panel back to its place and size'))}>${esc(t('Reset layout'))}</button></div>
     <div class="cz-line"><label for="cz-scene" class="hint">${esc(t('Scene'))}</label><select id="cz-scene" ${tip(t('Scene'), t('Panels can be tied to scenes in Edit layout. Auto follows the match: a fight, the end, nothing open.'))}><option value="auto">${esc(t('Auto'))}</option>${SCENES.map(([id, label]) => `<option value="${id}" ${h.scene === id ? 'selected' : ''}>${esc(t(label))}</option>`).join('')}</select></div>
     <label class="cz-check" ${tip(t('Lock panels'), t('Nothing moves or resizes by accident while watching: only Edit layout can'))}><input type="checkbox" data-cz-flag="lock" ${h.lock ? 'checked' : ''}> ${esc(t('Lock panels outside Edit layout'))}</label>
     <label class="cz-check" ${tip(t('Hide duplicates'), t('With the Team board on screen, the dashboard Overview drops Villagers, Idle, Military and Army value'))}><input type="checkbox" data-cz-flag="dedupe" ${h.dedupe ? 'checked' : ''}> ${esc(t('Hide dashboard columns the Team board shows'))}</label>
@@ -102,7 +108,9 @@ function checksHtml() {
     if (!el || !isVisible(p.id) || !el.getClientRects().length) continue;
     for (const c of panelChecks(el)) if (!c.ok) lines.push(`<li><b>${esc(t(p.label))}</b>: ${esc(t(c.text, c.args))}</li>`);
   }
-  return lines.length ? `<ul class="cz-checks">${lines.join('')}</ul>` : `<p class="hint cz-ok">✓ ${esc(t('Every panel passes: text sizes, safe area, map cover'))}</p>`;
+  // What to do about it, not only what is wrong.
+  const next = `<p class="hint cz-next">${esc(t('Small text: the dense tables (Team board, Dashboard, Event log) are for your own screen; for the stream use Minimal or Caster, or raise a panel\'s Scale in Edit layout. Safe area: the outer 2.5 % of the picture, which some screens crop; in Edit layout turn on Safe area and drag the panel inside the dashed frame. Map cover: make the panel smaller or hide it in the In-game scene.'))}</p>`;
+  return lines.length ? `<ul class="cz-checks">${lines.join('')}</ul>${next}` : `<p class="hint cz-ok">✓ ${esc(t('Every panel passes: text sizes, safe area, map cover'))}</p>`;
 }
 
 export function installCustomize(ctx) {
@@ -115,19 +123,22 @@ export function installCustomize(ctx) {
     const marker = focused ? ['data-preset', 'data-cz-show', 'data-cz-metric', 'data-cz-row', 'data-cz', 'data-cz-flag', 'data-cz-collapse', 'data-cz-layout', 'data-cz-copy', 'id']
       .map((a) => (focused.getAttribute(a) != null ? `[${a}="${CSS.escape(focused.getAttribute(a))}"]` : '')).find(Boolean) : null;
     const open = [...el.querySelectorAll('details[data-cz-sec]')].filter((d) => d.open).map((d) => d.dataset.czSec);
-    const sec = (id, title, body, first = false) => `<details data-cz-sec="${id}" ${first || open.includes(id) ? 'open' : ''}><summary><h3>${esc(t(title))}</h3></summary>${body}</details>`;
+    const fresh = !el.firstChild;
+    const sec = (id, title, body, first = false) => `<details data-cz-sec="${id}" ${(first && fresh) || open.includes(id) ? 'open' : ''}><summary><h3>${esc(t(title))}</h3></summary>${body}</details>`;
     const scroll = el.scrollTop;
-    el.innerHTML = `<div class="cz-head"><h2 id="customize-title">${esc(t('Customize'))}</h2><button type="button" data-cz="close" aria-label="${esc(t('Close'))}">${esc(t('✕ Esc'))}</button></div>
-      <p class="hint">${esc(t('Pick a preset, tick panels, tick metrics.'))} ${t('{key} edits the whole layout.', { key: key('arrangePanels') })}</p>
-      <section aria-label="${esc(t('Presets'))}"><h3>${esc(t('Presets'))}</h3>${presetsHtml()}</section>
+    el.innerHTML = `<div class="cz-head"><h2 id="customize-title">${esc(t('Customize'))}</h2><button type="button" data-cz="side" class="cz-side" aria-label="${esc(t('Move this drawer to the other side'))}" ${tip(t('Other side'), t('The drawer covers what is under it: move it to the other edge'))}>⇆</button><button type="button" data-cz="close" aria-label="${esc(t('Close'))}">${esc(t('✕ Esc'))}</button></div>
+      <p class="hint">${esc(t('Pick a preset, tick panels, tick metrics.'))} <span class="cz-keys">${t('{key} edits the whole layout.', { key: key('arrangePanels') })}</span></p>
+      <section aria-label="${esc(t('Presets'))}"><h3>${esc(t('Presets'))}</h3>${presetsHtml()}
+        <div class="cz-line cz-top"><button type="button" data-cz="edit" class="cz-primary" ${tip(t('Edit layout'), t('Drag panels, resize them, add widgets, set anchors and scenes'))}>${esc(t('Edit layout…'))} ${key('arrangePanels')}</button><button type="button" data-cz="goto-layout">${esc(t('Saved layouts ▾'))}</button></div></section>
       <section aria-label="${esc(t('Panels'))}"><h3>${esc(t('Panels'))} <span class="hint">· ${esc(t('scene: {scene}', { scene: sceneLabel() }))}</span></h3>${panelsHtml()}</section>
-      ${sec('metrics', 'Pulse strip metrics', metricsHtml(), !el.firstChild)}
+      ${sec('metrics', 'Pulse strip metrics', metricsHtml(), true)}
       ${sec('rows', 'Team board rows', rowsHtml())}
-      ${sec('layout', 'Layout', layoutHtml())}
+      ${sec('layout', 'Layout and saved layouts', layoutHtml(), true)}
       ${sec('share', 'Share link', shareHtml())}
       ${sec('check', 'Stream check', `<div class="cz-line"><button type="button" data-cz="check">${esc(t('Check the panels on screen'))}</button></div><div id="cz-check-out" role="status">${checks}</div>`)}
-      <div class="cz-foot"><button type="button" data-cz="reset-hud" class="warn" ${tip(t('Reset HUD to defaults'), t('The first preset, every preset as shipped, panels in their places. Saved layouts stay.'))}>${esc(t('Reset HUD to defaults'))}</button></div>`;
+      <div class="cz-foot"><button type="button" data-cz="close" class="cz-done">${esc(t('Done'))}</button><button type="button" data-cz="reset-hud" class="warn" ${tip(t('Reset HUD to defaults'), t('The first preset, every preset as shipped, panels in their places. Saved layouts stay.'))}>${esc(t('Reset HUD to defaults'))}</button></div>`;
     el.scrollTop = scroll;
+    el.classList.toggle('left', !!hud().drawerLeft);
     if (marker) { const again = el.querySelector(marker); if (again) again.focus({ preventScroll: true }); }
   }
 
@@ -204,6 +215,8 @@ export function installCustomize(ctx) {
     if (!b) return;
     const act = b.dataset.cz, name = () => ($('cz-layout-name').value || '').trim().slice(0, 40), picked = () => $('cz-layout-list').value;
     if (act === 'close') { close(); return; }
+    if (act === 'side') { setHud({ ...hud(), drawerLeft: !hud().drawerLeft }); render(); el.querySelector('[data-cz="side"]').focus(); return; }
+    if (act === 'goto-layout') { const d = el.querySelector('[data-cz-sec="layout"]'); d.open = true; d.scrollIntoView({ block: 'start' }); $('cz-layout-name').focus({ preventScroll: true }); return; }
     if (act === 'restore') restorePresetDefault(hud().preset);
     else if (act === 'edit') { close(); toggleEditLayout(); return; }
     else if (act === 'reset-layout') resetPanelSizes();
@@ -212,9 +225,9 @@ export function installCustomize(ctx) {
     else if (act === 'check') { checks = checksHtml(); }
     else if (act === 'save-layout') {
       if (!name()) { ctx.toast(t('Give the layout a name first')); $('cz-layout-name').focus(); return; }
-      const n = name();
+      const n = name(), existed = !!(hud().layouts || {})[n];
       setHud({ ...hud(), layoutName: n, layouts: { ...(hud().layouts || {}), [n]: snapshotLayout({ ...settings, hud: { ...hud(), layoutName: n } }, n) } });
-      ctx.toast(t('Layout saved: {name}', { name: n }));
+      ctx.toast(t(existed ? 'Layout replaced: {name}' : 'Layout saved: {name}', { name: n }));
     } else if (act === 'publish-layout') {
       const n = name() || picked();
       if (!n || !/^[\w -]{1,40}$/.test(n)) { ctx.toast(t('Use letters, digits, spaces, - and _ in the name')); return; }

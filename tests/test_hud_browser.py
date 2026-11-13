@@ -145,6 +145,32 @@ def test_desktop_app_starts_on_full_and_a_hub_embed_on_minimal(browser: Any, bas
     host.context.close()
 
 
+def test_new_touch_viewer_on_a_narrow_screen_gets_the_phone_layout(browser: Any, base: str) -> None:
+    # Full has no phone layout: at 390 px its time controls start off-screen. A new viewer on a
+    # phone opening the page directly starts on Minimal, which has one.
+    page = open_page(browser, base, saved=None, size=(390, 844), touch=True)
+    assert preset(page) == "minimal"
+    page.wait_for_function("document.body.classList.contains('hud-phone')")
+    page.wait_for_selector("#phone-tabs:not(.hidden)")
+    cut = page.evaluate(
+        """() => [...document.querySelectorAll('#hud .panel[id], #hud button')].filter((e) => {
+          if (!e.getClientRects().length) return false;
+          const r = e.getBoundingClientRect();
+          return r.left < -1 || r.right > innerWidth + 1; }).map((e) => e.id || e.className)"""
+    )
+    assert cut == [], cut
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.context.close()
+
+    # A touch tablet is wide enough for Full, and a saved Full stays Full on a phone.
+    tablet = open_page(browser, base, saved=None, size=(1024, 768), touch=True)
+    assert preset(tablet) == "full"
+    tablet.context.close()
+    kept = open_page(browser, base, saved=QUIET, size=(390, 844), touch=True)
+    assert preset(kept) == "full"
+    kept.context.close()
+
+
 def test_existing_settings_keep_full_inside_an_embed(browser: Any, base: str) -> None:
     ctx = browser.new_context(viewport={"width": 1600, "height": 900})
     ctx.add_init_script(
@@ -504,6 +530,93 @@ def test_layout_editor_move_resize_undo_and_exit(browser: Any, base: str) -> Non
     page.context.close()
 
 
+def test_layout_editor_keeps_sizes_focuses_on_click_and_has_a_grip(browser: Any, base: str) -> None:
+    page = open_page(browser, base, saved={**SEEN, "hud": {"preset": "caster", "hintSeen": True}})
+    page.wait_for_function("document.getElementById('ticker')")
+    page.keyboard.press("Alt+l")
+    page.wait_for_selector("#le-bar")
+
+    # A panel with nothing to show (the Event ticker between events) keeps a size to grab, and
+    # dragging it moves it without collapsing it to its padding.
+    x, y, w, h = page.evaluate(RECT, "ticker")
+    assert w >= 200 and h >= 30, (w, h)
+    page.mouse.move(x + 40, y + 12)
+    page.mouse.down()
+    page.mouse.move(x - 260, y + 212, steps=10)
+    page.mouse.up()
+    moved = page.evaluate(RECT, "ticker")
+    assert moved[0] < x - 200 and moved[1] > y + 150
+    assert moved[2] >= 200 and moved[3] >= 30, moved
+
+    # The press gave it the keyboard focus: the arrows act on what was just clicked.
+    assert page.evaluate("document.activeElement.id") == "ticker"
+    page.keyboard.press("ArrowLeft")
+    assert page.evaluate(RECT, "ticker")[0] == moved[0] - 10
+    page.keyboard.press("Alt+ArrowLeft")
+    page.keyboard.press("Alt+ArrowLeft")
+    for _ in range(40):
+        page.keyboard.press("Alt+ArrowUp")
+    small = page.evaluate(RECT, "ticker")
+    assert small[2] >= 220 and small[3] >= 30, "resizing stops at the panel's minimum"
+
+    # The inspector cannot make it smaller than that either.
+    page.fill('#le-insp [data-le-num="width"]', "1")
+    page.keyboard.press("Tab")
+    page.fill('#le-insp [data-le-num="height"]', "1")
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(200)
+    tiny = page.evaluate(RECT, "ticker")
+    assert tiny[2] >= 220 and tiny[3] >= 30, tiny
+
+    # A panel under the inspector pane: select it in the library, then drag its grip.
+    page.click('#le-lib [data-le-add="minimap"]')
+    grip = page.locator("#le-grip")
+    grip.wait_for(state="visible")
+    assert "Minimap" in grip.inner_text()
+    box = grip.bounding_box()
+    assert box is not None and box["x"] + box["width"] <= 1920 - 258, (
+        "the grip stays clear of the panes"
+    )
+    before = page.evaluate(RECT, "minimap-wrap")
+    page.mouse.move(box["x"] + 20, box["y"] + 8)
+    page.mouse.down()
+    page.mouse.move(box["x"] - 380, box["y"] - 292, steps=8)
+    page.mouse.up()
+    after = page.evaluate(RECT, "minimap-wrap")
+    assert after[0] < before[0] - 300 and after[1] < before[1] - 200
+    assert after[2:] == before[2:], "moved, not resized"
+    assert page.errors == []
+    page.context.close()
+
+
+def test_a_panel_hidden_in_a_scene_keeps_its_size_across_a_reload(browser: Any, base: str) -> None:
+    page = open_page(browser, base)
+    page.keyboard.press("Alt+l")
+    page.wait_for_selector("#le-bar")
+    page.click('#le-insp [data-le-fold="insp"]')
+    x, y, _, _ = page.evaluate(RECT, "events")
+    page.mouse.move(x + 40, y + 10)
+    page.mouse.down()
+    page.mouse.up()
+    page.click("#le-insp-tab")
+    page.fill('#le-insp [data-le-num="height"]', "30")
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(200)
+    sized = page.evaluate(RECT, "events")
+    assert abs(sized[3] - 324) <= 2
+    page.uncheck('#le-insp [data-le-scene-show="break"]')
+    page.click('#le-bar [data-le-scene="break"]')
+    assert "events" not in page.evaluate(VISIBLE)
+    page.click('#le-bar [data-le-scene=""]')
+    page.keyboard.press("Escape")
+    assert page.evaluate(RECT, "events") == sized
+    page.reload()
+    ready(page)
+    assert page.evaluate(RECT, "events") == sized
+    assert page.evaluate("window.vantage.settings.hud.sceneHide.events") == ["break"]
+    page.context.close()
+
+
 def test_layout_save_load_and_survive_another_window_size(browser: Any, base: str) -> None:
     page = open_page(browser, base, saved={**SEEN, "hud": {"preset": "caster", "hintSeen": True}})
     page.wait_for_function("document.getElementById('focus')")
@@ -520,7 +633,7 @@ def test_layout_save_load_and_survive_another_window_size(browser: Any, base: st
 
     page.keyboard.press("Alt+v")
     page.check('#panels-menu [data-cz-show="events"]')
-    page.click('#panels-menu [data-cz-sec="layout"] summary')
+    page.evaluate("document.querySelector('#panels-menu [data-cz-sec=layout]').open = true")
     page.fill("#cz-layout-name", "Cast A")
     page.click('#panels-menu [data-cz="save-layout"]')
     assert "Cast A" in saved_hud(page)["layouts"]
@@ -586,8 +699,9 @@ def test_pulse_strip_labels_and_text_sizes(browser: Any, base: str) -> None:
               return [Math.min(...px('#pulse .pm-v')), Math.min(...px('#pulse .pm-l'))]; }"""
         )
         assert sizes[0] >= minimum[0] and sizes[1] >= minimum[1], (size, sizes)
-        # Keyboard: Tab reaches the strip first, with a visible focus ring.
-        page.keyboard.press("Tab")
+        # Keyboard: after the four skip links, Tab reaches the strip, with a visible focus ring.
+        for _ in range(5):
+            page.keyboard.press("Tab")
         ring = page.evaluate(
             """() => { const e = document.activeElement, s = getComputedStyle(e);
               return [!!e.closest('#pulse'), s.outlineStyle, parseFloat(s.outlineWidth)]; }"""
@@ -621,6 +735,69 @@ def test_new_panels_keep_contrast_in_the_default_and_high_contrast_skins(
         page.wait_for_function("document.getElementById('focus')")
         assert page.evaluate(contrast) >= 4.5, skin
         page.context.close()
+
+
+def test_obs_overlay_is_transparent_and_carries_nothing_of_its_own(browser: Any, base: str) -> None:
+    page = open_page(browser, base + "/?overlay=1#hud=caster")
+    page.wait_for_function("document.getElementById('pulse')?.textContent.trim()")
+    styles = page.evaluate(
+        """() => { const h = getComputedStyle(document.documentElement);
+          const b = getComputedStyle(document.body);
+          return [h.colorScheme, h.backgroundColor, b.backgroundColor]; }"""
+    )
+    # A dark colour scheme on the root makes the browser paint a dark canvas behind the page.
+    assert styles == ["normal", "rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)"], styles
+    for stray in ("#viewer-build", "#skip-links", "#hud-hint", "#minimap-wrap", "#status-line"):
+        assert not page.locator(stray).is_visible(), stray
+    page.context.close()
+
+
+def test_glyph_buttons_have_names_and_skip_links_shorten_the_keyboard_path(
+    browser: Any, base: str
+) -> None:
+    page = open_page(browser, base, size=(1280, 720))
+    names = page.evaluate(
+        """() => [...document.querySelectorAll('#time-controls button, #time-controls2 button,'
+          + ' #event-filters button, .dash-nav, #minimap-tools button, #minimap-tools a')]
+          .filter((e) => e.getClientRects().length)
+          .map((e) => (e.getAttribute('aria-label') || e.textContent).trim())"""
+    )
+    assert names and all(len(name) > 3 for name in names), [n for n in names if len(n) <= 3]
+
+    # In a 720p window nothing is drawn under 12 px.
+    small = page.evaluate(
+        """() => { const out = [];
+          const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          let n; while ((n = w.nextNode())) { const e = n.parentElement;
+            if (!n.nodeValue.trim() || !e.getClientRects().length) continue;
+            const s = getComputedStyle(e); if (s.visibility === 'hidden') continue;
+            if (parseFloat(s.fontSize) < 11.99)
+              out.push(n.nodeValue.trim().slice(0, 20) + ' ' + s.fontSize); }
+          return out; }"""
+    )
+    assert small == [], small[:10]
+
+    # The first Tab stops are the skip links; they reach what used to be 34 to 71 stops away.
+    page.keyboard.press("Tab")
+    assert page.evaluate("document.activeElement.dataset.skip") == "time"
+    assert page.locator("#skip-links").bounding_box()["y"] >= 0, "visible while focused"
+    page.keyboard.press("Enter")
+    assert page.evaluate("document.activeElement.id") == "tc-play"
+    page.focus('#skip-links [data-skip="customize"]')
+    page.keyboard.press("Enter")
+    page.locator("#panels-menu").wait_for(state="visible")
+    assert page.evaluate("!!document.activeElement.closest('#panels-menu')")
+    page.keyboard.press("Escape")
+
+    # Statistics opened from the keyboard takes the focus: Tab walks the window.
+    page.keyboard.press("Control+Alt+s")
+    page.wait_for_selector("#overlay-stats #chart")
+    assert page.evaluate("document.activeElement.id") == "stats-title"
+    for _ in range(6):
+        page.keyboard.press("Tab")
+        assert page.evaluate("!!document.activeElement.closest('#overlay-stats')")
+    assert page.errors == []
+    page.context.close()
 
 
 # -- the phone layout --------------------------------------------------------------------------

@@ -513,7 +513,7 @@ function placeStatsWindow() {
 let dockedByPreset = null; // what "docked" was before a preset (Analyst) docked the window
 export function openStats(seek, { dock = null, metric = null, preset = false } = {}) {
   if (dock != null) {
-    if (preset && dockedByPreset == null) dockedByPreset = { docked: !!statsState().docked };
+    if (preset && dockedByPreset == null) dockedByPreset = { docked: !!statsState().docked, floating: statsState().docked ? statsState().floating : savedRect(STATS) };
     settings.statsWindow = { ...statsState(), docked: !!dock };
   }
   if (!isOpen(STATS)) open(STATS);
@@ -524,8 +524,14 @@ export function openStats(seek, { dock = null, metric = null, preset = false } =
 export function closeStatsDock() {
   if (!dockedByPreset) return;
   settings.statsWindow = { ...statsState(), docked: dockedByPreset.docked };
+  // Its rectangle from before the preset docked it (the default place when it had none).
+  if (!dockedByPreset.docked) {
+    if (dockedByPreset.floating) setPanelRect(STATS, { ...dockedByPreset.floating, moved: true, auto: false }, { save: false });
+    else resetPanel(STATS);
+  }
   dockedByPreset = null;
-  if (isOpen(STATS)) closeAll();
+  // The window stays open: it goes back to where the viewer keeps it (floating, unless they dock it themselves).
+  if (isOpen(STATS)) { placeStatsWindow(); drawStatsChart(); }
 }
 
 /** Dock the Statistics window to the right edge, or float it again (opening it if needed). */
@@ -621,7 +627,7 @@ export async function renderStats(seek, metric = null) {
   aggAt = S.t;
   const keys = tabSeries(chartState.tab);
   if (!keys.includes(chartState.key)) chartState.key = keys[0];
-  const zb = (id, label, name, detail) => `<button id="${id}" ${tip(t(name), detail ? t(detail) : '')}>${label}</button>`;
+  const zb = (id, label, name, detail) => `<button id="${id}" aria-label="${esc(t(name))}" ${tip(t(name), detail ? t(detail) : '')}>${label}</button>`;
   // Statistics opens on the whole game for every player. Investigating (one
   // interval, two players) takes over the chart only when it was asked for: a
   // value clicked on the dashboard, or an interval already chosen.
@@ -656,6 +662,9 @@ export async function renderStats(seek, metric = null) {
     <details class="review-details" open><summary>${t('Totals')}</summary><div id="stats-agg">${aggregates(chartState.tab)}</div></details>`}`;
   el.setAttribute('aria-busy', 'false');
   wireClose(el); wireStatsBar(el);
+  // Opened from the keyboard, the window takes the focus (its title bar), so Tab walks it, not the page behind.
+  // (Not when a preset opened it, nor from inside the Customize drawer or the layout editor: the focus stays where the viewer is working.)
+  if (statsWindowed() && !dockedByPreset && !el.contains(document.activeElement) && !document.activeElement?.closest?.('#panels-menu, #layout-editor')) { const grip = el.querySelector('#stats-title'); if (grip) grip.focus({ preventScroll: true }); }
   const investigateRange = (from, to, pids) => {
     chartState.from = from; chartState.span = Math.max(1, to - from);
     chartState.hidden = new Set(players().map((p) => p.id).filter((pid) => !pids.includes(pid)));

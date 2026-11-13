@@ -8,10 +8,11 @@ import { t } from './i18n.js';
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /** Which column is best and which is worst (indexes; null when the values tie or are missing). */
-export function rank(values, lower = false) {
+export function rank(values, lower = false, margin = 0) {
   const known = values.map(num);
   const vs = known.filter((v) => v != null);
-  if (vs.length < 2 || Math.min(...vs) === Math.max(...vs)) return { best: null, worst: null };
+  // A gap no bigger than the row's margin (89 % against 90 %) is a tie, not a lead.
+  if (vs.length < 2 || Math.max(...vs) - Math.min(...vs) <= margin) return { best: null, worst: null };
   const best = lower ? Math.min(...vs) : Math.max(...vs), worst = lower ? Math.max(...vs) : Math.min(...vs);
   return { best: known.indexOf(best), worst: known.indexOf(worst) };
 }
@@ -26,7 +27,7 @@ export function sideStats(side) { return side.players.map((p) => playerStats(p.i
 export function compareTableHtml(sides, rows, { caption = '', headers = true } = {}) {
   const head = headers ? `<tr><th scope="col"><span class="sr-only">${esc(t('Metric'))}</span></th>${sides.map((s) => `<th scope="col" style="color:${playerTextColor(s.players[0].id)}"><i style="background:${playerMarkColor(s.players[0].id)}"></i>${esc(sideLabel(s))}</th>`).join('')}</tr>` : '';
   const body = rows.filter((r) => r.values.some((v) => v != null)).map((r) => {
-    const { best, worst } = rank(r.values, r.lower);
+    const { best, worst } = rank(r.values, r.lower, r.margin || 0);
     const cells = r.values.map((v, i) => `<td class="${i === best ? 'best' : ''}${i === worst && r.warnWorst ? ' worst' : ''}">${v == null ? '–' : esc(r.text ? r.text[i] : String(v))}</td>`).join('');
     const name = r.series
       ? `<button type="button" class="ct-open" data-series="${r.series}" data-pid="${sides[0].players[0].id}" aria-label="${esc(`${t(r.label)}: ${t('open in Statistics')}`)}">${esc(t(r.label))}</button>`

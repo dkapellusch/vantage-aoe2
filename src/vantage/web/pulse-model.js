@@ -23,13 +23,14 @@ export function cellModel(id, stats, otherStats, players) {
   // A delta only where the lead is the story: army value and the collection rate.
   const leads = DELTA.has(id) && !!cmp && cmp.lead === 'a' && cmp.diff > 0;
   const cap = m.cap ? sumStat(stats, m.cap) : null;
-  const warn = !!m.warnEach && value >= m.warnEach * players;
+  // More than two idle per player, as on the Team board: two idle villagers in a 1v1 is ordinary.
+  const warn = !!m.warnEach && value > m.warnEach * players;
   const housed = id === 'pop' && stats.some((s) => s && s.housed);
   const stock = id === 'banksum';
   const shown = stock ? fmtStock(value) : fmtNum(value);
   let spoken = `${t(m.label)} ${shown}${cap != null ? ` ${t('of')} ${cap}` : ''}`;
   if (leads) spoken += `, ${t('ahead by {n}', { n: fmtNum(cmp.diff) })}`;
-  if (warn) spoken += `, ${t('high')}`;
+  if (warn) spoken += `, ${t('more than {n} per player', { n: m.warnEach })}`;
   if (housed) spoken += `, ${t('Housed')}`;
   return { id, short: m.short, series: m.series || null, shown, cap, delta: leads ? fmtNum(cmp.diff) : null, warn, housed, spoken };
 }

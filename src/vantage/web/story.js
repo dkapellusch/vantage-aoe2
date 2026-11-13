@@ -237,11 +237,11 @@ export function reviewRows(list, series, at, view) {
   const bank = stats.map((s) => sumStat(s, METRICS.banked.f));
   const idle = stats.map((s) => sumStat(s, METRICS.idle_villagers.f));
   return [
-    { label: METRICS.tc_idle.label, values: idleTc, text: time(idleTc), lower: true, warnWorst: true, series: 'tc_idle', detail: 'Town centre time without a villager in production, while still growing' },
-    { label: METRICS.housed.label, values: housed, text: time(housed), lower: true, warnWorst: true, series: 'housed' },
+    { label: 'Idle TC so far (growth)', values: idleTc, text: time(idleTc), lower: true, warnWorst: true, series: 'tc_idle', detail: 'Town centre time without a villager in production, while still growing' },
+    { label: 'Housed so far', values: housed, text: time(housed), lower: true, warnWorst: true, series: 'housed' },
     { label: 'Idle villagers now', values: idle, lower: true, warnWorst: true, series: 'idle' },
-    { label: METRICS.efficiency.label, values: eff, text: eff.map((v) => (v == null ? '–' : `${Math.round(v)}%`)), warnWorst: true, series: 'efficiency_lm', detail: METRICS.efficiency.detail },
-    { label: 'Banked, unspent', values: bank, text: bank.map((v) => (v == null ? '–' : fmtNum(Math.floor(v)))), lower: true, warnWorst: true, series: 'res_food', detail: METRICS.banked.detail },
+    { label: METRICS.efficiency.label, values: eff, text: eff.map((v) => (v == null ? '–' : `${Math.round(v)}%`)), warnWorst: true, margin: 3, series: 'efficiency_lm', detail: METRICS.efficiency.detail },
+    { label: 'Banked, unspent', values: bank, text: bank.map((v) => (v == null ? '–' : fmtNum(Math.floor(v)))), lower: true, warnWorst: true, margin: 100, series: 'res_food', detail: METRICS.banked.detail },
     { label: METRICS.eapm.label, values: eapm, warnWorst: true, series: 'apm', detail: METRICS.eapm.detail },
   ];
 }
@@ -250,7 +250,7 @@ function renderCards(el) {
   HUD_PARTS.delegate(el, 'click', '[data-series]', (d) => window.dispatchEvent(new CustomEvent('vantage-investigate', { detail: { pid: +d.dataset.pid, metric: d.dataset.series } })));
   if (!S.view) { HUD_PARTS.setHtml(el, ''); return; }
   const list = sides().slice(0, 4);
-  HUD_PARTS.setHtml(el, `<div class="rc-head"><span class="rc-title">${esc(t('Review cards'))}</span><span class="hint">${esc(t('worse side in amber'))}</span></div>${compareTableHtml(list, reviewRows(list, S.series, S.t, S.view))}`);
+  HUD_PARTS.setHtml(el, `<div class="rc-head"><span class="rc-title">${esc(t('Review cards'))}</span><span class="hint">${esc(t('totals so far · better in green, worse in amber'))}</span></div>${compareTableHtml(list, reviewRows(list, S.series, S.t, S.view))}`);
 }
 
 function make(id, label) {

@@ -32,17 +32,18 @@ test('one name per metric: the Team board, the dashboard and Statistics use the 
 });
 
 test('a Pulse cell: the value, a delta on the leading side only, warnings, and a spoken label', () => {
-  const a = [{ army_value: 1360, idle_villagers: 2, pop: 59, pop_cap: 85, villagers: 40, housed: false }];
+  const a = [{ army_value: 1360, idle_villagers: 3, pop: 59, pop_cap: 85, villagers: 40, housed: false }];
   const b = [{ army_value: 1310, idle_villagers: 1, pop: 59, pop_cap: 60, villagers: 40, housed: true }];
   const lead = cellModel('army', a, b, 1), trail = cellModel('army', b, a, 1);
   assert.equal(lead.shown, '1360'); assert.equal(lead.delta, '50'); assert.equal(lead.series, 'army_value');
   assert.equal(lead.spoken, 'Army value 1360, ahead by 50');
   assert.equal(trail.delta, null); assert.equal(trail.spoken, 'Army value 1310');
-  // Idle turns amber at two or more per player; no delta where lower is better.
+  // Idle turns amber above two per player (as on the Team board); no delta where lower is better.
   const idle = cellModel('idle', a, b, 1);
-  assert.equal(idle.warn, true); assert.equal(idle.delta, null); assert.match(idle.spoken, /^Idle villagers 2, high$/);
+  assert.equal(idle.warn, true); assert.equal(idle.delta, null); assert.equal(idle.spoken, 'Idle villagers 3, more than 2 per player');
   assert.equal(cellModel('idle', b, a, 1).warn, false);
-  assert.equal(cellModel('idle', [{ idle_villagers: 3 }, { idle_villagers: 0 }], null, 2).warn, false, 'a team of two needs four');
+  assert.equal(cellModel('idle', [{ idle_villagers: 2 }], null, 1).warn, false, 'two idle in a 1v1 is ordinary');
+  assert.equal(cellModel('idle', [{ idle_villagers: 4 }, { idle_villagers: 0 }], null, 2).warn, false, 'a team of two needs five');
   // Population: the cap, and housed is said as well as shown.
   const pop = cellModel('pop', b, a, 1);
   assert.equal(pop.cap, 60); assert.equal(pop.housed, true); assert.equal(pop.spoken, 'Population 59 of 60, Housed');
@@ -121,6 +122,9 @@ test('side-against-side tables mark the best column and the worst', () => {
   assert.deepEqual(rank([5, 5]), { best: null, worst: null });
   assert.deepEqual(rank([null, 5]), { best: null, worst: null });
   assert.deepEqual(rank([4, null, 9, 1], true), { best: 3, worst: 2 });
+  // A gap within the row's margin is a tie: 89 % against 90 % is not a lead.
+  assert.deepEqual(rank([89, 90], false, 3), { best: null, worst: null });
+  assert.deepEqual(rank([84, 90], false, 3), { best: 1, worst: 0 });
 });
 
 test('the Statistics window and other placed panels stay inside the window; edges resize one axis', async () => {
