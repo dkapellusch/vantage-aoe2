@@ -47,6 +47,12 @@ npm run lint:web            # no-undef only, all src/vantage/web/*.js modules
   actual entity sprite draws and no page errors; a zero missing-sprite counter
   alone cannot pass. CI runs these cases with Chromium, independently of the
   optional local Playwright installation.
+- `test_zoomed_game_art_big_scene_stays_within_frame_budgets` (same file) draws 3,000
+  generated rows with game art, zoomed in and zoomed out, and checks that the zoomed-in
+  frame draws only its own part and fits a frame-time budget, that a still picture
+  uploads and fetches nothing, and that no HUD task is long. The budgets are eight to
+  ten times what a development machine measures: they catch an all-rows pass that is
+  no longer culled, not a slow runner.
 - `tests/no_undef.test.mjs` runs ESLint's `no-undef` rule on every top-level browser
   module, including workers. Browser and worker globals are listed by the pinned
   `globals` package in `eslint.config.mjs`. Both Node and pytest run this gate.
@@ -70,6 +76,17 @@ PYTHONPATH="Z:$PWD/winsite;Z:$PWD/src;Z:$PWD" wine python/python.exe -m pytest -
 ```
 
 (Write the `Z:` paths with backslashes if your shell keeps the forward slashes; Wine maps `Z:` to `/`.)
+
+## Performance
+
+`tools/perf/` measures playback, panning, zooming and seeking in a real browser against a
+served recording: frame times, long tasks, the HUD's tasks, sprite fetches and uploads,
+memory, and the time to a complete picture after a seek or a camera jump. It also takes
+CPU profiles and browser traces of a scenario, and compares screenshots at fixed moments
+before and after a change. [tools/perf/README.md](../tools/perf/README.md) has the commands.
+Measure on a real GPU (`--gpu vulkan`; every result records the renderer): software WebGL
+says little about time spent in WebGL and canvas calls. Include a zoomed-in view of game
+art and a zoomed-out one, over a late team game: they have different hot spots.
 
 ## Lint and type check
 

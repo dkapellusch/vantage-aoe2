@@ -70,6 +70,13 @@ All notable changes to Vantage are documented here. The format follows
   starting resources, collected, bonus, trade, market, tribute, refunds and spending, which add up
   to the stockpile; an increase nothing explains is shown as **Unexplained gain**.
   `tools/reconcile_resources.py` checks a recording.
+- After a seek, the event log could keep the unit names of the moment left behind (a Longbowman
+  where the game by then had an Elite Longbowman) for the rows it wrote before the new moment's
+  view arrived.
+- A patch of ground could stay untextured after a seek first met a terrain (a farm's, say) until
+  the camera moved.
+- Zoomed out over the middle of a large map the ground never finished drawing, and was redrawn
+  four times a second for as long as the camera stayed there.
 - The ground stays drawn after the browser loses the WebGL context (a driver reset, the GPU
   process restarting): the terrain renderer starts over as the sprite renderer already did,
   instead of leaving the map black.
@@ -98,6 +105,13 @@ All notable changes to Vantage are documented here. The format follows
   and Caster the full panel opened from the chip stays the full panel until you press "compact".
   Customize → Layout has **Reset Selection panel**, and saved layouts carry all of it. Statistics
   reopens on the tab and series last looked at.
+- **Smoother playback and faster seeking in large games.** The panels' refresh no longer costs
+  the map a frame or two four times a second (it is spread over the frames that follow), a
+  zoomed-in view no longer pays for the rows off screen, and after a seek or a jump to another
+  place the picture is complete in about a tenth of a second instead of up to half a second
+  (the forest, terrain and trees no longer wait for their next refresh slot). The first fire of
+  a game no longer hitches (its graphics are decoded off the main thread). `tools/perf` has the
+  benchmark and the numbers' method.
 - **Statistics is a window**, not a page over the map: no dimming, a title bar that drags, resize
   from every edge and corner, **Dock right** (<kbd>Ctrl+Alt+D</kbd>), a remembered rectangle, and a
   chart that follows its size. Its own playback bar is gone (the main time controls are beside it);
