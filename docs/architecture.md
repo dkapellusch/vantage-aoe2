@@ -144,7 +144,7 @@ The game install is found from `$VANTAGE_GAME_DIR`, the folder the running game 
 | `audio.py` | Resolving the game's Wwise sound events to audio files the browser can play |
 | `skins.py` | `SkinStore`: skin packages (`skin.json` in a folder or `.zip`), merging and live reload |
 | `launcher.py` | `GameLauncher`: starting the game through Steam and tracking its status |
-| `combat_review.py`, `healing_review.py`, `resource_review.py`, `economy_benefits.py`, `review_moments.py` | The review panels' per-entity and per-player histories (military pressure, healing, resource income and bonuses), and saved review moments |
+| `combat_review.py`, `healing_review.py`, `resource_review.py`, `economy_benefits.py`, `review_moments.py` | The review panels' per-entity and per-player histories (military pressure, healing, resource income and bonuses), and saved review moments. Resource definitions and the stockpile identity: [resources.md](resources.md) |
 
 ### Plugins
 

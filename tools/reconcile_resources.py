@@ -210,6 +210,10 @@ def claimed(stats: dict[str, Any]) -> dict[str, list[float]]:
         else:
             for i, r in enumerate(RES):
                 paid[i] += row["spent"].get(r, 0)
+    if "market_in" in income:
+        # Collected no longer includes sale gold: it is part of the market's income.
+        bought = [float(income["market_in"][r]) for r in RES]
+        paid = [float(income["market_out"][r]) for r in RES]
     return {
         "collected": [float(collected.get(r, 0)) for r in RES],
         # A starting bonus is already inside the starting stockpile.

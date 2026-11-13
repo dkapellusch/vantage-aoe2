@@ -131,7 +131,9 @@ The **dashboard** at the bottom is a table with a row per player. It has several
 
 Team **Overview** has one page: villagers, idle workers, population, military,
 army value, kills/deaths, economy kills, economy losses, TC idle/housed time,
-town centres/castles, then **Collected** (total resources collected). The
+town centres/castles, then **Collected** (resources gathered by villagers and
+fishing ships; bonus, relic, trade and market income is listed under
+Statistics › Bonus resources, see [Resource accounting](../resources.md)). The
 existing columns keep their order. The former small Overview page is removed;
 <kbd>Alt+C</kbd>/<kbd>Alt+X</kbd> and the tabs cycle the remaining team pages.
 1v1 and FFA pages keep their existing columns and page sets. Saved selections of

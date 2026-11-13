@@ -3,18 +3,25 @@ import { t } from './i18n.js';
 
 export const RESOURCE_ORDER = ['food', 'wood', 'gold', 'stone'];
 
+// A recording's first frame is a fraction of a second into the game; only one
+// that begins later than the start window (resource_review.START_WINDOW_MS) is partial.
+const startsLate = (history) => history.observed_from_ms > 5000;
+
+// A typographic minus: a starting penalty (Chinese −200 food) is a real amount.
+const signed = (v) => (v < 0 ? `−${fmtNum(-v)}` : fmtNum(v));
+
 export function resourceNumbers(values = {}) {
-  return RESOURCE_ORDER.map((resource) => `<span class="review-resource-number" ${tip(t(resource))}><img src="/ui/resource_${resource}.png" alt="${esc(t(resource))}"><b>${values[resource] == null ? '–' : fmtNum(values[resource])}</b></span>`).join('');
+  return RESOURCE_ORDER.map((resource) => `<span class="review-resource-number" ${tip(t(resource))}><img src="/ui/resource_${resource}.png" alt="${esc(t(resource))}"><b>${values[resource] == null ? '–' : signed(values[resource])}</b></span>`).join('');
 }
 
 export function resourceTotalsHtml(totals, villager = false) {
   if (!totals || (!villager && !totals.is_drop_site)) return '';
-  const partial = totals.has_gaps || totals.observed_from_ms > 0 || totals.ambiguous_dropoffs > 0;
+  const partial = totals.has_gaps || startsLate(totals) || totals.ambiguous_dropoffs > 0;
   const label = villager ? t('Collected') : t('Delivered');
   const detail = villager
     ? t('Gathered by this worker, including resources still carried. Estimated from carry changes, deliveries and shared direct-farming receipts; excludes extra drop-off yield.')
     : t('Full stockpile receipts, including extra yield. Attribution to this drop-off site is approximate; ambiguous deliveries are excluded.');
-  const coverage = partial ? ` · ${t('Partial history')}${totals.observed_from_ms > 0 ? ` · ${fmtTime(totals.observed_from_ms)}` : ''}` : '';
+  const coverage = partial ? ` · ${t('Partial history')}${startsLate(totals) ? ` · ${fmtTime(totals.observed_from_ms)}` : ''}` : '';
   const credited = villager ? `<div class="hint" ${tip(t('Credited'), t('Resources from this worker added to the stockpile, including direct farming and drop-off bonuses. Excludes resources still carried. Attribution is approximate.') + coverage)}>${t('Credited')} ≈</div><div class="review-resource-numbers">${resourceNumbers(totals.credited)}</div>` : '';
   return `<div class="review-resource-totals" data-ui-key="resource-totals"><div class="hint" ${tip(label, detail + coverage)}>${label} <span>${partial ? '≥' : totals.estimated || villager ? '≈' : ''}</span></div><div class="review-resource-numbers">${resourceNumbers(villager ? totals.collected : totals.dropped_off)}</div>${credited}</div>`;
 }
@@ -53,7 +60,7 @@ export function bonusIncomeHtml(players) {
     const rows = (income.sources || []).filter((row) => row.category !== 'regular' && row.total !== 0)
       .sort((a, b) => (a.category === 'unattributed') - (b.category === 'unattributed') || (b.source === 'Starting bonus') - (a.source === 'Starting bonus') || b.total - a.total);
     const loose = (row) => row.category === 'unattributed' || row.category === 'unexplained';
-    const partial = income.has_gaps || income.observed_from_ms > 0;
+    const partial = income.has_gaps || startsLate(income);
     // A sent tribute has no received column: show what left the stockpile.
     const cell = (row, r) => row.source === 'Tribute sent' ? row.spent?.[r] : row.resources?.[r];
     const amount = (v, fractional) => !v ? '·' : v < 0 ? `−${fmtNum(-v)}` : v < 1 || fractional && !Number.isInteger(v) ? v.toFixed(1) : fmtNum(v);
@@ -110,7 +117,7 @@ export function bonusIncomeHtml(players) {
     if (!rows.length && !benefits && !RESOURCE_ORDER.some(r => income.bonus?.[r])) {
       return `<section class="review-income-player review-income-none" data-ui-key="income-player-${id}"><b style="color:${esc(color)}">${esc(name)}</b> <span class="hint">${t('No bonus income')}${partial ? ` · ${t('Partial history')}` : ''}</span>${ledgerHtml(id, income.ledger)}</section>`;
     }
-    return `<section class="review-income-player" data-ui-key="income-player-${id}"><div class="review-income-head"><b style="color:${esc(color)}">${esc(name)}</b><span class="hint" ${tip(t('Bonus income'), t('Attributed bonus income. Approximate source attribution; yield and savings are separate.'))}>${t('Income')} ≈ ${fmtNum(income.total)}</span></div>
+    return `<section class="review-income-player" data-ui-key="income-player-${id}"><div class="review-income-head"><b style="color:${esc(color)}">${esc(name)}</b><span class="hint" ${tip(t('Bonus income'), t('Attributed bonus income. Approximate source attribution; yield and savings are separate.'))}>${t('Income')} ≈ ${signed(income.total)}</span></div>
       <div class="review-resource-numbers">${resourceNumbers(income.bonus)}</div>
       ${partial ? `<span class="hint" ${tip(t('Partial history'), t('The recording starts late or has missing frames.'))}>${t('Partial history')}</span>` : ''}
       <table><thead><tr><th>${t('Source')}</th>${RESOURCE_ORDER.map((r) => `<th><img src="/ui/resource_${r}.png" alt="${esc(t(r))}" ${tip(t(r))}></th>`).join('')}</tr></thead><tbody>${sourceRows(rows.filter(row => !loose(row)))}${benefits}${sourceRows(rows.filter(loose))}${!rows.length && !benefits ? `<tr><td colspan="5" class="hint">${t('No attributed bonus income')}</td></tr>` : ''}</tbody></table>${ledgerHtml(id, income.ledger)}</section>`;

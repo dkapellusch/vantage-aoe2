@@ -60,6 +60,16 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Fixed
 
+- Resource accounting is complete and counted once ([docs/resources.md](docs/resources.md)).
+  **Collected** is now what villagers and fishing ships gathered: relic, trade, market-sale and
+  bonus income that the game's counter also includes is no longer in it or in the `/min` rates.
+  **Bonus resources** gains the **Starting bonus** (Persians, Aztecs, Sicilians, Tupi; negative for
+  Chinese, Huns and Maya; the Lithuanian Town Center food), also when it arrives with the first
+  Town Center on a Nomad start, plus Tribute rows. Khmer farm food that the game's own counter
+  drops above 8192 food is still collected. A new **Stockpile accounts** table per player lists
+  starting resources, collected, bonus, trade, market, tribute, refunds and spending, which add up
+  to the stockpile; an increase nothing explains is shown as **Unexplained gain**.
+  `tools/reconcile_resources.py` checks a recording.
 - The ground stays drawn after the browser loses the WebGL context (a driver reset, the GPU
   process restarting): the terrain renderer starts over as the sprite renderer already did,
   instead of leaving the map black.
