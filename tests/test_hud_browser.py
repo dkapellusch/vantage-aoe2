@@ -1208,3 +1208,70 @@ def test_zoomed_game_art_big_scene_stays_within_frame_budgets(browser: Any, base
     finally:
         print("big scene:", near, far)  # shown with -s, and on failure
         page.context.close()
+
+
+def test_trackpad_scroll_pans_pinch_zooms_and_a_mouse_wheel_still_zooms(
+    browser: Any, base: str
+) -> None:
+    """Wheel events as a trackpad and a mouse send them, on the real page."""
+    page = browser.new_page(viewport={"width": 1280, "height": 800})
+    page.errors = []
+    page.on("pageerror", lambda error: page.errors.append(str(error)))
+    page.add_init_script(
+        f"localStorage.setItem({json.dumps(KEY)}, "
+        f"{json.dumps(json.dumps({**QUIET, 'cameraSmoothMs': 0}))})"
+    )
+    page.goto(base)
+    page.wait_for_function("window.vantage?.S.view && document.body.dataset.startup === 'ready'")
+    page.evaluate("() => { vantage.S.playing = false; vantage.world.setCamera(4, 4, 2); }")
+    cdp = page.context.new_cdp_session(page)
+
+    def wheel(dx: float, dy: float, ctrl: bool = False) -> None:
+        cdp.send(
+            "Input.dispatchMouseEvent",
+            {"type": "mouseWheel", "x": 640, "y": 400, "deltaX": dx, "deltaY": dy}
+            | ({"modifiers": 2} if ctrl else {}),
+        )
+
+    def camera() -> list[float]:
+        return page.evaluate(
+            "() => [vantage.S.camera.x, vantage.S.camera.y, vantage.S.camera.zoom]"
+        )
+
+    try:
+        page.wait_for_timeout(300)  # the camera was just sent somewhere: let that settle
+        x0, y0, z0 = camera()
+        # Two fingers: pixel deltas with a sideways part. 60 px right, 24 px down in all.
+        for _ in range(12):
+            wheel(5, 2)
+            page.wait_for_timeout(10)
+        page.wait_for_timeout(100)
+        x1, y1, z1 = camera()
+        assert z1 == z0
+        # Screen px the camera moved (tiles are 32 x 16 px at zoom 1).
+        moved = [((x1 + y1) - (x0 + y0)) * 16 * z1, ((y1 - x1) - (y0 - x0)) * 8 * z1]
+        assert abs(moved[0] - 60) < 1 and abs(moved[1] - 24) < 1, moved
+        # A pinch (ctrl set, no key down): zooms in at once, the camera stays put
+        # under the pointer at the centre.
+        page.wait_for_timeout(250)
+        for _ in range(10):
+            wheel(0, -4, ctrl=True)
+            page.wait_for_timeout(10)
+        x2, y2, z2 = camera()
+        assert z2 > z1 * 1.3, (z1, z2)
+        assert abs(x2 - x1) < 0.01 and abs(y2 - y1) < 0.01
+        # A mouse wheel notch zooms as it always did (out, here).
+        page.wait_for_timeout(250)
+        wheel(0, 100)
+        page.wait_for_timeout(100)
+        assert camera()[2] < z2
+        # The setting can make two-finger scrolling zoom again.
+        page.evaluate("() => { vantage.settings.twoFingerScroll = 'zoom'; }")
+        page.wait_for_timeout(250)
+        z3 = camera()[2]
+        wheel(5, 2)
+        page.wait_for_timeout(100)
+        assert camera()[2] != z3
+        assert not page.errors, page.errors
+    finally:
+        page.context.close()
