@@ -585,10 +585,16 @@ function drawAtlasFrame(a, idx, px, py, s, rot, lit = false) {
   if (!fr) return;
   const k = a.k || a.meta.scale || 1;
   const r = fr.frame, sss = fr.spriteSourceSize, src = fr.sourceSize;
-  pctx.translate(px, py);
-  if (rot) pctx.rotate((rot * Math.PI) / 180);
   // Place the trimmed frame inside its source rectangle, centred on the pivot.
   const ox = (sss.x - src.w / 2) * s, oy = (sss.y - src.h / 2) * s;
+  if (!rot && !fr.rotated) {
+    // Upright (most particles): drawn where it lands, without moving the canvas
+    // origin there and back (two state changes per particle).
+    fxDrawn = true; pctx.drawImage(particleImage(a, lit), r.x * k, r.y * k, r.w * k, r.h * k, px + ox, py + oy, sss.w * s, sss.h * s);
+    return;
+  }
+  pctx.translate(px, py);
+  if (rot) pctx.rotate((rot * Math.PI) / 180);
   if (fr.rotated) {
     // Stored rotated 90° clockwise in the atlas.
     pctx.rotate(-Math.PI / 2);
@@ -2461,10 +2467,14 @@ export function draw(dt = 1 / 60) {
   // What the dead leave (death animations, corpses, rubble) lies on the ground
   // under everything standing (view.remains: not units, never selected or counted).
   if (useSprites && S.view && S.view.remains) {
-    const remains = sortByKey(S.view.remains, depth);
-    for (const r of remains) {
+    // Culled before sorting, as the rows below: a late game leaves hundreds.
+    const lying = [];
+    for (const r of S.view.remains) {
       const [px, py] = entityScreen(r);
-      if (hidden(r, px, py, entityInfo(r))) continue;
+      if (!hidden(r, px, py, entityInfo(r))) lying.push(r);
+    }
+    for (const r of sortByKey(lying, depth)) {
+      const [px, py] = entityScreen(r);
       if (sel.has(r[0])) drawSelection(r, px, py);
       drawSprites(r, px, py); // still loading: nothing, not a placeholder
     }
