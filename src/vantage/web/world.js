@@ -95,6 +95,7 @@ function evictSprites(hd) {
     if (spriteBytes <= budget) break;
     if (!v.img || v.pin) continue;
     spriteBytes -= v.bytes || 0;
+    v.gone = true;
     spriteCache.delete(k);
     spriteRevision++;
   }
@@ -172,20 +173,22 @@ const colourless = new Set();
 // Strips that are settled (loaded, or known to have no picture), by query and by
 // a number made of sprite, facet and colour: drawSprites asks for every layer of
 // every entity on screen each frame, and building the key string and moving the
-// entry to the end of the cache for each was most of its cost. The table is
-// dropped whenever a strip leaves the cache (spriteRevision).
-let settledStrips = new Map(), settledRevision = -1, recencyFrame = 0;
+// entry to the end of the cache for each was most of its cost. A strip that
+// leaves the cache is marked `gone` and dropped from the table when next met.
+const settledStrips = new Map();
+let recencyFrame = 0;
 function settledStrip(sid, facet, color, query) {
-  if (settledRevision !== spriteRevision) return undefined;
   const table = settledStrips.get(query);
-  return table && facet >= 0 && facet < 4096 ? table.get((sid * 4096 + facet) * 16 + color + 1) : undefined;
+  if (!table || !(facet >= 0 && facet < 4096)) return undefined;
+  const n = (sid * 4096 + facet) * 16 + color + 1;
+  const e = table.get(n);
+  if (e && e.gone) { table.delete(n); return undefined; }
+  return e;
 }
-function rememberSettled(sid, facet, color, query, key, e) {
+function rememberSettled(sid, facet, color, query, e) {
   if (!(facet >= 0 && facet < 4096) || !Number.isInteger(sid) || !Number.isInteger(facet) || !Number.isInteger(color)) return;
-  if (settledRevision !== spriteRevision) { settledStrips = new Map(); settledRevision = spriteRevision; }
   let table = settledStrips.get(query);
   if (!table) settledStrips.set(query, (table = new Map()));
-  e.key = key;
   table.set((sid * 4096 + facet) * 16 + color + 1, e);
 }
 // Most recently used last (the order strips are evicted in): once per strip per
@@ -205,11 +208,11 @@ function spriteStrip(sid, facet, color, opts) {
   let e = spriteCache.get(key);
   // A transient failure (network, server busy) is retried after a while; a 404 is
   // the game having no picture there and stays as it is.
-  if (e && e.retryAt && performance.now() > e.retryAt) { spriteCache.delete(key); spriteRevision++; e = null; }
+  if (e && e.retryAt && performance.now() > e.retryAt) { e.gone = true; spriteCache.delete(key); spriteRevision++; e = null; }
   if (e) {
     if (countingDraw && !e.img && !e.failed) firstFrameSpritesPending = true;
     touchStrip(key, e);
-    if (e.img || (e.failed && !e.retryAt)) rememberSettled(sid, facet, color, query, key, e);
+    if (e.img || (e.failed && !e.retryAt)) rememberSettled(sid, facet, color, query, e);
     if (e.img || e.failed || !(opts && opts.dir)) return e;
     const near = nearestFacing(sid, facet, color, query);
     if (near && countingDraw) spriteStats.standIn++;
@@ -218,7 +221,7 @@ function spriteStrip(sid, facet, color, opts) {
   evictSprites(hd);
   if (countingDraw) firstFrameSpritesPending = true;
   if (spriteRequests > 32) return null; // don't flood the server; retry next frame
-  e = { meta: null, img: null, failed: false };
+  e = { meta: null, img: null, failed: false, key };
   spriteCache.set(key, e);
   const standIn = opts && opts.dir ? nearestFacing(sid, facet, color, query) : null;
   spriteRequests++;
@@ -247,8 +250,8 @@ function spriteStrip(sid, facet, color, opts) {
         const plain = opts && opts.pm ? stripQuery({ ...opts, pm: false }) : query;
         const k2 = `${sid}/${facet}/-1?${plain}`, cur = spriteCache.get(k2);
         if (!cur || !cur.img) {
-          spriteCache.set(k2, { meta: { ...m, pm: false }, img, tile: e.tile, failed: false, bytes: 0, pin: e.pin });
-          if (cur) spriteRevision++; // an entry was replaced: whoever holds the old one asks again
+          spriteCache.set(k2, { meta: { ...m, pm: false }, img, tile: e.tile, failed: false, bytes: 0, pin: e.pin, key: k2 });
+          if (cur) { cur.gone = true; spriteRevision++; } // replaced: whoever holds the old one asks again
         }
       }
     }))
