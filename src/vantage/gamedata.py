@@ -922,6 +922,32 @@ class GameData:
 
         return cast(dict[str, Any] | None, self._converting.run("upgrade-facts", load))
 
+    @cached_property
+    def starting_resource_techs(self) -> dict[int, tuple[int, list[float]]]:
+        """Automatic civilization techs that change the starting stockpile.
+
+        Research id -> (civilization id, [food, wood, stone, gold]), read from
+        the installed dat: effect commands that add to the starting-resource
+        attributes 91-94 (Persians +50 food and wood, Chinese -200 food and
+        -50 wood, Huns -100 wood ...). Empty when the dat is unavailable.
+        """
+        facts = self._upgrade_facts
+        if not facts:
+            return {}
+        # The dat's order is food, wood, stone, gold: the same as ours.
+        out: dict[int, tuple[int, list[float]]] = {}
+        effects = facts["effects"]
+        for tid, tech in enumerate(facts["techs"]):
+            if not 0 <= tech["effect"] < len(effects):
+                continue
+            amounts = [0.0] * 4
+            for kind, a, mode, _, value in effects[tech["effect"]]:
+                if kind == 1 and 91 <= a <= 94 and mode == 1:
+                    amounts[int(a) - 91] += float(value)
+            if any(amounts):
+                out[tid] = (int(tech["civ"]), amounts)
+        return out
+
     def relevant_upgrades(self, civ_id: int) -> dict[str, list[int]]:
         """Object ID -> relevant research IDs, already gated and ordered for a civ."""
         return self._upgrade_table(civ_id)[0]

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 globalThis.window = { addEventListener() {} };
 globalThis.document = { getElementById() { return null; }, addEventListener() {} };
-const { resourceTotalsHtml, bonusIncomeHtml } = await import('../src/vantage/web/resource-review.js');
+const { resourceTotalsHtml, bonusIncomeHtml, ledgerHtml } = await import('../src/vantage/web/resource-review.js');
 
 test('worker collected and credited values differ while camps use the full receipt', () => {
   const data = { collected: {gold:10}, credited: {gold:11}, dropped_off: {gold:11}, is_drop_site:true, observed_from_ms:0 };
@@ -91,4 +91,50 @@ test('returned cargo is outside bonus income and market transactions', () => {
   assert.match(html,/Returned/); assert.match(html,/when villagers were deleted/);
   assert.match(html,/Excluded from bonus income/); assert.doesNotMatch(html,/>Market/);
   assert.match(html,/Income.*≈ 5/);
+});
+
+test('a starting bonus is a bonus row, negative for civilizations that start with less', () => {
+  const html = bonusIncomeHtml([{id:1,name:'Chinese',color:'#f00',income:{total:-250,bonus:{food:-200,wood:-50},sources:[
+    {source:'Starting bonus',category:'bonus',resources:{food:-200,wood:-50,gold:0,stone:0},total:-250,estimated:false},
+    {source:'Relics',category:'bonus',resources:{gold:300},total:300,estimated:false},
+  ]}}]);
+  assert.match(html,/data-ui-key="income-1-Starting bonus"/);
+  assert.match(html,/>−200<\/td><td>−50<\/td>/);
+  assert.match(html,/starting-resource bonus or penalty/); assert.match(html,/Never counted as collected/);
+  assert.doesNotMatch(html,/≈ Starting bonus/);
+  // The starting bonus leads the table, whatever its size.
+  assert.ok(html.indexOf('Starting bonus') < html.indexOf('Relics'));
+});
+
+test('tribute and unexplained stockpile gains are listed apart from bonus income', () => {
+  const html = bonusIncomeHtml([{id:2,name:'Ally',color:'#0f0',income:{total:0,bonus:{},sources:[
+    {source:'Unexplained gain',category:'unexplained',resources:{food:82},total:82,estimated:false},
+  ],exchanges:[
+    {source:'Tribute sent',category:'tribute',resources:{},spent:{gold:100},total:0},
+    {source:'Tribute received',category:'tribute',resources:{wood:70},spent:{},total:70},
+  ]}}]);
+  assert.match(html,/Tribute/); assert.match(html,/>Sent<\/td><td>·<\/td><td>·<\/td><td>100<\/td>/);
+  assert.match(html,/>Received<\/td><td>·<\/td><td>70<\/td>/);
+  assert.match(html,/class="hint"><td[^>]*>Unexplained gain/); assert.match(html,/missing source stays visible/);
+});
+
+test('the stockpile accounts list every flow and end on the stockpile', () => {
+  const zero = {food:0,wood:0,gold:0,stone:0};
+  const ledger = [
+    {label:'Starting resources',resources:{food:200,wood:200,gold:100,stone:200}},
+    {label:'Starting bonus',resources:{...zero,food:50,wood:50}},
+    {label:'Collected',resources:{food:1000,wood:800,gold:0,stone:0}},
+    {label:'Bonus',resources:zero}, {label:'Trade',resources:zero}, {label:'Market',resources:{...zero,wood:-100,gold:70}},
+    {label:'Tribute',resources:zero}, {label:'Refunds',resources:{...zero,food:50}},
+    {label:'Spent',resources:{food:-1200,wood:-900,gold:-100,stone:0}}, {label:'Unexplained gain',resources:zero},
+    {label:'Stockpile',resources:{food:100,wood:50,gold:70,stone:200}}, {label:'Difference',resources:{...zero,food:1}},
+  ];
+  const html = ledgerHtml(1, ledger);
+  for (const label of ['Starting resources','Starting bonus','Collected','Market','Refunds','Spent','= Stockpile']) assert.match(html,new RegExp(`>${label}</td>`));
+  // Empty rows and a rounding-only difference are left out.
+  assert.doesNotMatch(html,/>Bonus<\/td>|>Trade<\/td>|>Tribute<\/td>|Unexplained|Difference/);
+  assert.match(html,/>Spent<\/td><td>−1200<\/td><td>−900<\/td><td>−100<\/td><td>·<\/td>/);
+  assert.match(ledgerHtml(1, [...ledger.slice(0,-1), {label:'Difference',resources:{...zero,food:40}}]),/Difference/);
+  assert.equal(ledgerHtml(1, null), '');
+  assert.match(bonusIncomeHtml([{id:1,name:'P',color:'#f00',income:{total:0,bonus:{},sources:[],ledger}}]),/Stockpile accounts/);
 });

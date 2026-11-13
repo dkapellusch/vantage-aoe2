@@ -850,3 +850,29 @@ def test_terrain_table_is_read_from_the_data_file_and_a_changed_layout_is_reject
         parse_terrain_types(b"no table here")
     with pytest.raises(ValueError):
         parse_terrain_types(rows[0][:50] + b"".join(rows[1:]))
+
+
+def test_starting_resource_techs_are_the_dat_effects_on_the_starting_attributes() -> None:
+    from vantage.gamedata import GameData
+
+    data = GameData(None)
+    data.__dict__["_upgrade_facts"] = {
+        "techs": [
+            {"civ": 8, "effect": 0},  # Persians +50 food, +50 wood
+            {"civ": 6, "effect": 1},  # Chinese -200 food, -50 wood
+            {"civ": 25, "effect": 2},  # a direct age-up grant: not a starting resource
+            {"civ": 1, "effect": -1},
+            {"civ": 17, "effect": 3},  # sets (mode 0), does not add
+        ],
+        "effects": [
+            [[1, 91, 1, -1, 50.0], [1, 92, 1, -1, 50.0]],
+            [[1, 91, 1, -1, -200.0], [1, 92, 1, -1, -50.0], [4, 83, -1, 0, 5.0]],
+            [[1, 0, 1, -1, 100.0], [1, 3, 1, -1, 100.0]],
+            [[1, 92, 0, -1, 300.0]],
+        ],
+    }
+    assert data.starting_resource_techs == {
+        0: (8, [50.0, 50.0, 0.0, 0.0]),
+        1: (6, [-200.0, -50.0, 0.0, 0.0]),
+    }
+    assert GameData(None).starting_resource_techs == {}

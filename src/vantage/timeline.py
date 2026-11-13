@@ -747,10 +747,13 @@ class Timeline:
             )
             raw_collected["total"] = sum(raw_collected[r] for r in W.RESOURCE_NAMES)
             stats["recorded_collected"] = raw_collected
-            other = stats["resource_income"]["not_gathered"]
+            gathered = ResourceHistory.gathered(stats["resource_income"], raw_collected)
             for r in W.RESOURCE_NAMES:
-                stats["collected"][r] = round(max(0, raw_collected[r] - other[r]))
+                stats["collected"][r] = round(gathered[r])
             stats["collected"]["total"] = sum(stats["collected"][r] for r in W.RESOURCE_NAMES)
+            stats["resource_income"]["ledger"] = ResourceHistory.ledger(
+                stats["resource_income"], stats["collected"], stats["resources"]
+            )
         self._player_extras(v)
         self._activity(v)
         kf = Keyframe(t, zlib.compress(json.dumps(v, separators=(",", ":")).encode(), 3))

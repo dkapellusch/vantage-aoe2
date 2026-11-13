@@ -4,7 +4,7 @@ Every resource a player receives is in exactly one of these (docs/resources.md):
 
 * **Collected**: gathered by villagers and fishing ships. The game's
   ``<resource>Total`` counters minus everything below that those counters
-  also include.
+  also include, plus the little direct-farming food those counters lose.
 * **Bonus**: civilization, technology and event grants. Some arrive inside
   the counters (relics, kill rewards, trickles, Folwark), some are paid
   straight into the stockpile (age-up grants, building completion grants,
@@ -52,6 +52,8 @@ START_WINDOW_MS = 5000
 FLOW_EPS = 0.05
 #: Frames (about half a second each) a refund may trail its cause by.
 REFUND_FRAMES = 3
+#: Most food per frame the collected counter can lose to float rounding.
+DRIFT_PER_FRAME = 1.0
 #: Commands after which the game hands resources back.
 REFUND_COMMANDS = frozenset(
     {"cancelbuild", "unitorder", "resign", "deleteobjects", "buildingcommandqueue"}
@@ -59,7 +61,7 @@ REFUND_COMMANDS = frozenset(
 #: The hidden Town Center annex that carries the Lithuanian +100 food.
 TC_FOOD_ANNEX = 888
 LITHUANIANS = 35
-FLOWS = ("spent", "refunds", "unexplained", "direct", "not_gathered", "trade")
+FLOWS = ("spent", "refunds", "unexplained", "direct", "uncounted", "not_gathered", "trade")
 
 
 def is_direct(source: str) -> bool:
@@ -95,7 +97,7 @@ class ResourceHistory:
     def __init__(self, data: Any) -> None:
         self.data = data
         self.workers: dict[int, Worker] = {}
-        self.players: dict[int, tuple[list[float], float, list[float]]] = {}
+        self.players: dict[int, tuple[list[float], float, list[float], list[float]]] = {}
         self.collected: dict[int, list[float]] = defaultdict(vector)
         self.delivered: dict[int, list[float]] = defaultdict(vector)
         self.credited: dict[int, list[float]] = defaultdict(vector)
@@ -133,6 +135,11 @@ class ResourceHistory:
         self.start: dict[int, dict[str, list[float]]] = {}
         self._frame_direct: dict[int, list[float]] = defaultdict(vector)
         self._starting_attrs: dict[int, list[float]] = {}
+        #: Research id -> (civ, [food, wood, stone, gold]) from the installed
+        #: dat; without it the stream's starting attributes are used instead.
+        self._starting_techs: dict[int, tuple[int, list[float]]] = (
+            getattr(data, "starting_resource_techs", None) or {}
+        )
         self._researching: dict[int, set[int]] = {}
         self._refund_evidence: list[set[int]] = []
         self._market_legs: dict[int, list[float]] = defaultdict(vector)
@@ -143,7 +150,10 @@ class ResourceHistory:
     @property
     def direct(self) -> dict[int, list[float]]:
         """Per player, everything credited so far that bypassed the counters."""
-        return {owner: flows["direct"] for owner, flows in self.flows.items()}
+        return {
+            owner: [a + b for a, b in zip(flows["direct"], flows["uncounted"], strict=True)]
+            for owner, flows in self.flows.items()
+        }
 
     def _flow(self, owner: int, name: str, index: int, amount: float) -> None:
         self.flows[owner][name][index] += amount
@@ -338,18 +348,38 @@ class ResourceHistory:
                 out[index] += float(held.fields.get(W.AV_AMOUNT, 0))
         return out
 
+    def _starting_grant(self, player: Node, completed: set[int] | None) -> list[float]:
+        """Starting-resource changes of this player's executed civilization techs.
+
+        ``completed`` limits it to those research ids; None means every one done.
+        """
+        civ = int(player.fields.get(W.P_CIV, -1))
+        out = vector()
+        for tid, state in (player.fields.get(W.P_RESEARCH) or {}).items():
+            rule = self._starting_techs.get(tid)
+            if (
+                rule is None
+                or rule[0] not in (-1, civ)
+                or not isinstance(state, Node)
+                or state.fields.get(W.R_STATE) != W.RESEARCH_DONE
+                or (completed is not None and tid not in completed)
+            ):
+                continue
+            out = [a + b for a, b in zip(out, rule[1], strict=True)]
+        return out
+
     def _observe_start(self, players: dict[int, Node], entities: dict[int, Node], t: int) -> None:
         """Split each starting stockpile into the lobby's share and the civilization's.
 
-        The civilization's share is what the game itself records: the
-        ``starting<Resource>`` attributes (Persians +50 food and wood, Chinese
-        -200 food ...), and the Lithuanian +100 food of the starting Town
-        Center's annex. The annex share is kept only when it makes the players'
-        lobby shares agree at least as well as leaving it out does.
+        The civilization's share is the sum of its executed starting-resource
+        techs in the installed dat (Persians +50 food and wood, Chinese -200
+        food ...; without the dat, the stream's ``starting<Resource>``
+        attributes, which miss the penalties), and the Lithuanian +100 food
+        of the starting Town Center's annex. The annex share is kept only when
+        it makes the players' lobby shares agree at least as well as leaving
+        it out does.
         """
-        stock = {
-            pid: [W.attr(p, r) for r in RES] for pid, p in players.items() if pid > 0
-        }
+        stock = {pid: [W.attr(p, r) for r in RES] for pid, p in players.items() if pid > 0}
         attrs = {
             pid: [W.attr(p, "starting" + r.title()) for r in RES]
             for pid, p in players.items()
@@ -358,6 +388,8 @@ class ResourceHistory:
         self._starting_attrs = {pid: list(values) for pid, values in attrs.items()}
         if t > START_WINDOW_MS:
             return
+        if self._starting_techs:
+            attrs = {pid: self._starting_grant(players[pid], None) for pid in stock}
         annex = {pid: vector() for pid in stock}
         for e in entities.values():
             owner = int(e.fields.get(W.E_OWNER, 0) or 0)
@@ -373,25 +405,18 @@ class ResourceHistory:
                 annex[owner] = [a + b for a, b in zip(annex[owner], grant, strict=True)]
 
         def spread(with_annex: bool) -> float:
-            return sum(
-                max(values) - min(values)
-                for values in zip(
-                    *(
-                        [
-                            stock[pid][i] - attrs[pid][i] - (annex[pid][i] if with_annex else 0)
-                            for i in range(4)
-                        ]
-                        for pid in stock
-                    ),
-                    strict=True,
-                )
-            )
+            lobby = [
+                [
+                    stock[pid][i] - attrs[pid][i] - (annex[pid][i] if with_annex else 0)
+                    for pid in stock
+                ]
+                for i in range(4)
+            ]
+            return float(sum(max(values) - min(values) for values in lobby))
 
         use_annex = bool(stock) and spread(True) <= spread(False) + EPS
         for pid in stock:
-            bonus = [
-                attrs[pid][i] + (annex[pid][i] if use_annex else 0) for i in range(4)
-            ]
+            bonus = [attrs[pid][i] + (annex[pid][i] if use_annex else 0) for i in range(4)]
             self.start[pid] = {"stock": stock[pid], "bonus": bonus}
             if any(abs(value) > EPS for value in bonus):
                 # Already inside the starting stockpile: a Bonus row, not a flow.
@@ -501,11 +526,11 @@ class ResourceHistory:
                 ):
                     # A finished Town Center replaces its foundation as a new
                     # object; its hidden annex pays the grant.
-                    grant = self._completion_storage(
+                    annex_food = self._completion_storage(
                         (players[owner].fields.get(W.P_MASTERS) or {}).get(TC_FOOD_ANNEX)
                     )
                     annex_grants[owner] = [
-                        a + b for a, b in zip(annex_grants[owner], grant, strict=True)
+                        a + b for a, b in zip(annex_grants[owner], annex_food, strict=True)
                     ]
                 just_built = (
                     not baseline
@@ -695,16 +720,16 @@ class ResourceHistory:
             for command in commands or ():
                 if command.get("kind") not in REFUND_COMMANDS:
                     continue
-                for key in ("playerid", "unitplayerid", "commplayerid"):
-                    if isinstance(command.get(key), int):
-                        evidence.add(int(command[key]))
-                for eid in (
+                for field in ("playerid", "unitplayerid", "commplayerid"):
+                    if isinstance(command.get(field), int):
+                        evidence.add(int(command[field]))
+                for ref in (
                     command.get("targetid"),
                     command.get("unitid"),
                     *(command.get("unitids") or ()),
                 ):
-                    if eid in self._built:
-                        evidence.add(self._built[eid][0])
+                    if ref in self._built:
+                        evidence.add(self._built[ref][0])
             self._refund_evidence = [*self._refund_evidence[-(REFUND_FRAMES - 1) :], evidence]
         refundable = set().union(*self._refund_evidence) if self._refund_evidence else set()
         # Frame-correlated grants use receipts, never theoretical cost percentages.
@@ -818,6 +843,11 @@ class ResourceHistory:
             starting = [W.attr(p, "starting" + r.title()) for r in RES]
             old_starting = self._starting_attrs.get(pid, starting)
             self._starting_attrs[pid] = starting
+            late_start = (
+                self._starting_grant(p, done[pid] - self._research.get(pid, done[pid]))
+                if self._starting_techs
+                else [starting[i] - old_starting[i] for i in range(4)]
+            )
             self.players[pid] = (totals, relic, trade, stock)
             if baseline or previous is None:
                 continue
@@ -835,9 +865,9 @@ class ResourceHistory:
             for i, res in enumerate(RES):
                 # Receipt-gated grants: credited only when the stockpile shows them.
                 # A civilization's starting bonus that arrives with the first
-                # Town Center (Nomad starts) raises its starting attribute.
+                # Town Center (Nomad starts): its tech completes mid-game.
                 for source, amount in (
-                    (STARTING_BONUS, starting[i] - old_starting[i]),
+                    (STARTING_BONUS, late_start[i]),
                     ("Town Center construction", annex_grants[pid][i]),
                 ):
                     if amount > EPS and gain[i] + FLOW_EPS >= amount:
@@ -854,6 +884,16 @@ class ResourceHistory:
                     self._flow(pid, "spent", i, -gain[i])
                 elif gain[i] > FLOW_EPS and pid in refundable:
                     self._flow(pid, "refunds", i, gain[i])
+                elif (
+                    res == "food"
+                    and gain[i] <= DRIFT_PER_FRAME
+                    and candidates.get((pid, "food"), {}).get("villagers")
+                ):
+                    # Direct farming (Khmer) pays food every tick in amounts so
+                    # small that the game's own float counter drops them once it
+                    # is large (seen from 8192 food). The stockpile keeps them.
+                    self._flow(pid, "uncounted", i, gain[i])
+                    self._credit(pid, "villagers", res, gain[i])
                 elif gain[i] > FLOW_EPS:
                     self._flow(pid, "unexplained", i, gain[i])
                     self._credit(pid, UNEXPLAINED, res, gain[i])
@@ -864,8 +904,8 @@ class ResourceHistory:
             relic_delta = max(0.0, relic - previous[1])
             trade_delta = [max(0.0, trade[i] - previous[2][i]) for i in range(4)]
             self._credit(pid, "Relics", "gold", relic_delta)
-            for i in range(4):
-                self._flow(pid, "trade", i, min(receipts[i], trade_delta[i]))
+            # Trade carts and cogs. Other resources they bring are a Bonus row.
+            self._flow(pid, "trade", 3, min(receipts[3], trade_delta[3]))
             # Trade gold and sale gold are in goldTotal; neither is gathered.
             self._flow(pid, "not_gathered", 3, min(receipts[3], trade_delta[3]))
             receipts = [max(0.0, receipts[i] - trade_delta[i]) for i in range(4)]
@@ -1034,6 +1074,60 @@ class ResourceHistory:
         nearby = [eid for eid in sites if accepts(eid)]
         return nearby[0] if len(nearby) == 1 else None
 
+    @staticmethod
+    def gathered(income: dict[str, Any], counter: dict[str, float]) -> dict[str, float]:
+        """Collected: the game's counter without its non-gathered income.
+
+        ``counter`` is the player's ``<resource>Total`` attributes; ``income``
+        is :meth:`player`'s result at the same time.
+        """
+        return {
+            r: max(0.0, counter[r] - income["not_gathered"][r] + income["uncounted"][r])
+            for r in RES
+        }
+
+    @staticmethod
+    def ledger(
+        income: dict[str, Any], collected: dict[str, float], stock: dict[str, float]
+    ) -> list[dict[str, Any]] | None:
+        """One player's stockpile, accounted for: rows that add up to it.
+
+        ``income`` is :meth:`player`'s result. None when the recording does
+        not begin at the start (no observed starting stockpile).
+        """
+        if not income.get("starting"):
+            return None
+
+        def net(plus: str, minus: str | None = None, sign: int = 1) -> dict[str, float]:
+            return {
+                r: round(sign * (income[plus][r] - (income[minus][r] if minus else 0)), 1)
+                for r in RES
+            }
+
+        rows = [
+            ("Starting resources", income["starting"]),
+            (STARTING_BONUS, income["starting_bonus"]),
+            ("Collected", {r: float(collected.get(r, 0)) for r in RES}),
+            ("Bonus", net("bonus", "starting_bonus")),
+            ("Trade", income["trade"]),
+            ("Market", net("market_in", "market_out")),
+            ("Tribute", net("tribute_in", "tribute_out")),
+            ("Refunds", income["refunds"]),
+            ("Spent", net("spent", sign=-1)),
+            (UNEXPLAINED, income["unexplained"]),
+        ]
+        total = {r: round(sum(values[r] for _, values in rows), 1) for r in RES}
+        out = [{"label": label, "resources": values} for label, values in rows]
+        out.append({"label": "Stockpile", "resources": {r: round(stock.get(r, 0), 1) for r in RES}})
+        # Rounding of the displayed parts only; a real gap is an Unexplained row.
+        out.append(
+            {
+                "label": "Difference",
+                "resources": {r: round(stock.get(r, 0) - total[r], 1) for r in RES},
+            }
+        )
+        return out
+
     def checkpoint(self, t: int) -> None:
         self.benefits.checkpoint(t)
         for dirty, values, log in (
@@ -1190,6 +1284,8 @@ class ResourceHistory:
             # Inside the game's collected counters without being gathered:
             # Collected = counter - not_gathered (see timeline._keyframe).
             "not_gathered": resource_dict(flow("not_gathered")),
+            # Gathered, but lost by the game's counter to float rounding.
+            "uncounted": resource_dict(flow("uncounted")),
             "market_in": resource_dict(moved("resources", "exchange")),
             "market_out": resource_dict(moved("spent", "exchange")),
             "tribute_in": resource_dict(moved("resources", "tribute")),

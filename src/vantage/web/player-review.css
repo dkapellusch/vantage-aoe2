@@ -181,3 +181,6 @@
 .review-upgrade-summary button{font-size:var(--fs-11, 11px);min-height:28px}
 .review-upgrade-overflow{padding-top:6px;border-top:1px solid #ffffff18}
 .review-upgrade-progress{position:absolute;left:0;bottom:0;width:100%;height:3px;border:0;accent-color:#e5bb65}
+.review-ledger table { width: 100%; }
+.review-ledger td:not(:first-child), .review-ledger th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.review-ledger-total td { border-top: 1px solid #ffffff2a; font-weight: 600; }

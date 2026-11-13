@@ -1210,3 +1210,270 @@ def test_saved_maya_longevity_rows_are_not_reported():
     report = benefits.player(1, 1000)
     assert report["effects"] == []
     assert report["extra_yield"]["food"] == 0
+
+
+# --- Starting resources, direct grants and the stockpile ledger -------------
+
+
+def stock(attrs: Node, **values: float) -> None:
+    for name, value in values.items():
+        attr(attrs, name, value)
+
+
+def second_player(world: Node, civ: int = 1, **values: float) -> Node:
+    attrs = Node(SCHEMA.model_id("PlayerAttributes"), {})
+    stock(attrs, **values)
+    first = world.fields[W.W_PLAYERS][1]
+    world.fields[W.W_PLAYERS][2] = Node(
+        SCHEMA.model_id("Player"),
+        {W.P_CIV: civ, W.P_ATTR: attrs, W.P_MASTERS: dict(first.fields[W.P_MASTERS])},
+    )
+    return attrs
+
+
+@pytest.mark.parametrize(
+    "civ,bonus",
+    [
+        (8, {"food": 50, "wood": 50, "stone": 0, "gold": 0}),  # Persians
+        (6, {"food": -200, "wood": -50, "stone": 0, "gold": 0}),  # Chinese
+        (15, {"food": 0, "wood": 0, "stone": 0, "gold": 50}),  # Aztecs
+        (37, {"food": 0, "wood": 0, "stone": 100, "gold": 0}),  # Sicilians
+        (59, {"food": 25, "wood": 25, "stone": 25, "gold": 25}),  # Tupi
+        (17, {"food": 0, "wood": -100, "stone": 0, "gold": 0}),  # Huns
+    ],
+)
+def test_starting_attributes_are_a_signed_starting_bonus_not_collection(civ, bonus) -> None:
+    h, w, _, attrs, _ = scene(civ)
+    lobby = {"food": 200, "wood": 200, "stone": 200, "gold": 100}
+    stock(attrs, **{r: lobby[r] + bonus[r] for r in lobby})
+    for r, amount in bonus.items():
+        attr(attrs, "starting" + r.title(), amount)
+    tick(h, w, 100)
+    tick(h, w, 600)
+    result = h.player(1, 600)
+    assert result["starting"] == lobby
+    assert result["starting_bonus"] == bonus
+    assert result["bonus"] == bonus
+    row = next(r for r in result["sources"] if r["source"] == "Starting bonus")
+    assert row["category"] == "bonus" and not row["estimated"]
+    # Inside the starting stockpile: neither gathered nor a later receipt.
+    assert result["not_gathered"] == {r: 0 for r in lobby}
+    assert h.direct.get(1, [0] * 4) == [0] * 4
+    counter = {r: 0.0 for r in lobby}
+    ledger = ResourceHistory.ledger(
+        result, ResourceHistory.gathered(result, counter), {r: lobby[r] + bonus[r] for r in lobby}
+    )
+    assert ledger[-1] == {"label": "Difference", "resources": {r: 0 for r in lobby}}
+
+
+@pytest.mark.parametrize("paid", [True, False])
+def test_nomad_starting_bonus_is_credited_when_the_stockpile_receives_it(paid) -> None:
+    h, w, _, attrs, _ = scene(8)
+    stock(attrs, food=200, wood=475)
+    tick(h, w, 100)
+    assert h.player(1, 100)["total"] == 0
+    stock(attrs, startingFood=50, startingWood=50)
+    if paid:
+        stock(attrs, food=250, wood=525)
+    tick(h, w, 600)
+    result = h.player(1, 600)
+    assert result["total"] == (100 if paid else 0)
+    assert result["starting_bonus"] == {"food": 0, "wood": 0, "stone": 0, "gold": 0}
+    assert result["unexplained"]["food"] == 0
+    assert h.direct.get(1, [0] * 4)[:2] == ([50, 50] if paid else [0, 0])
+    tick(h, w, 1100)
+    assert h.player(1, 1100)["total"] == (100 if paid else 0)
+
+
+def lithuanian_annex(world: Node, player: int = 1) -> None:
+    masters = world.fields[W.W_PLAYERS][player].fields[W.P_MASTERS]
+    masters[888] = Node(SCHEMA.model_id("MasterBuildingEntity"), {W.M_CLASS: 27, W.M_TYPE: 80})
+    completion_storage(masters[888], 0, 100)
+
+
+@pytest.mark.parametrize("food,expected", [(300, 100), (200, 0)])
+def test_lithuanian_starting_town_center_food_must_agree_with_the_other_player(
+    food, expected
+) -> None:
+    h, w, _, attrs, _ = scene(35)
+    lithuanian_annex(w)
+    stock(attrs, food=food, wood=200)
+    second_player(w, food=200, wood=200)
+    tick(h, w, 100)
+    result = h.player(1, 100)
+    assert result["starting_bonus"]["food"] == expected
+    assert result["starting"]["food"] == 200
+    assert h.player(2, 100)["starting_bonus"]["food"] == 0
+    assert h.player(2, 100)["total"] == 0
+
+
+@pytest.mark.parametrize("civ,received,expected", [(35, 100, 100), (35, 0, 0), (1, 100, 0)])
+def test_lithuanian_town_center_grant_needs_a_new_finished_center_and_a_receipt(
+    civ, received, expected
+) -> None:
+    h, w, _, attrs, _ = scene(civ)
+    lithuanian_annex(w)
+    foundation = w.fields[W.W_ENTITIES][200]
+    foundation.fields.update({W.E_MASTER: 621, W.B_BUILT: False})
+    w.fields[W.W_PLAYERS][1].fields[W.P_MASTERS][621] = w.fields[W.W_PLAYERS][1].fields[
+        W.P_MASTERS
+    ][109]
+    stock(attrs, food=10)
+    tick(h, w, 100_000)
+    # The finished Town Center is a new object; the foundation disappears.
+    del w.fields[W.W_ENTITIES][200]
+    w.fields[W.W_ENTITIES][201] = Node(
+        SCHEMA.model_id("BuildingEntity"),
+        {W.E_OWNER: 1, W.E_MASTER: 109, W.E_STATE: 2, W.E_X: 11, W.E_Y: 11, W.B_BUILT: True},
+    )
+    stock(attrs, food=10 + received)
+    tick(h, w, 100_500)
+    result = h.player(1, 100_500)
+    assert result["bonus"]["food"] == expected
+    if civ == 1:
+        # Not a refund either: a foundation replaced by its building is no evidence.
+        assert result["unexplained"]["food"] == 100 and result["refunds"]["food"] == 0
+        assert [r["category"] for r in result["sources"]] == ["unexplained"]
+
+
+@pytest.mark.parametrize(
+    "evidence,flow",
+    [
+        ("cancelbuild", "refunds"),
+        ("unitorder", "refunds"),
+        ("lost building", "refunds"),
+        ("cancelled research", "refunds"),
+        (None, "unexplained"),
+    ],
+)
+def test_stockpile_gains_are_refunds_only_with_evidence(evidence, flow) -> None:
+    h, w, _, attrs, _ = scene()
+    stock(attrs, wood=500)
+    research = w.fields[W.W_PLAYERS][1].fields.setdefault(W.P_RESEARCH, {})
+    research[22] = Node(SCHEMA.model_id("ResearchState"), {W.R_STATE: 2})
+    tick(h, w, 0)
+    stock(attrs, wood=325)  # a purchase
+    tick(h, w, 500)
+    stock(attrs, wood=500)
+    commands = []
+    if evidence == "cancelbuild":
+        commands = [{"kind": "cancelbuild", "unitid": 77, "unitplayerid": 1}]
+    elif evidence == "unitorder":
+        commands = [{"kind": "unitorder", "targetid": 200, "unitids": [200]}]
+    elif evidence == "lost building":
+        del w.fields[W.W_ENTITIES][200]
+    elif evidence == "cancelled research":
+        research[22].fields[W.R_STATE] = 1
+    h.sample(w, 1000, [], commands=commands)
+    h.checkpoint(1000)
+    result = h.player(1, 1000)
+    assert result["spent"]["wood"] == 175
+    assert result[flow]["wood"] == 175
+    assert result["bonus"]["wood"] == 0 and result["total"] == 0
+    other = "unexplained" if flow == "refunds" else "refunds"
+    assert result[other]["wood"] == 0
+
+
+def test_a_refund_may_trail_its_command_by_a_frame_but_not_by_seconds() -> None:
+    h, w, _, attrs, _ = scene()
+    stock(attrs, food=0)
+    tick(h, w, 0)
+    h.sample(w, 500, [], commands=[{"kind": "cancelbuild", "unitid": 77, "unitplayerid": 1}])
+    stock(attrs, food=50)
+    tick(h, w, 1000)
+    assert h.player(1, 1000)["refunds"]["food"] == 50
+    for t in (1500, 2000, 2500):
+        tick(h, w, t)
+    stock(attrs, food=100)
+    tick(h, w, 3000)
+    assert h.player(1, 3000)["refunds"]["food"] == 50
+    assert h.player(1, 3000)["unexplained"]["food"] == 50
+
+
+def tribute(sender: int, receiver: int, resource: int, sent: float, got: float) -> dict:
+    return {
+        "kind": "tribute",
+        "senderid": sender,
+        "receiverid": receiver,
+        "attributetype": resource,
+        "sendervaluechange": -sent,
+        "receivervaluechange": got,
+    }
+
+
+def test_tribute_is_its_own_row_for_both_players_and_never_collected() -> None:
+    h, w, _, attrs, _ = scene()
+    stock(attrs, gold=500)
+    other = second_player(w, gold=0)
+    tick(h, w, 0)
+    stock(attrs, gold=400)
+    stock(other, gold=70)
+    h.sample(w, 500, [], raw_events=[tribute(1, 2, 3, 100, 70)])
+    h.checkpoint(500)
+    sender, receiver = h.player(1, 500), h.player(2, 500)
+    assert sender["tribute_out"]["gold"] == 100 and sender["spent"]["gold"] == 0
+    assert receiver["tribute_in"]["gold"] == 70
+    assert receiver["unexplained"]["gold"] == 0 and receiver["total"] == 0
+    assert [r["category"] for r in receiver["exchanges"]] == ["tribute"]
+    for result, attributes in ((sender, attrs), (receiver, other)):
+        final = {
+            r: float(attributes.fields.get(W._ATTR[r], 0))
+            for r in ("food", "wood", "stone", "gold")
+        }
+        ledger = ResourceHistory.ledger(
+            result, ResourceHistory.gathered(result, dict.fromkeys(final, 0.0)), final
+        )
+        assert ledger[-1]["resources"] == dict.fromkeys(final, 0)
+
+
+def test_relic_trade_and_sale_gold_leave_collected_and_the_ledger_adds_up() -> None:
+    h, w, worker, attrs, _ = scene()
+    player = w.fields[W.W_PLAYERS][1]
+    stock(attrs, gold=100, wood=200)
+    tick(h, w, 0)
+    worker.fields[W.E_HELD_AMT] = 10
+    tick(h, w, 500)
+    worker.fields[W.E_HELD_AMT] = 0
+    # One frame: a 10 gold delivery, 5 relic gold, 30 trade gold, a 70 gold sale.
+    relic_vp(w, 5)
+    player.fields[W.P_TRADE_GOLD] = 30
+    stock(attrs, goldTotal=115, gold=215, wood=100)
+    h.sample(w, 1000, [], raw_events=[raw_market(-100, 70)])
+    h.checkpoint(1000)
+    result = h.player(1, 1000)
+    assert result["not_gathered"]["gold"] == 105
+    assert result["trade"]["gold"] == 30
+    assert result["bonus"]["gold"] == 5
+    gathered = ResourceHistory.gathered(result, {"food": 0, "wood": 0, "stone": 0, "gold": 115})
+    assert gathered["gold"] == 10
+    final = {"food": 0.0, "wood": 100.0, "stone": 0.0, "gold": 215.0}
+    ledger = {
+        row["label"]: row["resources"] for row in ResourceHistory.ledger(result, gathered, final)
+    }
+    assert ledger["Collected"]["gold"] == 10 and ledger["Bonus"]["gold"] == 5
+    assert ledger["Trade"]["gold"] == 30
+    assert ledger["Market"] == {"food": 0, "wood": -100, "stone": 0, "gold": 70}
+    assert ledger["Difference"] == dict.fromkeys(final, 0)
+
+
+def test_a_recording_that_starts_late_has_no_starting_stockpile_or_ledger() -> None:
+    h, w, _, attrs, _ = scene(8)
+    stock(attrs, food=900, startingFood=50)
+    tick(h, w, 600_000)
+    result = h.player(1, 600_000)
+    assert result["starting"] is None and result["total"] == 0
+    assert ResourceHistory.ledger(result, {}, {}) is None
+
+
+def test_direct_farming_food_missing_from_a_large_counter_is_still_gathered() -> None:
+    h, w, worker, attrs, _ = scene(28)
+    direct_farm(w, worker)
+    stock(attrs, foodTotal=9000, food=100)
+    tick(h, w, 0)
+    stock(attrs, foodTotal=9000.3, food=100.5)  # the float counter dropped 0.2
+    tick(h, w, 500)
+    result = h.player(1, 500)
+    assert result["uncounted"]["food"] == pytest.approx(0.2, abs=0.05)
+    assert result["unexplained"]["food"] == 0
+    gathered = ResourceHistory.gathered(result, {"food": 9000.3, "wood": 0, "stone": 0, "gold": 0})
+    assert gathered["food"] == pytest.approx(9000.5, abs=0.05)

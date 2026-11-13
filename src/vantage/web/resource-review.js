@@ -19,6 +19,31 @@ export function resourceTotalsHtml(totals, villager = false) {
   return `<div class="review-resource-totals" data-ui-key="resource-totals"><div class="hint" ${tip(label, detail + coverage)}>${label} <span>${partial ? '≥' : totals.estimated || villager ? '≈' : ''}</span></div><div class="review-resource-numbers">${resourceNumbers(villager ? totals.collected : totals.dropped_off)}</div>${credited}</div>`;
 }
 
+const LEDGER_DETAIL = {
+  'Starting resources': 'The lobby’s starting resources: the stockpile at the start without the civilization’s starting bonus.',
+  'Starting bonus': 'The civilization’s starting-resource bonus or penalty. Also listed under bonus income.',
+  Collected: 'Gathered by villagers and fishing ships. The game’s collected counter without the bonus, trade and market income it also counts.',
+  Bonus: 'Civilization, technology and event grants received after the start.',
+  Trade: 'Gold delivered by trade carts and trade cogs.',
+  Market: 'Bought or received at the market, minus what was paid or sold.',
+  Tribute: 'Tribute received minus tribute sent, fee included.',
+  Refunds: 'Returned by cancelled or lost queues, research and foundations.',
+  Spent: 'Everything paid for units, buildings, research, repairs and farm reseeds.',
+  'Unexplained gain': 'Stockpile increases without a recorded source. Should be zero.',
+  Stockpile: 'The stockpile at this moment: the sum of the rows above.',
+};
+
+// Where the stockpile came from and went: rows that add up to it, so a
+// missing or double-counted source would show as an unexplained row.
+export function ledgerHtml(id, ledger) {
+  if (!ledger) return '';
+  const value = (v) => !v ? '·' : v < 0 ? `−${fmtNum(-v)}` : fmtNum(v);
+  const shown = ledger.filter((row) => row.label === 'Stockpile' || row.label === 'Collected' || row.label === 'Starting resources'
+    || (row.label === 'Difference' ? RESOURCE_ORDER.some((r) => Math.abs(row.resources[r]) >= 3) : RESOURCE_ORDER.some((r) => row.resources[r])));
+  const rows = shown.map((row) => `<tr data-ui-key="ledger-${id}-${esc(row.label)}" class="${row.label === 'Stockpile' ? 'review-ledger-total' : row.label === 'Unexplained gain' || row.label === 'Difference' ? 'hint' : ''}"><td ${tip(t(row.label), t(LEDGER_DETAIL[row.label] || 'Rounding of the rows above.'))}>${row.label === 'Stockpile' ? '= ' : ''}${esc(t(row.label))}</td>${RESOURCE_ORDER.map((r) => `<td>${value(row.resources[r])}</td>`).join('')}</tr>`).join('');
+  return `<details class="review-details review-ledger" data-ui-key="ledger-${id}"><summary ${tip(t('Stockpile accounts'), t('Every resource received and spent since the start, in rows that add up to the current stockpile.'))}>${t('Stockpile accounts')}</summary><table><thead><tr><th></th>${RESOURCE_ORDER.map((r) => `<th><img src="/ui/resource_${r}.png" alt="${esc(t(r))}" ${tip(t(r))}></th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></details>`;
+}
+
 // Income amounts are read from the game, while attribution without a dedicated
 // source counter is an estimate. Unattributed income can include ordinary work
 // and is deliberately excluded from the bonus total.
@@ -26,8 +51,12 @@ export function bonusIncomeHtml(players) {
   const sections = players.map(({ id, name, color, income }) => {
     if (!income) return '';
     const rows = (income.sources || []).filter((row) => row.category !== 'regular' && row.total !== 0)
-      .sort((a, b) => (a.category === 'unattributed') - (b.category === 'unattributed') || b.total - a.total);
+      .sort((a, b) => (a.category === 'unattributed') - (b.category === 'unattributed') || (b.source === 'Starting bonus') - (a.source === 'Starting bonus') || b.total - a.total);
+    const loose = (row) => row.category === 'unattributed' || row.category === 'unexplained';
     const partial = income.has_gaps || income.observed_from_ms > 0;
+    // A sent tribute has no received column: show what left the stockpile.
+    const cell = (row, r) => row.source === 'Tribute sent' ? row.spent?.[r] : row.resources?.[r];
+    const amount = (v, fractional) => !v ? '·' : v < 0 ? `−${fmtNum(-v)}` : v < 1 || fractional && !Number.isInteger(v) ? v.toFixed(1) : fmtNum(v);
     const sourceRows = (values) => values.map(row => {
       const detail = row.category === 'yield'
         ? t('Estimated share of observed gathering due to the resource-yield multiplier: gathered × (1 − 1 / multiplier). Includes carried resources. Separate from income and cost savings.')
@@ -35,6 +64,12 @@ export function bonusIncomeHtml(players) {
         ? t('Estimated gathered-resource contribution of the recorded lobby handicap. Excludes its work-speed effects. Separate from civilization extra yield, income and savings.')
         : row.category === 'exchange'
         ? `${t('Received resources from recorded market transactions; excluded from bonus income.')} ${t('Paid')}: ${RESOURCE_ORDER.filter(r => row.spent?.[r] > 0).map(r => `${fmtNum(row.spent[r])} ${t(r)}`).join(' · ')}`
+        : row.category === 'tribute'
+        ? t('Recorded tribute. Received amounts are after the tribute fee. Excluded from bonus income and from collected resources.')
+        : row.source === 'Starting bonus'
+        ? t('The civilization’s starting-resource bonus or penalty, as the game records it. Part of the starting stockpile, or paid with the first Town Center on a Nomad start. Never counted as collected.')
+        : row.category === 'unexplained'
+        ? t('The stockpile rose without a recorded source, refund or trade. Shown so that a missing source stays visible. Excluded from bonus totals.')
         : row.category === 'return'
         ? t('Previously carried resources returned when villagers were deleted. Matched to delete commands, lost cargo and actual receipts. Excluded from bonus income; no drop-off building is credited.')
         : row.category === 'savings'
@@ -60,24 +95,25 @@ export function bonusIncomeHtml(players) {
       const label = row.category === 'assets' ? `${t(row.source)} ×${fmtNum(row.count)}`
         : row.category === 'handicap' ? row.source.replace(/^Handicap · /, '')
         : row.category === 'exchange' ? t(row.source === 'Market sales' ? 'Sales' : 'Purchases')
+        : row.category === 'tribute' ? t(row.source === 'Tribute sent' ? 'Sent' : 'Received')
         : row.source === 'Building loot' ? t('Building loot · Danes') : t(row.source);
-      return `<tr data-ui-key="income-${id}-${esc(row.source)}" class="${row.category === 'unattributed' ? 'hint' : ''}"><td ${tip(label, detail)}>${row.estimated && row.category !== 'unattributed' ? '≈ ' : ''}${esc(label)}</td>${RESOURCE_ORDER.map(r => `<td>${row.resources?.[r] > 0 ? row.resources[r] < 1 || row.source === 'Poles Folwark bonus food' && !Number.isInteger(row.resources[r]) ? row.resources[r].toFixed(1) : fmtNum(row.resources[r]) : '·'}</td>`).join('')}</tr>`;
+      return `<tr data-ui-key="income-${id}-${esc(row.source)}" class="${loose(row) ? 'hint' : ''}"><td ${tip(label, detail)}>${row.estimated && !loose(row) ? '≈ ' : ''}${esc(label)}</td>${RESOURCE_ORDER.map(r => `<td>${amount(cell(row, r), row.source === 'Poles Folwark bonus food')}</td>`).join('')}</tr>`;
     }).join('');
     // Older backends labelled unproven global multipliers as civilization yield.
-    const effects = [...(income.effects || []), ...(income.exchanges || [])].filter(row => row.total > 0
+    const effects = [...(income.effects || []), ...(income.exchanges || [])].filter(row => (row.total > 0 || row.source === 'Tribute sent')
       && !['Resource yield', 'Other resource yield'].includes(row.source));
-    const benefits = [['yield', t('Extra yield')], ['savings', t('Saved')], ['assets', t('Free units')], ['handicap', t('Handicap')], ['exchange', t('Market')], ['return', t('Returned')]].map(([category, label]) => {
+    const benefits = [['yield', t('Extra yield')], ['savings', t('Saved')], ['assets', t('Free units')], ['handicap', t('Handicap')], ['exchange', t('Market')], ['tribute', t('Tribute')], ['return', t('Returned')]].map(([category, label]) => {
       const group = effects.filter(row => row.category === category);
-      return group.length ? `<tr class="review-income-category"><th colspan="5">${label} <span>${category === 'exchange' ? '' : '≈'}${fmtNum(group.reduce((sum, row) => sum + row.total, 0))}</span></th></tr>${sourceRows(group)}` : '';
+      return group.length ? `<tr class="review-income-category"><th colspan="5">${label} <span>${category === 'exchange' || category === 'tribute' ? '' : '≈'}${fmtNum(group.reduce((sum, row) => sum + row.total, 0))}</span></th></tr>${sourceRows(group)}` : '';
     }).join('');
     // A player with no bonus income is one line, not a table of zeros.
     if (!rows.length && !benefits && !RESOURCE_ORDER.some(r => income.bonus?.[r])) {
-      return `<section class="review-income-player review-income-none" data-ui-key="income-player-${id}"><b style="color:${esc(color)}">${esc(name)}</b> <span class="hint">${t('No bonus income')}${partial ? ` · ${t('Partial history')}` : ''}</span></section>`;
+      return `<section class="review-income-player review-income-none" data-ui-key="income-player-${id}"><b style="color:${esc(color)}">${esc(name)}</b> <span class="hint">${t('No bonus income')}${partial ? ` · ${t('Partial history')}` : ''}</span>${ledgerHtml(id, income.ledger)}</section>`;
     }
     return `<section class="review-income-player" data-ui-key="income-player-${id}"><div class="review-income-head"><b style="color:${esc(color)}">${esc(name)}</b><span class="hint" ${tip(t('Bonus income'), t('Attributed bonus income. Approximate source attribution; yield and savings are separate.'))}>${t('Income')} ≈ ${fmtNum(income.total)}</span></div>
       <div class="review-resource-numbers">${resourceNumbers(income.bonus)}</div>
       ${partial ? `<span class="hint" ${tip(t('Partial history'), t('The recording starts late or has missing frames.'))}>${t('Partial history')}</span>` : ''}
-      <table><thead><tr><th>${t('Source')}</th>${RESOURCE_ORDER.map((r) => `<th><img src="/ui/resource_${r}.png" alt="${esc(t(r))}" ${tip(t(r))}></th>`).join('')}</tr></thead><tbody>${sourceRows(rows.filter(row => row.category !== 'unattributed'))}${benefits}${sourceRows(rows.filter(row => row.category === 'unattributed'))}${!rows.length && !benefits ? `<tr><td colspan="5" class="hint">${t('No attributed bonus income')}</td></tr>` : ''}</tbody></table></section>`;
+      <table><thead><tr><th>${t('Source')}</th>${RESOURCE_ORDER.map((r) => `<th><img src="/ui/resource_${r}.png" alt="${esc(t(r))}" ${tip(t(r))}></th>`).join('')}</tr></thead><tbody>${sourceRows(rows.filter(row => !loose(row)))}${benefits}${sourceRows(rows.filter(loose))}${!rows.length && !benefits ? `<tr><td colspan="5" class="hint">${t('No attributed bonus income')}</td></tr>` : ''}</tbody></table>${ledgerHtml(id, income.ledger)}</section>`;
   }).join('');
   return sections ? `<div class="review-income-grid">${sections}</div>` : `<p class="hint">${t('Resource source history is unavailable for this recording.')}</p>`;
 }
