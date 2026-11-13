@@ -16,7 +16,7 @@ import { settings, saveSettings, esc, tip } from './state.js';
 import { t } from './i18n.js';
 import { PANELS, panelInfo, hud, setHud, isVisible, setVisible, setEditorScene, togglePanelsMenu, PRESETS } from './layout.js';
 import { SCENES, ANCHORS, safeFrame } from './hud-model.js';
-import { arranging, setArranging, pinHandles, savedRect, setPanelRect, resetPanel, resetPanelSizes, syncPanelSizes, nudgePanel, resizeRect } from './panel-resize.js';
+import { arranging, setArranging, pinHandles, savedRect, setPanelRect, resetPanel, resetPanelSizes, syncPanelSizes, nudgePanel, resizeRect, startMove, minimum } from './panel-resize.js';
 import { panelChecks } from './stream-check.js';
 import { SERIES_LABEL, seriesLabel } from './overlays.js';
 
@@ -35,12 +35,41 @@ export function installLayoutEditor(ctx) {
   root.innerHTML = `<div id="le-grid" aria-hidden="true"></div><div id="le-safe" aria-hidden="true"><span>${esc(t('Safe area'))}</span></div>
     <div id="le-zone" class="hidden" tabindex="0" role="group" aria-label="${esc(t('Reserved zone: panels keep out of it. Drag to move, arrow keys nudge.'))}"><span>${esc(t('Reserved: webcam'))}</span><i data-zone-size aria-hidden="true"></i></div>
     <div id="le-bar" class="panel" role="toolbar" aria-label="${esc(t('Edit layout'))}"></div>
+    <button type="button" id="le-grip" class="hidden"></button>
     <aside id="le-lib" class="panel" aria-label="${esc(t('Widget library'))}"></aside>
     <aside id="le-insp" class="panel" aria-label="${esc(t('Inspector'))}"></aside>
     <button type="button" id="le-lib-tab" data-le-unfold="lib" aria-label="${esc(t('Show the library'))}">▸ ${esc(t('Library'))}</button>
     <button type="button" id="le-insp-tab" data-le-unfold="insp" aria-label="${esc(t('Show the inspector'))}">${esc(t('Inspector'))} ◂</button>`;
   document.body.appendChild(root);
-  const bar = $('le-bar'), lib = $('le-lib'), insp = $('le-insp'), zone = $('le-zone');
+  const bar = $('le-bar'), lib = $('le-lib'), insp = $('le-insp'), zone = $('le-zone'), grip = $('le-grip');
+
+  // The selected panel's grip: its name on a handle that is always in reach, even when the panel
+  // sits under the library or the inspector. Drag it to move the panel.
+  function placeGrip() {
+    const el = selected && hostOf(selected);
+    if (!el || !el.getClientRects().length || document.body.classList.contains('hud-moving')) { grip.classList.add('hidden'); return; }
+    const p = panelInfo(selected), r = el.getBoundingClientRect();
+    grip.textContent = `⠿ ${t(p.label)}`;
+    grip.setAttribute('aria-label', t('Move {p}: drag, or use the arrow keys', { p: t(p.label) }));
+    grip.classList.remove('hidden');
+    const free = (pane) => (root.classList.contains(`fold-${pane}`) ? 8 : 266);
+    const w = grip.offsetWidth, h = grip.offsetHeight;
+    grip.style.left = `${Math.max(free('lib'), Math.min(window.innerWidth - free('insp') - w, r.left))}px`;
+    grip.style.top = `${Math.max(58, Math.min(window.innerHeight - h - 8, r.top - h - 4))}px`;
+  }
+  grip.addEventListener('pointerdown', (e) => {
+    const el = selected && hostOf(selected);
+    if (!el) return;
+    remember(); grip.classList.add('hidden');
+    startMove(el, e);
+  });
+  grip.addEventListener('keydown', (e) => {
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key], el = selected && hostOf(selected);
+    if (!d || !el) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    remember(); nudgePanel(el, d[0] * (e.shiftKey ? 1 : 10), d[1] * (e.shiftKey ? 1 : 10));
+    renderInsp(); placeGrip();
+  });
 
   // -- undo ---------------------------------------------------------------------------------
   // A key the settings do not hold yet (no panel was ever placed) is stored empty, so undo can clear it again.
@@ -95,7 +124,8 @@ export function installLayoutEditor(ctx) {
   function renderInsp() {
     const p = selected && panelInfo(selected), el = p && hostOf(selected);
     if (!p || !el || !el.getClientRects().length) {
-      insp.innerHTML = `<div class="le-pane-head"><h2>${esc(t('Inspector'))}</h2><button type="button" data-le-fold="insp" aria-expanded="true" aria-label="${esc(t('Fold the inspector'))}">▸</button></div><p class="hint">${esc(t('Select a panel: click it, or Tab to it. Arrows move it, Alt+arrows resize it, Delete hides it.'))}</p>`;
+      insp.innerHTML = `<div class="le-pane-head"><h2>${esc(t('Inspector'))}</h2><button type="button" data-le-fold="insp" aria-expanded="true" aria-label="${esc(t('Fold the inspector'))}">▸</button></div><p class="hint">${esc(t('Select a panel: click it, or pick it in the library. Drag it by its body or by the ⠿ grip above it; drag an edge to resize. Arrows move it, Alt+arrows resize it, Delete hides it. A panel under one of these panes: fold the pane (◂ ▸) or use the grip.'))}</p>`;
+      placeGrip();
       return;
     }
     const r = el.getBoundingClientRect(), saved = savedRect(el.id) || {}, v = vp();
@@ -115,6 +145,7 @@ export function installLayoutEditor(ctx) {
       <ul class="le-stream">${panelChecks(el).map((c) => `<li class="${c.ok ? 'ok' : 'warn'}"><span aria-hidden="true">${c.ok ? '✓' : '!'}</span> ${esc(t(c.text, c.args))}</li>`).join('')}</ul>
       ${content ? `<h3>${esc(t('Content'))}</h3><div class="le-content">${content}</div>` : ''}
       <div class="le-actions"><button type="button" data-le="dock" ${tip(t('Dock'), t('Back to its default place and size'))}>${esc(t('Dock'))}</button><button type="button" data-le="hide">${esc(t('Hide'))}</button></div>`;
+    placeGrip();
   }
 
   function placeStage() {
@@ -151,7 +182,7 @@ export function installLayoutEditor(ctx) {
     if (banner) banner.classList.add('hidden');
     if (on) { history = []; scene = null; refresh(); bar.querySelector('.le-done').focus({ preventScroll: true }); }
     else {
-      select(null); pinHandles(null); setEditorScene(null);
+      select(null); pinHandles(null); setEditorScene(null); grip.classList.add('hidden');
       for (const p of PANELS) { const el = hostOf(p.id); if (el) el.removeAttribute('tabindex'); }
       saveSettings();
     }
@@ -159,11 +190,17 @@ export function installLayoutEditor(ctx) {
   }
 
   document.addEventListener('vantage:arrange', (e) => show(!!e.detail.on));
-  document.addEventListener('vantage:panel-press', (e) => { remember(); select(idOfHost(e.detail.id)); });
+  // A press selects the panel and gives it the keyboard focus (the drag itself keeps the browser
+  // from doing so), so the arrow keys act on what was just clicked.
+  document.addEventListener('vantage:panel-press', (e) => {
+    remember(); select(idOfHost(e.detail.id));
+    const el = selected && hostOf(selected);
+    if (el) el.focus({ preventScroll: true });
+  });
   document.addEventListener('vantage:hud-changed', () => { if (arranging()) refresh(); });
   window.addEventListener('resize', () => { if (arranging()) refresh(); });
   // After a drag or a resize: the inspector shows the new size.
-  window.addEventListener('pointerup', () => { if (arranging()) setTimeout(() => { renderInsp(); renderBar(); }, 0); });
+  window.addEventListener('pointerup', () => { if (arranging()) setTimeout(() => { renderInsp(); renderBar(); placeGrip(); }, 0); });
 
   // -- the bar's controls ---------------------------------------------------------------------------
   bar.addEventListener('click', (e) => {
@@ -214,8 +251,8 @@ export function installLayoutEditor(ctx) {
     const r = el.getBoundingClientRect(), v = vp(), rect = { left: r.left, top: r.top, width: r.width, height: r.height };
     if (d.leNum) {
       const n = Math.max(+e.target.min, Math.min(+e.target.max, +e.target.value || 0));
-      if (d.leNum === 'width') setPanelRect(el.id, { ...rect, width: (n / 100) * v.width, auto: false });
-      else if (d.leNum === 'height') setPanelRect(el.id, { ...rect, height: (n / 100) * v.height, auto: false });
+      if (d.leNum === 'width') setPanelRect(el.id, { ...rect, width: Math.max(minimum(el.id).width, (n / 100) * v.width), auto: false });
+      else if (d.leNum === 'height') setPanelRect(el.id, { ...rect, height: Math.max(minimum(el.id).height, (n / 100) * v.height), auto: false });
       else if (d.leNum === 'scale') setPanelRect(el.id, { ...rect, width: r.width, height: r.height, scale: n / 100, ...(savedRect(el.id) ? {} : { auto: true, moved: true }) });
       else if (d.leNum === 'opacity') setPanelRect(el.id, { ...rect, opacity: n / 100, ...(savedRect(el.id) ? {} : { auto: true, moved: true }) });
     } else if (d.leSceneShow) {
@@ -281,7 +318,7 @@ export function installLayoutEditor(ctx) {
       const step = e.shiftKey ? 1 : 10;
       if (e.altKey) {
         const r = el.getBoundingClientRect();
-        setPanelRect(el.id, { ...resizeRect({ left: r.left, top: r.top, width: r.width, height: r.height }, 'se', d[0] * step, d[1] * step, vp(), { width: 80, height: 40 }), auto: false, ...(savedRect(el.id)?.moved ? { moved: true } : {}) });
+        setPanelRect(el.id, { ...resizeRect({ left: r.left, top: r.top, width: r.width, height: r.height }, 'se', d[0] * step, d[1] * step, vp(), minimum(el.id)), auto: false, ...(savedRect(el.id)?.moved ? { moved: true } : {}) });
       } else nudgePanel(el, d[0] * step, d[1] * step);
       renderInsp();
     } else if (e.key === 'Delete' || e.key === 'Backspace') {

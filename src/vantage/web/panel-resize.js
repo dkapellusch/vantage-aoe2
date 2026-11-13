@@ -79,7 +79,10 @@ export function snapRect(rect, others, viewport, mode = 'move', threshold = SNAP
 }
 
 const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
-const minimum = id => ({ width: id === 'minimap-wrap' ? 180 : 220, height: id === 'scoreboard' ? 60 : 90 });
+// The smallest a panel resizes to: its controls must still fit (the Statistics window's title bar and tabs).
+const MINIMUM = { 'minimap-wrap': { width: 180, height: 90 }, scoreboard: { width: 220, height: 60 }, 'overlay-stats': { width: 480, height: 320 },
+  ticker: { width: 220, height: 30 }, selchip: { width: 200, height: 34 }, pulse: { width: 320, height: 40 } };
+export const minimum = id => MINIMUM[id] || { width: id.startsWith('w-') ? 120 : 220, height: id.startsWith('w-') ? 40 : 90 };
 let handleBox, guideBox, host = null, pinned = null, drag = null, move = null, changed = () => {};
 const slots = new Map();
 
