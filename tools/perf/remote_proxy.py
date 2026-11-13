@@ -153,6 +153,12 @@ def main() -> None:
         config.certfile, config.keyfile = certificate(Path(tmp))
         config.alpn_protocols = ["h2", "http/1.1"]
         config.accesslog = None
+        # Hypercorn closes a connection after 1,000 requests (and after 5 s without a new
+        # one), whatever is still being sent on it. A viewer makes that many in its first
+        # seconds over one HTTP/2 connection: every download under way then failed, the
+        # 4-6 MB particle atlases among them. A link to a hosted hub does not do that.
+        config.keep_alive_max_requests = 10**9
+        config.keep_alive_timeout = 600
         asyncio.run(serve(app(args.upstream, args.rtt, args.mbps, extra), config))
 
 
