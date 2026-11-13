@@ -1137,9 +1137,12 @@ function renderHud() {
   if (pressed()) { reviewStatus(autocast.on ? 'Auto' : S.followSelection ? 'Follow selection' : 'Free'); return; }
   for (const part of HUD_PARTS) part();
 }
-/** Start a refresh spread over the next frames (the timer); one already under way carries on. */
+/** Start a refresh spread over the next frames (the timer). */
 function refreshHud() {
-  if (hudPart < 0) hudPart = 0;
+  // The last one did not finish: frames are slow or are not coming at all (a
+  // throttled page, an error in the frame). The panels do not wait for them.
+  while (hudPart >= 0) hudStep();
+  hudPart = 0;
 }
 /** One part of the refresh under way. */
 function hudStep() {
