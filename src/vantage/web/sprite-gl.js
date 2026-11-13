@@ -41,10 +41,23 @@ const loc = {}, ringLoc = {};
 // building groups.
 let targets = null;
 
+// How long a frame counts as in use for eviction: two windows of this many
+// drawn frames (3 to 6 s at 60 fps).
+const HEAT_FRAMES = 180;
+
 /**
  * Where frames go in the atlas: per layer, shelves of frames side by side. A
  * layer's generation changes when it is emptied, which invalidates every slot
  * packed in it. Pure bookkeeping (no WebGL), so it is tested on its own.
+ *
+ * Which layer is emptied when the atlas is full: the one with the least area
+ * drawn lately (`use`), not the one touched longest ago. Layers fill in the
+ * order frames first appear, so each holds a mix of animations still on screen
+ * and ones long gone, and nearly every layer is touched every frame: least
+ * recently touched then picked layers at random, full of frames in use, which
+ * were uploaded again at once (late in an eight-player game at 8x half of all
+ * uploads were repeats, 30 M texels a second). Emptying the coldest layer
+ * re-uploads only its few live frames, next to each other.
  */
 export class ShelfAtlas {
   /** `maxLayers`: the budget it may grow to (doubling) before it evicts. */
@@ -54,9 +67,10 @@ export class ShelfAtlas {
     this.layers = Array.from({ length: layers }, () => ShelfAtlas.empty());
     this.evictions = 0;
     this.grows = 0;
+    this.window = 0;
   }
 
-  static empty() { return { shelves: [], used: -1, gen: 0, top: 0 }; }
+  static empty() { return { shelves: [], used: -1, gen: 0, top: 0, heat: 0, heatPrev: 0 }; }
 
   /** A w x h rectangle for a frame drawn in frame `frame`: [layer, x, y] or null. */
   place(w, h, frame) {
@@ -83,17 +97,41 @@ export class ShelfAtlas {
         pass--;
         continue;
       }
-      // At the budget: empty the least recently used layer not needed in this frame.
-      let lru = -1;
+      // At the budget: empty the layer with the least area drawn lately (ties:
+      // the least recently used), never one needed in this frame.
+      this.roll(frame);
+      let pick = -1;
       for (let i = 0; i < this.layers.length; i++) {
-        if (this.layers[i].used < frame && (lru < 0 || this.layers[i].used < this.layers[lru].used)) lru = i;
+        const L = this.layers[i];
+        if (L.used >= frame) continue;
+        if (pick < 0) { pick = i; continue; }
+        const P = this.layers[pick], a = L.heat + L.heatPrev, b = P.heat + P.heatPrev;
+        if (a < b || (a === b && L.used < P.used)) pick = i;
       }
-      if (lru < 0) return null; // the whole atlas is in use by this one frame
-      const L = this.layers[lru];
-      L.shelves = []; L.top = 0; L.gen++;
+      if (pick < 0) return null; // the whole atlas is in use by this one frame
+      const L = this.layers[pick];
+      L.shelves = []; L.top = 0; L.gen++; L.heat = 0; L.heatPrev = 0;
       this.evictions++;
     }
     return null;
+  }
+
+  // Heat is counted per window of HEAT_FRAMES frames; the last two windows count.
+  roll(frame) {
+    const w = Math.floor(frame / HEAT_FRAMES);
+    if (w === this.window) return;
+    const next = w === this.window + 1;
+    for (const L of this.layers) { L.heatPrev = next ? L.heat : 0; L.heat = 0; }
+    this.window = w;
+  }
+
+  /** A packed frame (`slot`: { layer, w, h }) is drawn in frame `frame`. */
+  use(slot, frame) {
+    this.roll(frame);
+    const L = this.layers[slot.layer];
+    L.used = frame;
+    // Each frame counts once per window, however many times it is drawn.
+    if (slot.window !== this.window) { slot.window = this.window; L.heat += slot.w * slot.h; }
   }
 
   gen(layer) { return this.layers[layer].gen; }
@@ -389,7 +427,7 @@ function slotFor(img, sx, sw, sh, rows = sh) {
   // Keyed by the rows too: a strip may be drawn with and without its mask band.
   const key = rows === sh ? sx : `${sx}|${rows}`;
   let s = m.get(key);
-  if (s && s.gen === atlasSlots.gen(s.layer)) { atlasSlots.touch(s.layer, frameNo); return s; }
+  if (s && s.gen === atlasSlots.gen(s.layer)) { atlasSlots.use(s, frameNo); return s; }
   const w = Math.ceil(sw), h = Math.ceil(rows);
   if (w + PAD * 2 > ATLAS || h + PAD * 2 > ATLAS) { stats.tooLarge++; return null; }
   // Past this frame's upload budget (a seek into a big battle brings hundreds of
@@ -398,7 +436,7 @@ function slotFor(img, sx, sw, sh, rows = sh) {
   // A strip with nothing uploaded yet always uploads.
   if (uploadedPx >= uploadBudgetPx) {
     for (const alt of m.values()) {
-      if (alt.h === h && alt.w === w && alt.gen === atlasSlots.gen(alt.layer)) { atlasSlots.touch(alt.layer, frameNo); stats.deferred++; return alt; }
+      if (alt.h === h && alt.w === w && alt.gen === atlasSlots.gen(alt.layer)) { atlasSlots.use(alt, frameNo); stats.deferred++; return alt; }
     }
   }
   const before = atlasSlots.evictions;
@@ -417,7 +455,8 @@ function slotFor(img, sx, sw, sh, rows = sh) {
   gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
   stats.uploads++;
   uploadedPx += w * h;
-  s = { layer, gen: atlasSlots.gen(layer), x: x + PAD, y: y + PAD, w, h };
+  s = { layer, gen: atlasSlots.gen(layer), x: x + PAD, y: y + PAD, w, h, window: -1 };
+  atlasSlots.use(s, frameNo);
   m.set(key, s);
   return s;
 }

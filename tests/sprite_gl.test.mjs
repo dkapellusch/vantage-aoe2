@@ -64,3 +64,36 @@ test('an atlas without a larger budget keeps its size', () => {
   assert.equal(a.layers.length, 1);
   assert.equal(a.evictions, 1);
 });
+
+test('a full atlas empties the layer with the least area drawn lately, not the least recently touched', () => {
+  const a = new ShelfAtlas(3, 100);
+  // Three full layers of four 50 x 50 frames each.
+  const slots = [];
+  for (let i = 0; i < 12; i++) { const [layer] = a.place(50, 50, 1); const s = { layer, w: 50, h: 50 }; a.use(s, 1); slots.push(s); }
+  assert.deepEqual(slots.map((s) => s.layer), [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2]);
+  // Later: all of layer 0 is still drawn, one frame of layer 1, two of layer 2.
+  // Layer 1 was touched most recently of all.
+  for (const s of slots.slice(0, 4)) a.use(s, 400);
+  for (const s of slots.slice(8, 10)) a.use(s, 400);
+  a.use(slots[4], 401);
+  assert.deepEqual(a.place(50, 50, 402), [1, 0, 0]);
+  assert.equal(a.gen(1), 1);
+  assert.equal(a.evictions, 1);
+  // A frame drawn many times in a window counts once.
+  const b = new ShelfAtlas(2, 100);
+  const one = { layer: b.place(100, 100, 1)[0], w: 100, h: 100 }, two = { layer: b.place(50, 100, 1)[0], w: 50, h: 100 };
+  const small = { layer: b.place(40, 100, 1)[0], w: 40, h: 100 };
+  assert.deepEqual([one.layer, two.layer, small.layer], [0, 1, 1]);
+  b.use(one, 2); b.use(two, 2);
+  for (let i = 0; i < 50; i++) b.use(small, 2);
+  assert.deepEqual(b.place(100, 100, 3), [1, 0, 0]); // 50 + 40 columns drawn once each < 100
+});
+
+test('heat fades: a layer not drawn for two windows is emptied before a warm one', () => {
+  const a = new ShelfAtlas(2, 100);
+  const cold = { layer: a.place(100, 100, 1)[0], w: 100, h: 100 }, warm = { layer: a.place(10, 100, 1)[0], w: 10, h: 100 };
+  a.use(cold, 1); a.use(warm, 1);
+  a.use(warm, 500); // frame 500 is two windows on: the big frame's heat is gone
+  a.touch(0, 501);  // touched later than the warm layer, but nothing of it drawn
+  assert.deepEqual(a.place(100, 100, 502), [0, 0, 0]);
+});
