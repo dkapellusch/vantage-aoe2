@@ -1092,7 +1092,7 @@ function drawSprites(r, px, py) {
   }
   // Do not replace a complete pose with a half-loaded building or animation.
   if (drew && !pendingMain) lastDrawn.remember(r, generation, S.t, drawn);
-  if (!drew && !failed) {
+  if (!drew) {
     spriteStats.missing++;
     spriteStats.missingMasters.set(r[2], (spriteStats.missingMasters.get(r[2]) || 0) + 1);
   }
