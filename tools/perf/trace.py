@@ -13,6 +13,7 @@ call site, and the longest tasks with what was inside them.
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -44,6 +45,7 @@ KINDS = {
     "FireAnimationFrame": "frame callback (script)",
     "TimerFire": "timers (script, incl. the HUD render)",
     "EventDispatch": "input and message events",
+    "HandlePostMessage": "message tasks (the view worker's answers, the HUD's parts)",
     "RunMicrotasks": "microtasks (promises)",
     "Decode Image": "image decode (main thread)",
     "HitTest": "hit test",
@@ -161,7 +163,29 @@ def main():
             }
         )
     long_tasks = [t["dur"] / 1000 for t in tasks if t["dur"] > 50000]
+    # The whole main-thread frame: the task that runs the frame callback, then
+    # style, layout, observers and paint. What decides whether a frame is on
+    # time (the frame callback alone leaves the browser's own share out).
+    starts = sorted(e["ts"] for e in mine if e["name"] == "FireAnimationFrame")
+    whole = []
+    for t in mine:
+        if t["name"] != "RunTask":
+            continue
+        i = bisect.bisect_left(starts, t["ts"])
+        if i < len(starts) and starts[i] <= t["ts"] + t["dur"]:
+            whole.append(t["dur"] / 1000)
+    whole.sort()
     out = {
+        "frame_tasks": {
+            "n": len(whole),
+            "p50": round(whole[len(whole) // 2], 2) if whole else None,
+            "p95": round(whole[int(len(whole) * 0.95)], 2) if whole else None,
+            "p99": round(whole[int(len(whole) * 0.99)], 2) if whole else None,
+            "max": round(whole[-1], 2) if whole else None,
+            "over_8ms": sum(w > 8.3 for w in whole),
+            "over_12ms": sum(w > 12 for w in whole),
+            "over_16ms": sum(w > 16.7 for w in whole),
+        },
         "args": {k: a for k, a in vars(args).items() if k != "spots_data"},
         "renderer": renderer,
         "load": load,
@@ -180,6 +204,12 @@ def main():
     }
     Path(args.out).write_text(json.dumps(out, indent=1))
     print(f"{renderer}\nframes {frames}, load {load}")
+    ft = out["frame_tasks"]
+    print(
+        f"whole main-thread frames (callback, style, layout, paint): p50 {ft['p50']} "
+        f"p95 {ft['p95']} p99 {ft['p99']} max {ft['max']} ms; over 8.3 ms: {ft['over_8ms']}, "
+        f"over 12 ms: {ft['over_12ms']}, over 16.7 ms: {ft['over_16ms']} of {ft['n']}"
+    )
     for k, ms in out["ms_per_frame"].items():
         print(f"  {ms:8.3f} ms/frame  {counts[k]:6d} x  {k}")
     print(
