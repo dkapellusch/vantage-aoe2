@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from common import Viewer, background_load, load_spots, measured, summarize
+from common import Viewer, background_load, frame_stats, load_spots, measured, summarize
 from playwright.sync_api import sync_playwright
 
 ZOOM_OUT = 1.0  # icons (sprites off below the game-art threshold) or small sprites
@@ -41,6 +41,9 @@ def open_at(pw, args, hud, where, zoom, lead_ms=0):
         size=tuple(args.size),
         headless=not args.headed,
         web=args.web,
+        path=args.path,
+        dpr=args.dpr,
+        cpu=args.cpu,
     )
     v.camera(x, y, zoom)
     v.seek(max(args.spots_data["start"], t - lead_ms))
@@ -138,7 +141,7 @@ def spin_wheel(v, size, seconds):
     direction = -1
     while time.time() - t0 < seconds:
         for _ in range(12):
-            m.wheel(0, direction * 100)
+            wheel_event(v, w / 2, h / 2, 0, direction * 100)  # a mouse wheel's notch
             v.page.wait_for_timeout(40)
         v.page.wait_for_timeout(700)
         direction = -direction
@@ -150,6 +153,147 @@ def wheel_zoom(pw, args, hud, where, zoom):
     r = measured(v, 0, before=lambda: spin_wheel(v, args.size, args.pan_seconds))
     r["settle_after"] = v.settle()
     return v, r
+
+
+def wheel_event(v, x, y, dx, dy, ctrl=False):
+    """One wheel event in CSS pixels (ctrl set without a key down: a trackpad's pinch).
+    With an emulated pixel density the browser divides synthetic deltas by it."""
+    v.cdp.send(
+        "Input.dispatchMouseEvent",
+        {
+            "type": "mouseWheel",
+            "x": x,
+            "y": y,
+            "deltaX": dx * v.dpr,
+            "deltaY": dy * v.dpr,
+            "modifiers": 2 if ctrl else 0,
+        },
+    )
+
+
+CAMERA = "() => { const c = window.vantage.S.camera; return [c.x, c.y, c.zoom]; }"
+
+
+def trackpad_pan(pw, args, hud, where, zoom):
+    """Two fingers on a trackpad: a stream of small wheel events, right and down, then back."""
+    v = open_at(pw, args, hud, where, zoom)
+    w, h = args.size
+    x0, y0, z0 = v.ev(CAMERA)
+    sent = [0.0, 0.0]
+
+    def scroll():
+        t0 = time.time()
+        while time.time() - t0 < args.pan_seconds:
+            k = (time.time() - t0) * 1.6
+            dx, dy = round(math.cos(k) * 22, 2), round(math.sin(2 * k) * 14, 2)
+            wheel_event(v, w / 2, h / 2, dx, dy)
+            sent[0] += dx
+            sent[1] += dy
+            v.page.wait_for_timeout(8)
+
+    r = measured(v, 0, before=scroll)
+    v.page.wait_for_timeout(1500)  # an eased zoom, if that is what the events did, has ended
+    x1, y1, z1 = v.ev(CAMERA)
+    # The camera's move in screen px (the viewer's isometric projection, 32 x 16 px tiles).
+    moved = [((x1 + y1) - (x0 + y0)) * 16 * z1, ((y1 - x1) - (y0 - x0)) * 8 * z1]
+    r["trackpad"] = {
+        "scrolled_px": [round(sent[0]), round(sent[1])],
+        "camera_moved_px": [round(moved[0]), round(moved[1])],
+        "zoom_before": round(z0, 3),
+        "zoom_after": round(z1, 3),
+        "pans": abs(z1 - z0) < 1e-6 and abs(moved[0] - sent[0]) < 3 and abs(moved[1] - sent[1]) < 3,
+    }
+    r["settle_after"] = v.settle()
+    return v, r
+
+
+def trackpad_pinch(pw, args, hud, where, zoom):
+    """A pinch: ctrl + wheel events with small deltas, out and back in. How far the
+    zoom has got when the fingers stop, and how long until it is where it ends."""
+    v = open_at(pw, args, hud, where, zoom)
+    w, h = args.size
+    pinches = []
+    v.ev("() => window.__perf.start()")
+    for direction in (1, -1, 1, -1):  # zoom out, in, out, in
+        z0 = v.ev(CAMERA)[2]
+        for _ in range(40):
+            wheel_event(v, w / 2, h / 2, 0, direction * 2.5, ctrl=True)
+            v.page.wait_for_timeout(8)
+        at_stop = v.ev(CAMERA)[2]
+        t0 = time.time()
+        z, settled_ms = at_stop, 0.0
+        while time.time() - t0 < 3:
+            v.page.wait_for_timeout(30)
+            z_now = v.ev(CAMERA)[2]
+            if abs(z_now - z) > 1e-4 * z:
+                settled_ms = (time.time() - t0) * 1000
+            z = z_now
+        total = abs(math.log(z / z0)) or 1e-9
+        pinches.append(
+            {
+                "zoom": [round(z0, 3), round(at_stop, 3), round(z, 3)],
+                "done_when_fingers_stop_pct": round(100 * abs(math.log(at_stop / z0)) / total),
+                "still_moving_ms": round(settled_ms),
+            }
+        )
+    v.ev("() => { window.__perf.on = false; }")
+    c = v.collect()
+    out = frame_stats(c["frames"], c["work"])
+    out["pinches"] = pinches
+    out["done_when_fingers_stop_pct"] = min(p["done_when_fingers_stop_pct"] for p in pinches)
+    out["still_moving_ms"] = max(p["still_moving_ms"] for p in pinches)
+    return v, out
+
+
+def link_stats(args):
+    """What crossed tools/perf/remote_proxy.py since the last call (None without it)."""
+    import ssl
+    import urllib.request
+
+    try:
+        ctx = ssl._create_unverified_context()
+        with urllib.request.urlopen(args.base + "/__stats", timeout=5, context=ctx) as r:
+            got = json.load(r)
+            return got if "sprites" in got else None
+    except Exception:
+        return None
+
+
+def second_match(pw, args, hud, where, zoom):
+    """Open a match, watch a little, then open another (--path2) of the same game
+    build: how much of the first one's graphics the second fetches again."""
+    link_stats(args)
+    v = open_at(pw, args, hud, where, zoom, lead_ms=30000)
+    v.speed(8)
+    v.ev("() => { window.vantage.S.playing = true; }")
+    v.page.wait_for_timeout(12000)
+    v.ev("() => { window.vantage.S.playing = false; }")
+    v.page.wait_for_timeout(1500)
+    first = link_stats(args)
+    t0 = time.time()
+    v.page.goto(args.base + args.path2)
+    ready = "document.body.dataset.startup === 'ready' && window.vantage && window.vantage.S.view"
+    while True:
+        try:
+            v.page.wait_for_function(ready, timeout=180000)
+            break
+        except Exception as e:
+            if "context was destroyed" not in str(e):
+                raise
+    load_s = round(time.time() - t0, 2)
+    v.camera(v.x, v.y, zoom)
+    jump = v.seek(max(args.spots_data["start"], v.t - 30000), settle=False, timeout=30000)
+    v.speed(8)
+    v.ev("() => { window.vantage.S.playing = true; }")
+    r = measured(v, 12)
+    out = {
+        "first_match_link": first,
+        "second_match_load_s": load_s,
+        "second_match_seek": jump,
+        "second_match_link": link_stats(args),
+        "second_match_playback": {k: r[k] for k in ("work", "over16_pct", "incomplete", "game_s")},
+    }
+    return v, out
 
 
 def camera_jumps(pw, args, hud, where, zoom):
@@ -274,6 +418,9 @@ SCENARIOS = {
     "pan_mouse": pan_mouse,
     "pan_edge": pan_edge,
     "wheel": wheel_zoom,
+    "trackpad_pan": trackpad_pan,
+    "trackpad_pinch": trackpad_pinch,
+    "second_match": second_match,
     "jumps": camera_jumps,
     "seek": seeks,
     "memory": memory,
@@ -295,6 +442,10 @@ def main():
         help="take the viewer's front end from this src/vantage/web folder (A/B on one server)",
     )
     ap.add_argument("--size", type=int, nargs=2, default=[1920, 1080])
+    ap.add_argument("--path", default="/", help="the viewer's page (a hub match: /v/<id>/)")
+    ap.add_argument("--path2", help="another match's page, for the second_match scenario")
+    ap.add_argument("--dpr", type=float, default=1, help="device pixels per CSS pixel")
+    ap.add_argument("--cpu", type=float, default=1, help="CPU slowdown factor for the page")
     ap.add_argument("--scenarios", default="playback,pan,pan_mouse,pan_edge,wheel,jumps,seek")
     ap.add_argument("--hud", default="full,minimal")
     ap.add_argument(
@@ -328,10 +479,15 @@ def main():
                         for kw in variants:
                             for rep in range(args.repeat):
                                 load = background_load()
+                                link_stats(args)  # start counting from here
                                 v = None
                                 try:
                                     v, r = SCENARIOS[name](pw, args, hud, where, zoom, **kw)
+                                    link = link_stats(args)
+                                    if link and "link" not in r:
+                                        r["link"] = link
                                     r["renderer"] = v.renderer()
+                                    r["load_s"] = v.load_s
                                     r["page_errors"] = v.errors[:5]
                                 except Exception as e:
                                     r = {"failed": repr(e)[:300]}
@@ -346,6 +502,11 @@ def main():
                                     **kw,
                                     "rep": rep,
                                     "gpu": args.gpu,
+                                    "profile": {
+                                        "dpr": args.dpr,
+                                        "cpu": args.cpu,
+                                        "size": args.size,
+                                    },
                                     "load": load,
                                     "result": r,
                                 }

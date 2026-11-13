@@ -136,16 +136,32 @@ class Viewer:
         headless=True,
         extra_args=(),
         web=None,
+        path="/",
+        dpr=1,
+        cpu=1,
     ):
         """`web`: a src/vantage/web folder to take the viewer's scripts and styles from
         instead of the server's own (the server reads its copy once, at start): one
-        loaded recording then serves any checkout's front end, for A/B runs."""
+        loaded recording then serves any checkout's front end, for A/B runs.
+        `path`: the viewer's page on `base` (a hub match is at /v/<id>/). `dpr`: device
+        pixels per CSS pixel (2 on a Retina display). `cpu`: slow the page's main thread
+        down this many times, once it has loaded (a laptop against this desktop)."""
         self.base = base
+        self.dpr = dpr
+        secure = base.startswith("https:")
         self.browser = pw.chromium.launch(
-            headless=headless, args=[*GPU_ARGS[gpu], *COMMON_ARGS, *extra_args]
+            headless=headless,
+            args=[
+                *GPU_ARGS[gpu],
+                *COMMON_ARGS,
+                *(["--ignore-certificate-errors"] if secure else []),
+                *extra_args,
+            ],
         )
         self.ctx = self.browser.new_context(
-            viewport={"width": size[0], "height": size[1]}, device_scale_factor=1
+            viewport={"width": size[0], "height": size[1]},
+            device_scale_factor=dpr,
+            ignore_https_errors=secure,
         )
         saved = {**SEEN, "hud": {"preset": hud, "hintSeen": True}, **(settings or {})}
         self.ctx.add_init_script(
@@ -171,11 +187,22 @@ class Viewer:
         self.cdp.on("Network.responseReceived", self._on_response)
         self.cdp.on("Network.loadingFinished", self._on_finished)
         self.page.set_default_timeout(180000)
-        self.page.goto(base + "/")
-        self.page.wait_for_function(
-            "document.body.dataset.startup === 'ready' && window.vantage && window.vantage.S.view",
-            timeout=180000,
+        t0 = time.time()
+        self.page.goto(base + path)
+        ready = (
+            "document.body.dataset.startup === 'ready' && window.vantage && window.vantage.S.view"
         )
+        while True:
+            try:
+                self.page.wait_for_function(ready, timeout=180000)
+                break
+            except Exception as e:
+                # A hub match first loads a page that registers its service worker and reloads.
+                if "context was destroyed" not in str(e) or time.time() - t0 > 180:
+                    raise
+        self.load_s = round(time.time() - t0, 2)
+        if cpu and cpu != 1:
+            self.cdp.send("Emulation.setCPUThrottlingRate", {"rate": cpu})
 
     @staticmethod
     def _from_folder(route, folder):
@@ -345,6 +372,7 @@ def measured(viewer, seconds, before=None):
     }
     out["game_s"] = round((end["t"] - start["t"]) / 1000, 1)
     out["entities"] = end["entities"]
+    out["slow_frames"] = end.get("slow") or []
     out["probe_errors"] = end["errors"]
     return out
 

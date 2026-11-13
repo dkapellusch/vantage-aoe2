@@ -6,7 +6,7 @@
   // Saved settings for a first visit (the HUD preset and the tutorials already seen).
   if (window.__perfSettings && !localStorage.getItem(window.__perfSettings[0])) localStorage.setItem(...window.__perfSettings);
   const P = window.__perf = {
-    on: false, frames: [], work: [], long: [], decode: [], hud: [], state: [],
+    on: false, frames: [], work: [], long: [], decode: [], hud: [], state: [], slow: [],
     driver: null, watch: null, errors: [],
   };
   const raf = window.requestAnimationFrame.bind(window);
@@ -20,10 +20,18 @@
   window.requestAnimationFrame = (fn) => raf((now) => {
     const isTick = fn.name === 'tick';
     if (isTick && P.driver) { try { P.driver(now); } catch (e) { P.errors.push(String(e)); P.driver = null; } }
+    const w0 = isTick && P.on && window.vantage && window.vantage.world;
+    const before = w0 ? [{ ...w0.drawTimes }, w0.gpuSpriteStats()] : null;
     const a = performance.now();
     fn(now);
     const b = performance.now();
     if (!isTick) return;
+    // What a slow frame was made of: the viewer's own stage timers and counters.
+    if (before && b - a > 40 && P.slow.length < 20) {
+      const d = w0.drawTimes, g = w0.gpuSpriteStats(), [d0, g0] = before, part = {};
+      for (const k of ['ground', 'entities', 'outlines', 'effects', 'post', 'trees', 'chunks']) part[k] = Math.round(d[k] - d0[k]);
+      P.slow.push({ work: Math.round(b - a), ...part, paints: d.paints - d0.paints, uploads: g.uploads - g0.uploads, grows: g.grows - g0.grows, evictions: g.evictions - g0.evictions });
+    }
     if (P.on) { P.frames.push(now); P.work.push(b - a); }
     if (P.on || P.watch) {
       const cur = snap();
@@ -67,7 +75,11 @@
     const t0 = performance.now();
     let first = null, clean = 0, cleanAt = null, frames = 0, incomplete = 0;
     const waited = {}; // what was missing -> frames it was missing for
-    P.watch = (now, end, d) => {
+    // Frames that never come (an error in every frame) must not hang the run.
+    const watching = (now, end, d) => step(now, end, d);
+    setTimeout(() => { if (P.watch === watching) { P.watch = null; resolve({ first, full: null, frames, incomplete, waited, stalled: true }); } }, timeout + 3000);
+    P.watch = watching;
+    const step = (now, end, d) => {
       const v = window.vantage, S = v.S;
       frames++;
       const right = target == null || (S.view && S.view.time <= target + 1 && target - S.view.time < 2500 && Math.abs(S.t - target) < 2500);
@@ -85,7 +97,7 @@
       if (clean >= settle || end - t0 > timeout) { P.watch = null; resolve({ first, full: clean >= settle ? cleanAt : null, frames, incomplete, waited }); }
     };
   });
-  P.reset = () => { P.frames = []; P.work = []; P.long = []; P.decode = []; P.hud = []; P.state = []; };
+  P.reset = () => { P.frames = []; P.work = []; P.long = []; P.decode = []; P.hud = []; P.state = []; P.slow = []; };
 
   // -- helpers the Python side calls -------------------------------------------------
   P.renderer = () => {
@@ -119,7 +131,7 @@
   P.collect = () => {
     const v = window.vantage, w = v.world, s = w.spriteStats;
     return {
-      frames: P.frames, work: P.work, long: P.long, decode: P.decode, hud: P.hud, state: P.state, errors: P.errors,
+      frames: P.frames, work: P.work, long: P.long, decode: P.decode, hud: P.hud, state: P.state, slow: P.slow, errors: P.errors,
       drawTimes: { ...w.drawTimes }, gpu: w.gpuSpriteStats(), sprites: w.spriteMemory(),
       spriteStats: { missing: s.missing, stale: s.stale, standIn: s.standIn },
       heap: performance.memory ? performance.memory.usedJSHeapSize : 0, t: v.S.t, speed: v.S.speedIndex,
