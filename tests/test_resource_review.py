@@ -260,11 +260,14 @@ def raw_market(amount: float, gold: float, resource: int = 1) -> dict:
 
 def test_raw_market_sales_survive_merged_display_events_and_keep_payment_breakdown() -> None:
     h, w, _, attrs, _ = scene()
+    attr(attrs, "wood", 300)
     tick(h, w, 0)
     attr(attrs, "goldTotal", 139)
+    attr(attrs, "wood", 100)  # a sale takes the sold wood out of the stockpile
     h.sample(w, 1000, [], raw_events=[raw_market(-100, 70), raw_market(-100, 69)])
     h.checkpoint(1000)
     attr(attrs, "goldTotal", 207)
+    attr(attrs, "wood", 0)
     # The timeline can merge this trade into a previous UI row and emit no row.
     h.sample(w, 2000, [], raw_events=[raw_market(-100, 68)])
     h.checkpoint(2000)
@@ -284,6 +287,7 @@ def test_market_gold_is_not_misattributed_to_a_simultaneous_worker_delivery() ->
     tick(h, w, 1000)
     worker.fields[W.E_HELD_AMT] = 0
     attr(attrs, "goldTotal", 90)
+    attr(attrs, "wood", -100)  # the sold wood leaves the stockpile
     h.sample(w, 2000, [], raw_events=[raw_market(-100, 70)])
     h.checkpoint(2000)
     assert h.entity(100, 2000)["credited"]["gold"] == 20
@@ -1155,6 +1159,8 @@ def test_query_state_roundtrip_answers_every_query_the_same() -> None:
         h.credit_log = defaultdict(list)
         h.source_log = defaultdict(list)
         h.exchange_log = defaultdict(list)
+        h.flow_log = defaultdict(list)
+        h.start = {}
         h.ambiguous_sites = defaultdict(list)
         h._sites = set()
         h.coverage = []
@@ -1168,6 +1174,8 @@ def test_query_state_roundtrip_answers_every_query_the_same() -> None:
     history.deposit_log[7].append((1000, [1.0, 0.0, 0.0, 0.0]))
     history.source_log[1].append((1000, {"villagers": [3.0, 0.0, 0.0, 0.0]}))
     history.exchange_log[1].append((1000, [{"resources": [1.0, 0, 0, 0], "spent": [0, 1.0, 0, 0]}]))
+    history.flow_log[1].append((1000, {"spent": [5.0, 0, 0, 0], "trade": [0, 0, 0, 7.0]}))
+    history.start = {1: {"stock": [250.0, 200.0, 200.0, 100.0], "bonus": [50.0, 0, 0, 0]}}
     history.ambiguous_sites[9] = [500]
     history._sites = {9}
     history.coverage = [(0, None), (2000, 1500)]

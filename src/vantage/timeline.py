@@ -735,8 +735,10 @@ class Timeline:
             stats["resource_income"] = self.resource_history.player(int(pid), t)
             bonus = self.resource_history.farms.bonus(int(pid), t)
             stats["folwark_bonus_food"] = round(bonus, 1)
-            # Preserve the raw counter for reconciliation; rates and gathered
-            # totals exclude Folwark's instant construction payout.
+            # Preserve the game's raw counter for reconciliation. "Collected" is
+            # what workers gathered: the counter minus the bonus, trade and
+            # market income it also counts (docs/resources.md), so no amount is
+            # both Collected and Bonus and grants never inflate gathering rates.
             owner_node = W.players_of(world).get(int(pid)) if world is not None else None
             raw_collected = (
                 {r: W.attr(owner_node, r + "Total") for r in W.RESOURCE_NAMES}
@@ -745,8 +747,10 @@ class Timeline:
             )
             raw_collected["total"] = sum(raw_collected[r] for r in W.RESOURCE_NAMES)
             stats["recorded_collected"] = raw_collected
-            stats["collected"]["food"] = round(max(0, raw_collected["food"] - bonus))
-            stats["collected"]["total"] = round(max(0, raw_collected["total"] - bonus))
+            other = stats["resource_income"]["not_gathered"]
+            for r in W.RESOURCE_NAMES:
+                stats["collected"][r] = round(max(0, raw_collected[r] - other[r]))
+            stats["collected"]["total"] = sum(stats["collected"][r] for r in W.RESOURCE_NAMES)
         self._player_extras(v)
         self._activity(v)
         kf = Keyframe(t, zlib.compress(json.dumps(v, separators=(",", ":")).encode(), 3))
