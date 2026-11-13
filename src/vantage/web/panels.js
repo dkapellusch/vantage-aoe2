@@ -1847,6 +1847,11 @@ export function renderEvents(seek) {
       if (eventsPinnedToBottom) pager.classList.add('hidden');
     });
   }
+  // A row is written once, with the unit names of the view on screen (a player's
+  // Longbowman is an Elite Longbowman later in the game). Right after a seek that
+  // is still the view of the moment left behind: wait for the new one, at most
+  // 3 s, rather than write the new moment's rows with the old moment's names.
+  if (S.jump && !S.jump.wait && S.view && Math.abs(S.view.time - S.t) > 2500 && performance.now() - S.jump.at < 3000) return;
   const recent = recentVisibleEvents(150);
   renderPinned(high, recent);
   // The log is a window of the last 150 events: while playing forward it only
