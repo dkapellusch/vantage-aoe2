@@ -38,6 +38,24 @@
   });
   const si = window.setInterval.bind(window);
   window.setInterval = (fn, ms, ...rest) => si(ms === 250 ? () => { const a = performance.now(); fn(); if (P.on) P.hud.push(performance.now() - a); } : fn, ms, ...rest);
+  // Builds that split the HUD refresh into parts run each part from a MessageChannel
+  // (app.js hudStep): time those tasks too, so `hud` is "one HUD task" in every build.
+  const MC = window.MessageChannel, onmessage = Object.getOwnPropertyDescriptor(MessagePort.prototype, 'onmessage');
+  window.MessageChannel = function () {
+    const ch = new MC();
+    for (const port of [ch.port1, ch.port2]) {
+      let handler = null;
+      Object.defineProperty(port, 'onmessage', {
+        get: () => handler,
+        set(fn) {
+          handler = fn;
+          const timed = fn && fn.name === 'hudStep';
+          onmessage.set.call(port, timed ? (e) => { const a = performance.now(); fn(e); if (P.on) P.hud.push(performance.now() - a); } : fn);
+        },
+      });
+    }
+    return ch;
+  };
   try { new PerformanceObserver((l) => { if (P.on) for (const e of l.getEntries()) P.long.push([e.startTime, e.duration]); }).observe({ entryTypes: ['longtask'] }); } catch (e) { /* not supported */ }
   if (window.createImageBitmap) {
     const cib = window.createImageBitmap.bind(window);
@@ -48,16 +66,23 @@
   P.afterJump = (target, settle = 3, timeout = 20000) => new Promise((resolve) => {
     const t0 = performance.now();
     let first = null, clean = 0, cleanAt = null, frames = 0, incomplete = 0;
+    const waited = {}; // what was missing -> frames it was missing for
     P.watch = (now, end, d) => {
       const v = window.vantage, S = v.S;
       frames++;
       const right = target == null || (S.view && S.view.time <= target + 1 && target - S.view.time < 2500 && Math.abs(S.t - target) < 2500);
       if (right && first == null) first = end - t0;
       // d.missing is not part of it: an entity the game has no picture for counts there every frame.
-      const whole = right && d.stale === 0 && d.standIn === 0 && d.deferred === 0 && v.world.initialFrameReady();
+      // framePending: newer builds say what is missing; older ones only whether.
+      const pending = v.world.framePending ? v.world.framePending() : v.world.initialFrameReady() ? [] : ['?'];
+      if (d.stale) pending.push('stale pose');
+      if (d.standIn) pending.push('facing stand-in');
+      if (d.deferred) pending.push('deferred upload');
+      const whole = right && pending.length === 0;
+      if (right && !whole) for (const k of pending) waited[k] = (waited[k] || 0) + 1;
       if (right && !whole) incomplete++;
       if (whole) { if (!clean) cleanAt = end - t0; clean++; } else { clean = 0; cleanAt = null; }
-      if (clean >= settle || end - t0 > timeout) { P.watch = null; resolve({ first, full: clean >= settle ? cleanAt : null, frames, incomplete }); }
+      if (clean >= settle || end - t0 > timeout) { P.watch = null; resolve({ first, full: clean >= settle ? cleanAt : null, frames, incomplete, waited }); }
     };
   });
   P.reset = () => { P.frames = []; P.work = []; P.long = []; P.decode = []; P.hud = []; P.state = []; };

@@ -18,12 +18,17 @@ uv run --with playwright python tools/perf/bench.py --base http://127.0.0.1:8792
 uv run --with playwright python tools/perf/profile.py --base http://127.0.0.1:8792 \
     --spots spots.json --gpu vulkan --mode playback --speed 8 --zoom 3.5 --out prof.json
 
+# 4b. what the browser does besides script: style, layout (and the line that forced
+#     it), paint, GC, main-thread image decodes, the longest tasks
+uv run --with playwright python tools/perf/trace.py --base http://127.0.0.1:8792 \
+    --spots spots.json --gpu vulkan --mode playback --speed 8 --zoom 3.5 --out trace.json
+
 # 5. the picture did not change: screenshots at fixed moments, then a pixel diff
 uv run --with playwright --with pillow --with numpy python tools/perf/golden.py capture \
     --base http://127.0.0.1:8792 --spots spots.json --name 4v4 --out golden/after
 uv run --with pillow --with numpy python tools/perf/golden.py compare golden/before golden/after
 
-# 6. before/after table
+# 6. before/after table (one column per file; repeats reduced to their median)
 uv run python tools/perf/report.py before.json after.json
 ```
 
@@ -63,7 +68,19 @@ compare medians when the machine is shared.
 
 "Complete picture": three consecutive frames with every strip of the view
 loaded, no pose held over from an earlier frame, no neighbouring facing
-standing in, no upload deferred, and the ground and trees current.
+standing in, no upload deferred, and the ground and trees current. The seek
+and jump results also say what the picture waited for, in frames
+(`waited_frames`: sprites, trees, terrain, ground and why), from
+`world.framePending()`.
+
+`profile.py` and `trace.py` take `--mode playback|pan|wheel`. "HUD task" is one
+task of the HUD refresh: the whole refresh in builds that do it in one go, one
+of its parts in builds that spread it over frames.
+
+On a shared machine the tails are noise: run each build several times,
+interleaved (`for i in 1 2 3; do bench --web A ...; bench --web B ...; done`),
+and compare medians. `work p50` and the counters (uploads, fetches, repaints,
+ms to a complete picture) are the stable numbers.
 
 Frame `interval` is the time between frame callbacks (what the eye sees; 16.7 ms
 is the display's limit). Frame `work` is the time inside the viewer's own frame

@@ -18,7 +18,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from bench import PAN_DRIVER, open_at
+from bench import PAN_DRIVER, open_at, spin_wheel
 from common import background_load, load_spots
 from playwright.sync_api import sync_playwright
 
@@ -129,7 +129,7 @@ def main():
     ap.add_argument("--headed", action="store_true")
     ap.add_argument("--web", help="take the viewer's front end from this src/vantage/web folder")
     ap.add_argument("--size", type=int, nargs=2, default=[1920, 1080])
-    ap.add_argument("--mode", default="playback", choices=["playback", "pan", "paused"])
+    ap.add_argument("--mode", default="playback", choices=["playback", "pan", "wheel", "paused"])
     ap.add_argument("--hud", default="full")
     ap.add_argument("--where", default="late.fight")
     ap.add_argument("--zoom", type=float, default=3.5)
@@ -158,7 +158,10 @@ def main():
         v.cdp.send("Profiler.setSamplingInterval", {"interval": 200})
         v.ev("() => window.__perf.start()")
         v.cdp.send("Profiler.start")
-        v.page.wait_for_timeout(args.seconds * 1000)
+        if args.mode == "wheel":
+            spin_wheel(v, args.size, args.seconds)
+        else:
+            v.page.wait_for_timeout(args.seconds * 1000)
         prof = Profile(v.cdp.send("Profiler.stop")["profile"])
         c = v.collect()
         renderer = v.renderer()

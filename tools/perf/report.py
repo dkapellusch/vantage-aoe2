@@ -1,9 +1,9 @@
 """Before/after table from two bench.py result files.
 
-    python tools/perf/report.py before.json after.json [--md]
+    python tools/perf/report.py before.json after.json [more.json ...]
 
 Runs are matched by (scenario, hud, where, zoom, speed); repeats are reduced to
-their median.
+their median. One column per file.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ COLUMNS = [
     (">16.7ms %", "over16_pct"),
     (">33ms %", "over33_pct"),
     ("long tasks ms", "long_tasks.total_ms"),
-    ("HUD p50", "hud_render.p50"),
-    ("HUD max", "hud_render.max"),
+    ("HUD task p50", "hud_render.p50"),
+    ("HUD task max", "hud_render.max"),
     ("uploads/frame", "gpu.uploads_per_frame"),
     ("fetches/s", "sprite_net.requests_per_s"),
     ("refetched", "sprite_net.refetched"),
@@ -69,20 +69,26 @@ def fmt(x):
 
 
 def main():
-    before, after = load(sys.argv[1]), load(sys.argv[2])
-    for key in sorted(set(before) & set(after), key=str):
-        b, a = before[key], after[key]
-        load_b = statistics.median(r["load"]["loadavg"] for r in b)
-        load_a = statistics.median(r["load"]["loadavg"] for r in a)
+    files = [a for a in sys.argv[1:] if not a.startswith("--")]
+    sets = [load(f) for f in files]
+    labels = [json.loads(Path(f).read_text()).get("label", Path(f).stem) for f in files]
+    keys = set(sets[0])
+    for rows in sets[1:]:
+        keys &= set(rows)
+    for key in sorted(keys, key=str):
+        runs = [rows[key] for rows in sets]
+        loads = "/".join(
+            f"{statistics.median(r['load']['loadavg'] for r in rs):.0f}" for rs in runs
+        )
         speed = f" · {key[4]:g}x" if key[4] != "" else ""
         print(f"\n### {key[0]} · {key[2]} · zoom {key[3]:g}{speed} · {key[1]} HUD")
-        print(f"\nruns {len(b)}/{len(a)}, load average {load_b:.0f}/{load_a:.0f}\n")
-        print("| metric | before | after |\n|---|---|---|")
+        print(f"\nruns {'/'.join(str(len(rs)) for rs in runs)}, load average {loads}\n")
+        print("| metric | " + " | ".join(labels) + " |\n|---|" + "---|" * len(labels))
         for name, path in COLUMNS:
-            x, y = med(b, path), med(a, path)
-            if x is None and y is None:
+            vals = [med(rs, path) for rs in runs]
+            if all(v is None for v in vals):
                 continue
-            print(f"| {name} | {fmt(x)} | {fmt(y)} |")
+            print(f"| {name} | " + " | ".join(fmt(v) for v in vals) + " |")
 
 
 if __name__ == "__main__":

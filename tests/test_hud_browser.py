@@ -1071,3 +1071,140 @@ def test_zoomed_game_art_draws_entities_not_only_selection_rings(
         assert drawn > 0, f"No entities drawn, even if missing == 0: {stats}"
     finally:
         page.context.close()
+
+
+# Frame time budgets for the big-scene check below, in ms of work inside the
+# frame callback (median over ~90 frames), under software WebGL. Generous: eight
+# to ten times what a busy development machine measures (1.1 ms zoomed in, 4 ms
+# zoomed out, HUD tasks of 1-2.5 ms), so only a real regression (an all-rows pass
+# that is no longer culled, a per-frame rebuild) trips them, not a slow CI runner.
+BIG_SCENE_ROWS = 3000
+BUDGET_ZOOMED_IN_MS = 10.0
+BUDGET_ZOOMED_OUT_MS = 40.0
+BUDGET_HUD_TASK_MS = 25.0
+FRAME_PROBE = """
+window.__frames = []; window.__hud = [];
+const raf = window.requestAnimationFrame.bind(window);
+window.requestAnimationFrame = (fn) => raf((now) => {
+  const a = performance.now(); fn(now);
+  if (fn.name === 'tick') window.__frames.push(performance.now() - a);
+});
+const MC = window.MessageChannel;
+const onmessage = Object.getOwnPropertyDescriptor(MessagePort.prototype, 'onmessage');
+window.MessageChannel = function () {
+  const ch = new MC();
+  Object.defineProperty(ch.port1, 'onmessage', { set(fn) {
+    onmessage.set.call(ch.port1, (e) => {
+      const a = performance.now(); fn(e); window.__hud.push(performance.now() - a);
+    });
+  } });
+  return ch;
+};
+"""
+
+
+def test_zoomed_game_art_big_scene_stays_within_frame_budgets(browser: Any, base: str) -> None:
+    """A late team game's worth of rows, zoomed in on game art and zoomed out.
+
+    Synthetic art and rows (no game installation). Checks that what is off
+    screen costs next to nothing (the zoomed-in frame draws a fraction of the
+    rows and fits its budget), that a still picture uploads and fetches nothing,
+    and that no HUD task is long enough to drop frames.
+    """
+    import base64
+
+    page = browser.new_page(viewport={"width": 1280, "height": 800})
+    page.errors = []
+    page.on("pageerror", lambda error: page.errors.append(str(error)))
+    page.add_init_script(FRAME_PROBE)
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAL0lEQVR4nO3OIQEAAAgDMCIRjYg0gxg3E/Or7bmkEhAQEBAQEBAQEBAQEBAQSAceUUZ8iO1NzJQAAAAASUVORK5CYII="
+    )
+    meta = {"cw": 32, "ch": 32, "ax": 16, "ay": 28, "n": 1, "step": 1, "per": 1, "duration": 0}
+    requests: list[str] = []
+
+    def strip(route: Any) -> None:
+        requests.append(route.request.url)
+        route.fulfill(
+            body=png,
+            content_type="image/png",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Expose-Headers": "X-Sprite-Meta",
+                "X-Sprite-Meta": json.dumps({**meta, "pc": False}),
+            },
+        )
+
+    page.route("**/sprite/**", strip)
+    page.goto(base)
+    page.wait_for_function("window.vantage?.S.view && document.body.dataset.startup === 'ready'")
+    page.evaluate(
+        """rows => {
+      const {S, settings} = vantage;
+      S.playing = false;
+      S.gameArt = true; settings.gameGraphics = true; settings.gpuSprites = true;
+      settings.waitForGraphics = false;
+      // Copies of the match's own rows over a 70 x 70 tile field, in a fixed
+      // pseudo-random order, with sixteen different pictures.
+      const own = S.view.entities, out = [];
+      let seed = 12345;
+      const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+      for (let i = 0; i < rows; i++) {
+        const r = own[i % own.length].slice();
+        r[0] = 500000 + i; r[3] = rnd() * 70; r[4] = rnd() * 70;
+        r[8] = [[900001 + (i % 16), 0, 0, 0]];
+        out.push(r);
+      }
+      S.view = { ...S.view, entities: out }; S.nextView = null;
+    }""",
+        BIG_SCENE_ROWS,
+    )
+
+    def measure(zoom: float) -> dict[str, Any]:
+        page.evaluate("z => vantage.world.setCamera(35, 35, z)", zoom)
+        # Until the picture is complete and still.
+        page.wait_for_function(
+            """() => { const w = vantage.world, g = w.gpuSpriteStats();
+              const now = g.uploads + ':' + w.spriteMemory().strips;
+              const same = window.__still === now; window.__still = now;
+              return same && w.initialFrameReady(); }""",
+            polling=400,
+            timeout=60000,
+        )
+        before = page.evaluate(
+            "() => { window.__frames.length = 0; return vantage.world.gpuSpriteStats(); }"
+        )
+        fetched = len(requests)
+        page.wait_for_function("window.__frames.length >= 90", timeout=120000)
+        got = page.evaluate(
+            """() => ({ work: [...window.__frames].sort((a, b) => a - b),
+              gpu: vantage.world.gpuSpriteStats(), hud: Math.max(0, ...window.__hud) })"""
+        )
+        frames = len(got["work"])
+        return {
+            "median": got["work"][frames // 2],
+            "instances": (got["gpu"]["instances"] - before["instances"]) / frames,
+            "uploads": got["gpu"]["uploads"] - before["uploads"],
+            "fetched": len(requests) - fetched,
+            "hud": got["hud"],
+        }
+
+    near = far = None
+    try:
+        near = measure(3.5)
+        far = measure(1.0)
+        assert not page.errors, page.errors
+        # Game art is drawn in both, and the zoomed-in view draws only its own part.
+        assert near["instances"] >= 1, near
+        assert far["instances"] > 8 * near["instances"], (near, far)
+        # A still picture: nothing uploaded, nothing asked of the server.
+        assert near["uploads"] == 0 and far["uploads"] == 0, (near, far)
+        assert near["fetched"] == 0 and far["fetched"] == 0, (near, far)
+        assert near["median"] < BUDGET_ZOOMED_IN_MS, near
+        # Whatever the machine: a tenth of the rows on screen is well under the cost of all.
+        assert near["median"] < 0.6 * far["median"], (near, far)
+        assert far["median"] < BUDGET_ZOOMED_OUT_MS, far
+        assert max(near["hud"], far["hud"]) < BUDGET_HUD_TASK_MS, (near, far)
+    finally:
+        print("big scene:", near, far)  # shown with -s, and on failure
+        page.context.close()

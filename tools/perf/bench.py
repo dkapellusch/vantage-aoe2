@@ -50,6 +50,15 @@ def open_at(pw, args, hud, where, zoom, lead_ms=0):
     return v
 
 
+def waited(jumps):
+    """What the picture waited for after the jumps: frames each thing was missing for."""
+    total = {}
+    for j in jumps:
+        for k, n in (j.get("waited") or {}).items():
+            total[k] = total.get(k, 0) + n
+    return dict(sorted(total.items(), key=lambda kv: -kv[1]))
+
+
 def playback(pw, args, hud, where, zoom, speed):
     """Play at `speed` with the camera held on the spot, starting before its moment."""
     # Start so that the spot's moment falls in the middle of the run at 1x..8x.
@@ -120,24 +129,25 @@ def pan_edge(pw, args, hud, where, zoom):
     return v, r
 
 
+def spin_wheel(v, size, seconds):
+    """Wheel in twelve notches, pause, wheel out twelve notches, pause, and again."""
+    w, h = size
+    m = v.page.mouse
+    m.move(w / 2, h / 2)
+    t0 = time.time()
+    direction = -1
+    while time.time() - t0 < seconds:
+        for _ in range(12):
+            m.wheel(0, direction * 100)
+            v.page.wait_for_timeout(40)
+        v.page.wait_for_timeout(700)
+        direction = -direction
+
+
 def wheel_zoom(pw, args, hud, where, zoom):
     """Wheel zoom in to game art and back out, repeatedly."""
     v = open_at(pw, args, hud, where, ZOOM_OUT)
-    w, h = args.size
-    m = v.page.mouse
-    m.move(w / 2, h / 2)
-
-    def spin():
-        t0 = time.time()
-        direction = -1
-        while time.time() - t0 < args.pan_seconds:
-            for _ in range(12):
-                m.wheel(0, direction * 100)
-                v.page.wait_for_timeout(40)
-            v.page.wait_for_timeout(700)
-            direction = -direction
-
-    r = measured(v, 0, before=spin)
+    r = measured(v, 0, before=lambda: spin_wheel(v, args.size, args.pan_seconds))
     r["settle_after"] = v.settle()
     return v, r
 
@@ -164,7 +174,7 @@ def camera_jumps(pw, args, hud, where, zoom):
             v.page.wait_for_timeout(150)
     v.ev("() => { window.__perf.on = false; }")
     c = v.collect()
-    out = {"jumps": jumps}
+    out = {"jumps": jumps, "waited_frames": waited(jumps)}
     for rnd, name in ((0, "first_visit"), (1, "revisit")):
         got = [j for j in jumps if j["round"] == rnd]
         out[name] = {
@@ -190,9 +200,11 @@ def seeks(pw, args, hud, where, zoom):
     lo = max(args.spots_data["start"], t - 240000)
     n = 40
     v.ev("() => { window.__perf.scrubWork0 = window.__perf.work.length; }")
+    v.ev("() => { window.vantage.S.scrubbing = true; }")  # as the time bar's drag sets it
     for i in range(n):
         v.ev("(t) => window.vantage.seek(t)", lo + (t - lo) * i / n)
         v.page.wait_for_timeout(80)
+    v.ev("() => { window.vantage.S.scrubbing = false; }")
     release = v.seek(t, settle=False, timeout=30000)
     v.ev("() => { window.__perf.on = false; }")
     c = v.collect()
@@ -203,6 +215,7 @@ def seeks(pw, args, hud, where, zoom):
         "full_ms": summarize([s["full"] for s in skips if s["full"] is not None], 1),
         "timeouts": sum(s["full"] is None for s in skips),
         "incomplete_frames": sum(s["incomplete"] for s in skips),
+        "waited_frames": waited(skips),
         "scrub_work": summarize(c["work"][k:]),
         "scrub_release": release,
         "work": summarize(c["work"]),
