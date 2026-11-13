@@ -144,11 +144,23 @@ function buildStripQuery(base, opts) {
 // path take strips in the player's colour.
 const noMask = new Set();
 function gpuDrawing() { return spritesOn() && gpuLayers() && SG.available(); }
+const PLAIN_STRIP = Object.freeze([-1, false]), MASK_STRIP = Object.freeze([-1, true]);
 function stripColor(sid, owner, layer, gpu) {
-  if (colourless.has(sid) || layer === 'shadow') return [-1, false];
-  if (gpu && owner && settings.gpuTint !== false && !noMask.has(sid)) return [-1, true];
+  if (colourless.has(sid) || layer === 'shadow') return PLAIN_STRIP;
+  if (gpu && owner && settings.gpuTint !== false && !noMask.has(sid)) return MASK_STRIP;
   return [colorIndex(owner), false];
 }
+// The options of a strip request, one shared object per combination (asked for
+// per layer of every entity drawn; nothing changes them).
+const stripOptions = new Map();
+function stripOpts(dmg, layer, dir, pm) {
+  const code = dmg * 16 + (layer === 'shadow' ? 4 : layer === 'main' ? 8 : 0) + (dir ? 2 : 0) + (pm ? 1 : 0);
+  let o = stripOptions.get(code);
+  if (!o) stripOptions.set(code, (o = Object.freeze({ dmg, layer, dir: !!dir, pm: !!pm })));
+  return o;
+}
+// The passes a sprite layer is drawn in: [strip layer, filtering setting].
+const PASSES_MAIN = [['main', 'unitColor']], PASSES_SPLIT = [['shadow', 'unitShadow'], ['main', 'unitColor']], PASSES_WHOLE = [[null, 'unitColor']];
 /** The colour the GPU tints a player's sprites with (the server's own table). */
 function spriteTint(owner) {
   const pc = S.catalog && S.catalog.player_colors, c = pc && pc[colorIndex(owner)];
@@ -157,10 +169,38 @@ function spriteTint(owner) {
 // Sprites whose strips have no player colour (meta.pc false: most projectiles):
 // one copy, colour -1, serves every player.
 const colourless = new Set();
+// Strips that are settled (loaded, or known to have no picture), by query and by
+// a number made of sprite, facet and colour: drawSprites asks for every layer of
+// every entity on screen each frame, and building the key string and moving the
+// entry to the end of the cache for each was most of its cost. The table is
+// dropped whenever a strip leaves the cache (spriteRevision).
+let settledStrips = new Map(), settledRevision = -1, recencyFrame = 0;
+function settledStrip(sid, facet, color, query) {
+  if (settledRevision !== spriteRevision) return undefined;
+  const table = settledStrips.get(query);
+  return table && facet >= 0 && facet < 4096 ? table.get((sid * 4096 + facet) * 16 + color + 1) : undefined;
+}
+function rememberSettled(sid, facet, color, query, key, e) {
+  if (!(facet >= 0 && facet < 4096) || !Number.isInteger(sid) || !Number.isInteger(facet) || !Number.isInteger(color)) return;
+  if (settledRevision !== spriteRevision) { settledStrips = new Map(); settledRevision = spriteRevision; }
+  let table = settledStrips.get(query);
+  if (!table) settledStrips.set(query, (table = new Map()));
+  e.key = key;
+  table.set((sid * 4096 + facet) * 16 + color + 1, e);
+}
+// Most recently used last (the order strips are evicted in): once per strip per
+// frame is as good as on every use.
+function touchStrip(key, e) {
+  if (e.touched === recencyFrame) return;
+  e.touched = recencyFrame;
+  spriteCache.delete(key); spriteCache.set(key, e);
+}
 function spriteStrip(sid, facet, color, opts) {
   if (colourless.has(sid)) color = -1;
-  const hd = settings.enhancedGraphics && S.camera.zoom >= 1.4;
   const query = stripQuery(opts);
+  const settled = settledStrip(sid, facet, color, query);
+  if (settled) { touchStrip(settled.key, settled); return settled; }
+  const hd = settings.enhancedGraphics && S.camera.zoom >= 1.4;
   const key = `${sid}/${facet}/${color}?${query}`;
   let e = spriteCache.get(key);
   // A transient failure (network, server busy) is retried after a while; a 404 is
@@ -168,7 +208,8 @@ function spriteStrip(sid, facet, color, opts) {
   if (e && e.retryAt && performance.now() > e.retryAt) { spriteCache.delete(key); spriteRevision++; e = null; }
   if (e) {
     if (countingDraw && !e.img && !e.failed) firstFrameSpritesPending = true;
-    spriteCache.delete(key); spriteCache.set(key, e); // most recent last
+    touchStrip(key, e);
+    if (e.img || (e.failed && !e.retryAt)) rememberSettled(sid, facet, color, query, key, e);
     if (e.img || e.failed || !(opts && opts.dir)) return e;
     const near = nearestFacing(sid, facet, color, query);
     if (near && countingDraw) spriteStats.standIn++;
@@ -204,7 +245,10 @@ function spriteStrip(sid, facet, color, opts) {
       if (m.pc === false && (color !== -1 || (opts && opts.pm))) {
         const plain = opts && opts.pm ? stripQuery({ ...opts, pm: false }) : query;
         const k2 = `${sid}/${facet}/-1?${plain}`, cur = spriteCache.get(k2);
-        if (!cur || !cur.img) spriteCache.set(k2, { meta: { ...m, pm: false }, img, tile: e.tile, failed: false, bytes: 0, pin: e.pin });
+        if (!cur || !cur.img) {
+          spriteCache.set(k2, { meta: { ...m, pm: false }, img, tile: e.tile, failed: false, bytes: 0, pin: e.pin });
+          if (cur) spriteRevision++; // an entry was replaced: whoever holds the old one asks again
+        }
       }
     }))
     .catch((err) => {
@@ -1066,15 +1110,14 @@ function drawSprites(r, px, py) {
   // No save()/restore() per entity (a canvas state flush each, the costliest
   // call at 8x): only the alpha and the smoothing flag change, set directly.
   if (ghost) ctx.globalAlpha = 0.45;
+  // Town centre annex parts repeat the main part's shadow; stacked, the
+  // half-transparent shadows go black, so they draw their graphic only.
+  const annex = TOWN_CENTER_PARTS.has(r[2]) && layerSplit !== false;
+  const passes = annex ? PASSES_MAIN : split ? PASSES_SPLIT : PASSES_WHOLE;
   for (const [sid, frame, ox, oy] of layers) {
-    // Town centre annex parts repeat the main part's shadow; stacked, the
-    // half-transparent shadows go black, so they draw their graphic only.
-    const annex = TOWN_CENTER_PARTS.has(r[2]) && layerSplit !== false;
-    const passes = annex ? [['main', 'unitColor']]
-      : split ? [['shadow', 'unitShadow'], ['main', 'unitColor']] : [[null, 'unitColor']];
     for (const [layer, filterKey] of passes) {
       const [color, pm] = stripColor(sid, r[1], layer, gpu);
-      const e = spriteStrip(sid, facet, color, { dmg, layer, dir: !building, pm });
+      const e = spriteStrip(sid, facet, color, stripOpts(dmg, layer, !building, pm));
       if (e && e.failed && !e.retryAt) continue;
       if (!e || !e.img || !e.meta) { if (layer !== 'shadow') pendingMain = true; continue; }
       const m = e.meta;
@@ -1551,7 +1594,8 @@ function decodeFog() {
   // lands) and attach the bytes to that view, whichever view is current then.
   if (!view._fogPromise) {
     try {
-      const raw = Uint8Array.from(atob(view.fog), (c) => c.charCodeAt(0));
+      const text = atob(view.fog), raw = new Uint8Array(text.length);
+      for (let i = 0; i < text.length; i++) raw[i] = text.charCodeAt(i);
       view._fogPromise = inflate(raw).then((b) => {
         view._fogDecoded = b;
         if (S.view === view) { fogBytes = b; fogKey = ''; }
@@ -2260,8 +2304,19 @@ function bakeGradeAllowed(useSprites, fog) {
 
 const WORLD_BACKGROUND = '#07080a';
 let frameSerial = 0, fogRenderedFor = -1;
+// Scratch for draw(): the rows on screen with their catalog info, screen position
+// and depth, and the order they are drawn in. Reused every frame, grown as needed.
+const onScreen = { rows: [], info: [], px: new Float64Array(1024), py: new Float64Array(1024), key: new Float64Array(1024), order: new Uint32Array(1024) };
+function growOnScreen() {
+  for (const k of ['px', 'py', 'key', 'order']) {
+    const bigger = new onScreen[k].constructor(onScreen[k].length * 2);
+    bigger.set(onScreen[k]);
+    onScreen[k] = bigger;
+  }
+}
 export function draw(dt = 1 / 60) {
   frameSerial++;
+  recencyFrame = frameSerial;
   groundGraded = false; bakeGradeThisFrame = false;
   const dpr = viewSize.dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -2323,13 +2378,9 @@ export function draw(dt = 1 / 60) {
   if (useSprites) SG.setAtlasBudget(Number(settings.enhancedGraphics ? settings.atlasMemoryUhd : settings.atlasMemoryNormal) || 768);
   gpuTarget = useSprites && gpuLayers() && SG.begin(viewSize.w, viewSize.h, viewSize.dpr, spriteLook()) ? ctx : null;
   layered = false;
-  const sorted = useSprites
-    ? sortByKey(entityRows, depth)
-    : sortByKey(entityRows, (r) => depth(r) - (r[6] & 1) * 1e6);
-  const hidden = (r, px, py, u) => {
+  // Out of sight under the fog of war (standard fog only).
+  const fogged = (r) => {
     const [, owner, , x, y, , flags] = r;
-    const margin = flags & 1 ? Math.max(60, (u.size || 1) * TW * z * 1.4) : 60;
-    if (px < -margin || py < -margin || px > viewSize.w + margin || py > viewSize.h + margin * 2) return true;
     if (fog === 'standard' && owner !== S.perspective && !(owner > 0 && sameTeam(owner) && S.combinedFog)) {
       const i = (Math.floor(y) * mapW + Math.floor(x)) * 2;
       if (!(fogBytes[i] & mask)) {
@@ -2337,6 +2388,11 @@ export function draw(dt = 1 / 60) {
       }
     }
     return false;
+  };
+  const hidden = (r, px, py, u) => {
+    const margin = r[6] & 1 ? Math.max(60, (u.size || 1) * TW * z * 1.4) : 60;
+    if (px < -margin || py < -margin || px > viewSize.w + margin || py > viewSize.h + margin * 2) return true;
+    return fogged(r);
   };
   // What the dead leave (death animations, corpses, rubble) lies on the ground
   // under everything standing (view.remains: not units, never selected or counted).
@@ -2356,18 +2412,49 @@ export function draw(dt = 1 / 60) {
     if (r) drawSelection(r, ...entityScreen(r));
   }
   const track = useSprites && S.view && Array.isArray(S.view.missile_track) && S.view.missile_track.length ? S.view.missile_track : null;
-  // Farms are ground: their fields go down before anything stands on them.
-  for (const r of sorted) {
-    const [id, owner, mid, , , , flags] = r;
-    if (track && id < 0) continue; // projectiles: drawn from their track below
-    const [px, py0] = entityScreen(r);
+  // What is on screen, then its painter's order (rough, by screen y; without
+  // sprites, buildings first): culled before sorting, so a zoomed-in view of a
+  // late team game orders the couple of hundred rows it draws, not all 2,500.
+  // This loop sees every row of the game every frame: the position is worked out
+  // in place (entityScreen's own arithmetic, without its arrays), and a unit off
+  // screen is dropped before its catalog entry is looked up.
+  let shown = 0;
+  const air = S.view && S.view.air;
+  const camSum = S.camera.x + S.camera.y, camDiff = S.camera.y - S.camera.x;
+  const halfW = viewSize.w / 2, halfH = viewSize.h / 2;
+  for (let i = 0; i < entityRows.length; i++) {
+    const r = entityRows[i];
+    if (track && r[0] < 0) continue; // projectiles: drawn from their track below
+    const x = r[3], y = r[4];
+    const flown = air && air[r[0]];
+    const lift = flown != null ? flown : TG.heightAt(x, y);
+    const px = ((x + y) - camSum) * TW / 2 * z + halfW;
+    const py0 = ((y - x) - camDiff) * TH / 2 * z + halfH - lift * TH / 2 * z;
     // A town centre's annex parts stand half a tile and a tile in front of it but
     // the game draws their pictures from the centre's own spot (its main part gets
     // the same shift from its draw list): drawn at their own spot they sat 24/48 px
     // low and exposed the black inside the Khmer centre's walls.
-    const py = py0 - (TC_ANNEX_LIFT[mid] || 0) * TH / 2 * S.camera.zoom;
-    const u = entityInfo(r);
-    if (hidden(r, px, py, u)) continue;
+    const py = py0 - (TC_ANNEX_LIFT[r[2]] || 0) * TH / 2 * z;
+    let u = null, margin = 60;
+    if (r[6] & 1) { u = entityInfo(r); margin = Math.max(60, (u.size || 1) * TW * z * 1.4); }
+    if (px < -margin || py < -margin || px > viewSize.w + margin || py > viewSize.h + margin * 2) continue;
+    if (fogged(r)) continue;
+    if (!u) u = entityInfo(r);
+    if (shown === onScreen.px.length) growOnScreen();
+    onScreen.rows[shown] = r; onScreen.info[shown] = u;
+    onScreen.px[shown] = px; onScreen.py[shown] = py;
+    onScreen.key[shown] = useSprites ? depth(r) : depth(r) - (r[6] & 1) * 1e6;
+    onScreen.order[shown] = shown;
+    shown++;
+  }
+  // Ties in input order, as a stable sort of all the rows gives.
+  const { key: depths } = onScreen;
+  const order = onScreen.order.subarray(0, shown).sort((a, b) => depths[a] - depths[b] || a - b);
+  // Farms are ground: their fields go down before anything stands on them.
+  for (let n = 0; n < shown; n++) {
+    const at = order[n];
+    const r = onScreen.rows[at], u = onScreen.info[at], px = onScreen.px[at], py = onScreen.py[at];
+    const [id, owner, mid, , , , flags] = r;
     if (px >= 0 && px <= viewSize.w && py >= 0 && py <= viewSize.h) sceneAdd(r, u, px);
     const color = owner === 0 ? gaiaColor(mid, u) : playerColor(owner);
     if (sel.has(id)) drawSelection(r, px, py);
@@ -2403,6 +2490,8 @@ export function draw(dt = 1 / 60) {
     if (flags & 1) drawBuilding(r, px, py, color, showIcons);
     else drawUnit(r, px, py, color, showIcons, owner === 0);
   }
+  // The rows and their info are not kept alive by the scratch list.
+  onScreen.rows.length = 0; onScreen.info.length = 0;
   const tC = performance.now();
   if (useSprites) fxBegin();
   const tFx = performance.now();
@@ -3008,6 +3097,7 @@ function drawZones(zones) {
   ctx.globalAlpha = 1;
 }
 
+const NO_STATS = Object.freeze({});
 function drawRangeCircles() {
   if (!S.rangeCircles) return;
   const z = S.camera.zoom;
@@ -3028,7 +3118,9 @@ function drawRangeCircles() {
     const show = building ? bMode === 'always' || (bMode === 'selected' && selected) : selected && sMode !== 'none';
     if (!show) continue;
     const u = entityInfo(r);
-    const st = { ...(u.stats || {}), ...(selected ? unitDetail(r) || {} : {}) };
+    // Every building, every frame: the catalog's own stats unless it is selected
+    // (then merged with the live ones).
+    const st = selected ? { ...(u.stats || {}), ...(unitDetail(r) || {}) } : u.stats || NO_STATS;
     const half = building ? Math.max(1, u.size || 1) / 2 : 0;
     const square = squareArea(r, half);
     const reach = Math.max(st.range || 0, st.work_range || 0, st.aura_range || 0, square || 0);

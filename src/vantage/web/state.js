@@ -746,18 +746,29 @@ export function teamIcon(team) {
 // With an owner, that player's own name and icon for the master at the time
 // being watched win (view.owner_units: the Poles' Mill is their Folwark, an
 // upgraded Archer is that player's Crossbowman).
+// Asked for every entity on the map, every frame: the merged object for a
+// player's own variant is built once per (override, catalog entry, names), not
+// per call (a spread of the whole catalog entry each time, and its garbage).
+const ownUnits = new WeakMap(); // override row or private unit -> { u, names, info }
+function ownUnit(source, u, names, build) {
+  if (typeof source !== 'object') return build();
+  const hit = ownUnits.get(source);
+  if (hit && hit.u === u && hit.names === names) return hit.info;
+  const info = build();
+  ownUnits.set(source, { u, names, info });
+  return info;
+}
 export function unitInfo(mid, owner, entityId, view = S.view) {
+  const names = S.catalog.unit_names;
   const privateUnit = entityId != null && view?.entity_units?.[entityId];
   if (privateUnit && privateUnit.owner === owner && privateUnit.master === mid) {
-    const name = S.catalog.unit_names?.[privateUnit.string_id] ?? privateUnit.name;
-    return { ...privateUnit, name };
+    return ownUnit(privateUnit, null, names, () => ({ ...privateUnit, name: names?.[privateUnit.string_id] ?? privateUnit.name }));
   }
   const u = S.catalog.units[mid] || { name: `#${mid}`, icon: -1, kind: 'other', cls: -1 };
   const own = owner != null && view && view.owner_units && view.owner_units[owner];
   const o = own && own[mid];
   if (!o) return u;
-  const name = (S.catalog.unit_names && S.catalog.unit_names[o[0]]) || u.name;
-  return { ...u, name, icon: o[1], string_id: o[0] };
+  return ownUnit(o, u, names, () => ({ ...u, name: (names && names[o[0]]) || u.name, icon: o[1], string_id: o[0] }));
 }
 export function techInfo(tid) { return S.catalog.techs[tid] || { name: `Tech ${tid}`, icon: -1, time: 0 }; }
 
