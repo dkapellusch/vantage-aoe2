@@ -1,4 +1,5 @@
 // Player context and compact, explicitly scoped military information.
+import { rememberScope } from './selection-memory.js';
 import { S, player, playerName, playerTextColor, playerStats, emblem, ageIcon, ageName,
   esc, fmtNum, fmtTime, tip } from './state.js';
 import { t } from './i18n.js';
@@ -155,6 +156,7 @@ export function wireReviewControls(el) {
     const control = event.target.closest?.('[data-review-scope]');
     if (!control || control.disabled) return;
     S.reviewScope = control.dataset.reviewScope;
+    rememberScope(S.reviewScope); // Life or 60s is the viewer's choice for every later selection
   });
 }
 

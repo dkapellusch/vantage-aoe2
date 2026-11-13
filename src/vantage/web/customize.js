@@ -13,7 +13,7 @@ import { binding } from './hotkeys.js';
 import {
   PANELS, PRESETS, PRESET_ORDER, hud, setHud, applyPreset, isVisible, setVisible, isCollapsed, setCollapsed, presetIsChanged,
   restorePresetDefault, pulseMetrics, setPulseMetric, shareHash, LAYOUTS, hudLayout, setHudLayout, toggleEditLayout,
-  showEverything, resetHud, applyPanels, scene, headlinePanel, isAuto,
+  showEverything, resetHud, applyPanels, scene, headlinePanel, isAuto, resetSelectionPanel,
 } from './layout.js';
 import { PULSE_METRICS, PULSE_METRIC_LABELS, PULSE_METRIC_SHORT, CUSTOM, snapshotLayout, layoutPatch, SCENES } from './hud-model.js';
 import { METRICS } from './metrics.js';
@@ -71,7 +71,7 @@ function layoutHtml() {
   const h = hud(), full = h.preset === 'full';
   const names = Object.keys(h.layouts || {}).sort();
   return `${full ? `<div class="cz-line"><span class="hint">${esc(t('Placement'))}</span>${LAYOUTS.map(([k, l]) => `<button type="button" data-cz-layout="${k}" aria-pressed="${hudLayout() === k}">${esc(t(l))}</button>`).join('')}<button type="button" data-cz="everything" ${tip(t('Everything'), t('Every panel, none collapsed'))}>${esc(t('Everything'))}</button></div>` : ''}
-    <div class="cz-line"><button type="button" data-cz="reset-layout" ${tip(t('Reset layout'), t('Every panel back to its place and size'))}>${esc(t('Reset layout'))}</button></div>
+    <div class="cz-line"><button type="button" data-cz="reset-layout" ${tip(t('Reset layout'), t('Every panel back to its place and size'))}>${esc(t('Reset layout'))}</button><button type="button" data-cz="reset-selection" ${tip(t('Reset Selection panel'), t('Its place and size, its open sections, the upgrades list and the Life / 60s choice back to their defaults'))}>${esc(t('Reset Selection panel'))}</button></div>
     <div class="cz-line"><label for="cz-scene" class="hint">${esc(t('Scene'))}</label><select id="cz-scene" ${tip(t('Scene'), t('Panels can be tied to scenes in Edit layout. Auto follows the match: a fight, the end, nothing open.'))}><option value="auto">${esc(t('Auto'))}</option>${SCENES.map(([id, label]) => `<option value="${id}" ${h.scene === id ? 'selected' : ''}>${esc(t(label))}</option>`).join('')}</select></div>
     <label class="cz-check" ${tip(t('Lock panels'), t('Nothing moves or resizes by accident while watching: only Edit layout can'))}><input type="checkbox" data-cz-flag="lock" ${h.lock ? 'checked' : ''}> ${esc(t('Lock panels outside Edit layout'))}</label>
     <label class="cz-check" ${tip(t('Hide duplicates'), t('With the Team board on screen, the dashboard Overview drops Villagers, Idle, Military and Army value'))}><input type="checkbox" data-cz-flag="dedupe" ${h.dedupe ? 'checked' : ''}> ${esc(t('Hide dashboard columns the Team board shows'))}</label>
@@ -220,6 +220,7 @@ export function installCustomize(ctx) {
     if (act === 'restore') restorePresetDefault(hud().preset);
     else if (act === 'edit') { close(); toggleEditLayout(); return; }
     else if (act === 'reset-layout') resetPanelSizes();
+    else if (act === 'reset-selection') { resetSelectionPanel(); ctx.toast(t('Selection panel reset')); }
     else if (act === 'everything') showEverything();
     else if (act === 'reset-hud') { resetHud(); ctx.toast(t('HUD reset to its defaults')); }
     else if (act === 'check') { checks = checksHtml(); }

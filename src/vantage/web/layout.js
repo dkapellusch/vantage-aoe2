@@ -21,6 +21,7 @@ import {
 } from './hud-model.js';
 import { hudEnvironment } from './state.js';
 import { binding } from './hotkeys.js';
+import { chipExpanded, setChipExpanded, resetSelectionMemory } from './selection-memory.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -67,7 +68,7 @@ let linkText = '';      // that link as written
 let linkScene = null;   // the scene a link asks for (an OBS scene's browser source)
 let peek = false;       // hold-to-peek: the Full HUD while the key is down
 let editorScene = null; // the scene being edited (layout editor)
-let selExpanded = false; // the Selection chip was opened into the full Selection panel
+let selExpanded = chipExpanded(); // the Selection chip was opened into the full Selection panel (kept: selection-memory.js)
 
 /** The HUD in force: the saved one with this visit's link applied. */
 export function hud() {
@@ -168,8 +169,18 @@ export function isAuto(id) {
 export function isCollapsed(id) { return list('collapsedPanels').includes(id); }
 
 /** The Selection chip opens the full Selection panel until the selection is cleared. */
-export function expandSelection(on) { if (selExpanded !== !!on) { selExpanded = !!on; applyPanels(); } }
+export function expandSelection(on) { if (selExpanded !== !!on) { selExpanded = !!on; setChipExpanded(selExpanded); applyPanels(); } }
 export function selectionExpanded() { return selExpanded; }
+
+/** Customize → Reset Selection panel: its place and size, its open sections, the upgrades overflow, the scope. */
+export function resetSelectionPanel() {
+  resetPanel('unitpanel');
+  resetSelectionMemory();
+  selExpanded = false;
+  S.reviewScope = 'life';
+  applyPanels();
+  document.dispatchEvent(new CustomEvent('vantage:selection-reset'));
+}
 
 export function setVisible(id, on) {
   const p = byId.get(id);
@@ -192,7 +203,7 @@ export function setVisible(id, on) {
     return;
   }
   const now = (presetPanels(h, preset) || []).filter((x) => x !== id);
-  if (id === 'unitpanel' && !on) selExpanded = false;
+  if (id === 'unitpanel' && !on) expandSelection(false);
   setHud(withPanels(h, preset, on ? [...now, id] : now));
 }
 
@@ -219,7 +230,7 @@ export function layoutContext() { return context; }
 
 export function applyPreset(name) {
   if (!STOCK[name] && name !== CUSTOM) return;
-  peek = false; selExpanded = false;
+  peek = false;
   setHud({ ...hud(), preset: name });
   // Analyst opens Statistics docked beside the map (a wide window only); leaving it puts things back.
   if (STOCK[name] && STOCK[name].stats === 'dock' && window.innerWidth >= 1500) context.openStats({ dock: true, preset: true });

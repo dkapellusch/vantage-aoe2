@@ -186,6 +186,8 @@ The **event log** on the right lists what happens: kills and losses, units train
 
 ## Selection panel
 
+The panel remembers how you set it up. The sections you open (Details, a group's Units & upgrades and Lifetime details, Farm grants), the expanded Relevant upgrades list, and Life or 60s stay that way for whatever you select next and after a reload. So does its place and size: drag it by ⠿ in its hover toolbar or resize it from an edge, and every later selection opens there. At its natural size it holds on to the nearest corner of the window, so a taller or shorter panel grows away from that corner instead of shifting. In Minimal and Caster, the full panel opened from the Selection chip stays the full panel until you press **▾ compact**. **Customize → Layout → Reset Selection panel** puts all of it back; saved layouts (and their export files) carry it.
+
 Selecting works like in the game:
 
 - click to select a unit.

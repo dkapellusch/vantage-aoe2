@@ -81,6 +81,13 @@ All notable changes to Vantage are documented here. The format follows
 
 ### Changed
 
+- The Selection panel remembers what you set up, for every later selection and across reloads:
+  which sections are open (Details, the group sections, farm grants), the Relevant upgrades list,
+  Life or 60s, and where you dragged it and how big you made it. Left at its natural size it holds
+  on to a corner, so a taller or shorter panel no longer shifts from where you put it. In Minimal
+  and Caster the full panel opened from the chip stays the full panel until you press "compact".
+  Customize → Layout has **Reset Selection panel**, and saved layouts carry all of it. Statistics
+  reopens on the tab and series last looked at.
 - **Statistics is a window**, not a page over the map: no dimming, a title bar that drags, resize
   from every edge and corner, **Dock right** (<kbd>Ctrl+Alt+D</kbd>), a remembered rectangle, and a
   chart that follows its size. Its own playback bar is gone (the main time controls are beside it);

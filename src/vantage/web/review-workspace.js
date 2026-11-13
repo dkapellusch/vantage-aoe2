@@ -3,6 +3,7 @@ import { S, api, esc, fmtTime, fmtNum, players, playerName, playerTextColor, toa
 import { t } from './i18n.js';
 import { patchHtml } from './dom.js';
 import { reviewIcon, ownerIdentity } from './player-review.js';
+import { storedScope } from './selection-memory.js';
 
 const $ = (id) => document.getElementById(id);
 let moments = [], loadedGeneration = null;
@@ -11,7 +12,7 @@ export async function loadMoments() {
   const rows = await api('/api/review-moments').catch(() => []);
   if (generation !== S.session?.generation) return;
   moments = Array.isArray(rows) ? rows : []; loadedGeneration = generation;
-  S.reviewRange = null; S.reviewScope = 'life';
+  S.reviewRange = null; S.reviewScope = storedScope();
 }
 export function captureMoment(name, note = '') {
   return { id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,

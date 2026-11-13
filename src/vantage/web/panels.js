@@ -19,7 +19,7 @@ import {
 } from './state.js';
 import { centerOn, currentRows, selectedRows, gatherersOf, isTreeId, rowForEntityId } from './world.js';
 import { t, language } from './i18n.js';
-import { setSelectionHtml } from './selection-panel.js';
+import { setSelectionHtml, forgetSelectionState } from './selection-panel.js';
 import { patchHtml, listDelta } from './dom.js';
 import { tcIdleTooltip } from './tc-idle.js';
 import { ownerIdentity, selectionHeader, militaryCard, isProductionBuilding, healingCells, wireReviewControls, reviewIcon, DASH_HISTORY, DASH_SELECTIONS } from './player-review.js';
@@ -28,9 +28,10 @@ import { farmReviewHtml } from './farm-review.js';
 import { renderTeamBoard, toggleTeamBoardView } from './team-board.js';
 import { METRICS, KILLS_LOSSES } from './metrics.js';
 import { isVisible as panelOn, hud as hudOf } from './layout.js';
-import { readUpgradeOverflow, writeUpgradeOverflow } from './upgrade-overflow.js';
+import { sectionStore, upgradesExpanded, setUpgradesExpanded } from './selection-memory.js';
 
-let upgradeOverflowExpanded = readUpgradeOverflow();
+let upgradeOverflowExpanded = upgradesExpanded();
+if (typeof document !== 'undefined') document.addEventListener('vantage:selection-reset', () => { upgradeOverflowExpanded = upgradesExpanded(); const el = $('unitpanel'); if (el) forgetSelectionState(el); });
 const upgradeOverflowLabel = n => upgradeOverflowExpanded ? t('Hide {n} upgrades', { n }) : t('+{n} more', { n });
 
 const $ = (id) => document.getElementById(id);
@@ -56,7 +57,7 @@ function hudEl(id, cls = 'panel hidden', tag = 'div') {
 function setHtml(el, html) {
   if (el.id === 'unitpanel') {
     const context = `${S.session?.generation}:${[...S.selection].sort((a, b) => a - b).join(',')}`;
-    setSelectionHtml(el, html, context); return;
+    setSelectionHtml(el, html, context, sectionStore); return;
   }
   if (el._html !== html) { el._html = html; patchHtml(el, html); }
 }
@@ -2403,7 +2404,7 @@ export function renderUnitPanel() {
   delegate(el, 'click', '.review-upgrade', techClick);
   delegate(el, 'click', '[data-upgrades-toggle]', () => {
     upgradeOverflowExpanded = !upgradeOverflowExpanded;
-    writeUpgradeOverflow(upgradeOverflowExpanded);
+    setUpgradesExpanded(upgradeOverflowExpanded);
     // Respond immediately even while fresh entity statistics are pending.
     for (const button of el.querySelectorAll('[data-upgrades-toggle]')) {
       button.setAttribute('aria-expanded', String(upgradeOverflowExpanded));

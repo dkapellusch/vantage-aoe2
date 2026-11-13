@@ -101,7 +101,7 @@ function renderChip(el, ctx) {
   HUD_PARTS.delegate(el, 'click', '[data-chip-back]', () => { expandSelection(false); ctx.onChange(); });
   const rows = S.view ? selectedRows() : [];
   // The full panel replaces the chip once it is open (or when the preset shows it anyway).
-  if (!rows.length) { el.classList.add('empty'); el.classList.remove('back'); HUD_PARTS.setHtml(el, ''); expandSelection(false); return; }
+  if (!rows.length) { el.classList.add('empty'); el.classList.remove('back'); HUD_PARTS.setHtml(el, ''); return; }
   // Opened into the full panel from the chip: the chip becomes the way back, just above the panel.
   if (selectionExpanded()) {
     const up = document.getElementById('unitpanel'), r = up && up.getClientRects().length ? up.getBoundingClientRect() : null;

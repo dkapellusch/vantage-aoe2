@@ -107,3 +107,11 @@ test('?hud= is read as a request for this visit', async () => {
   const saved = await load({ saved: { settingsVersion: 10, hud: { preset: 'full' } }, search: '?hud=caster' });
   assert.equal(saved.mod.settings.hud.preset, 'full', 'saved settings are not rewritten by a link');
 });
+
+test('settings from before the Selection panel memory gain its defaults; saved memory comes back', async () => {
+  const old = await load({ saved: { settingsVersion: 10, hud: { preset: 'full' } } });
+  assert.deepEqual(old.mod.settings.selectionPanel, { open: {}, upgrades: null, scope: 'life', expanded: false });
+  const kept = await load({ saved: { settingsVersion: 10, selectionPanel: { open: { details: true }, upgrades: true, scope: 'minute', expanded: true } } });
+  assert.deepEqual(kept.mod.settings.selectionPanel, { open: { details: true }, upgrades: true, scope: 'minute', expanded: true });
+  assert.deepEqual(kept.mod.DEFAULT_SETTINGS.selectionPanel.open, {}, 'the defaults are not the viewer\'s object');
+});

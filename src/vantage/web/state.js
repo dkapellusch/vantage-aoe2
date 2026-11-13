@@ -4,7 +4,7 @@ import { requestResource } from './startup-assets.js';
 import { t } from './i18n.js';
 import { ViewCache, mergeSeries, seriesEnd } from './playback.js';
 import { compactTeamLabels, memberLabel } from './team-names.js';
-import { defaultHud, normalizeHud, initialPreset } from './hud-model.js';
+import { defaultHud, normalizeHud, initialPreset, normalizeSelectionPanel, SELECTION_DEFAULTS } from './hud-model.js';
 
 export const S = {
   upcoming: [],   // read-ahead views (fast playback): their strips are requested early
@@ -161,6 +161,8 @@ export const DEFAULT_SETTINGS = {
   autocastHighlights: true,
   toggleHTMLServer: false,      // skin-debugging HTTP server (live reload + /stats-dump)
   enabledSkins: [],             // several user skins merged (names); [] = default look
+  // The Selection panel's memory: open sections, the upgrades overflow, the activity scope, chip or full panel.
+  selectionPanel: { ...SELECTION_DEFAULTS, open: {} },
   statsWindow: { docked: false }, // the Statistics window: docked right or floating (its rectangle is in panelSizes)
   // The customizable HUD (hud-model.js): the preset, each preset's edits, the layout options.
   hud: defaultHud(),
@@ -258,6 +260,7 @@ export function migrateSettings(s) {
     s.settingsVersion = 10;
   }
   s.hud = normalizeHud(s.hud);
+  s.selectionPanel = normalizeSelectionPanel(s.selectionPanel);
   // Team games now have one Overview. Do not reinterpret a custom page's id.
   if (s.dashboardSelection?.oppositional === 'overviewSmall'
     && !s.customDashboardConfig?.oppositional?.length) {

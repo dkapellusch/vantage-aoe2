@@ -800,6 +800,147 @@ def test_glyph_buttons_have_names_and_skip_links_shorten_the_keyboard_path(
     page.context.close()
 
 
+# -- the Selection panel remembers what the viewer set up ----------------------------------------
+
+PANEL_STATE = """() => { const e = document.getElementById('unitpanel');
+  const d = e.querySelector('details[data-panel-detail]');
+  const b = e.querySelector('[data-upgrades-toggle]');
+  return { shown: e.getClientRects().length > 0, details: d ? d.open : null,
+    overflow: b ? b.getAttribute('aria-expanded') : null }; }"""
+OWNED = """() => { const v = window.vantage, seen = new Set(), out = [];
+  for (const r of v.world.currentRows()) {
+    if (r[1] > 0 && !seen.has(r[2])) { seen.add(r[2]); out.push(r[0]); } }
+  return out; }"""
+
+
+def select(page: Any, entity: int) -> None:
+    page.evaluate("(id) => { window.vantage.S.selection = new Set([id]); }", entity)
+    page.wait_for_function(
+        "(id) => document.getElementById('unitpanel').getClientRects().length > 0"
+        " && document.querySelector('#unitpanel details[data-panel-detail]')",
+        arg=entity,
+    )
+    page.wait_for_timeout(600)
+
+
+def test_selection_panel_keeps_sections_place_and_size_across_selections_and_reload(
+    browser: Any, base: str
+) -> None:
+    page = open_page(browser, base)
+    ids = page.evaluate(OWNED)
+    assert len(ids) >= 2, "the synthetic match has two kinds of owned object"
+    first, second = ids[0], ids[1]
+    third = ids[2] if len(ids) > 2 else ids[0]
+
+    select(page, first)
+    assert page.evaluate(PANEL_STATE)["details"] is False
+    page.click("#unitpanel details[data-panel-detail] > summary")
+    has_overflow = page.locator("#unitpanel [data-upgrades-toggle]").count() > 0
+    if has_overflow:
+        page.click("#unitpanel [data-upgrades-toggle]")
+
+    # Drag it by the grip in its hover toolbar.
+    x, y, _, _ = page.evaluate(RECT, "unitpanel")
+    page.mouse.move(x + 100, y + 30)
+    grip = page.locator('#panel-tools [data-pt="move"]')
+    grip.wait_for(state="visible")
+    box = grip.bounding_box()
+    assert box is not None
+    page.mouse.move(box["x"] + 5, box["y"] + 5)
+    page.mouse.down()
+    page.mouse.move(box["x"] - 700, box["y"] - 400, steps=8)
+    page.mouse.up()
+    moved = page.evaluate(RECT, "unitpanel")
+    assert moved[0] < x - 500 and moved[1] < y
+    stored = page.evaluate("window.vantage.settings.panelSizes.unitpanel")
+    assert len(stored["anchor"]) == 2, "a natural-size panel holds on to a corner, not the centre"
+
+    # Another object, a third, and a selection made after clearing it: the same corner, the same
+    # sections, whatever height the content has.
+    for entity in (second, third):
+        select(page, entity)
+        assert page.evaluate(RECT, "unitpanel")[:2] == moved[:2]
+        state = page.evaluate(PANEL_STATE)
+        assert state["details"] is True
+        assert state["overflow"] in ("true", None)
+    page.evaluate("() => { window.vantage.S.selection = new Set(); }")
+    page.wait_for_timeout(500)
+    select(page, first)
+    assert page.evaluate(RECT, "unitpanel")[:2] == moved[:2]
+
+    # Resize it: the size holds for every later selection.
+    page.mouse.move(moved[0] + 60, moved[1] + 40)
+    handle = page.locator('#panel-resize-handles [data-corner="se"]')
+    handle.wait_for(state="visible")
+    hbox = handle.bounding_box()
+    assert hbox is not None
+    page.mouse.move(hbox["x"] + 7, hbox["y"] + 7)
+    page.mouse.down()
+    page.mouse.move(moved[0] + 432, moved[1] + 472, steps=6)
+    page.mouse.up()
+    sized = page.evaluate(RECT, "unitpanel")
+    assert sized[:2] == moved[:2] and abs(sized[2] - 432) <= 8 and abs(sized[3] - 472) <= 8
+    select(page, second)
+    assert page.evaluate(RECT, "unitpanel") == sized
+
+    # A reload: the same rectangle, the same sections, for whatever is selected next.
+    saved = page.evaluate(f"JSON.parse(localStorage.getItem('{KEY}'))")
+    assert saved["selectionPanel"]["open"] == {"details": True}
+    assert saved["panelSizes"]["unitpanel"]["moved"] is True
+    page.reload()
+    ready(page)
+    select(page, third)
+    assert page.evaluate(RECT, "unitpanel") == sized
+    state = page.evaluate(PANEL_STATE)
+    assert state["details"] is True and state["overflow"] in ("true", None)
+
+    # A smaller window: clamped on screen.
+    page.set_viewport_size({"width": 1280, "height": 720})
+    page.wait_for_timeout(1000)
+    left, top, width, height = page.evaluate(RECT, "unitpanel")
+    assert left >= 0 and top >= 0 and left + width <= 1280 and top + height <= 720
+    page.set_viewport_size({"width": 1920, "height": 1080})
+    page.wait_for_timeout(600)
+
+    # Customize -> Reset Selection panel puts all of it back.
+    page.keyboard.press("Alt+v")
+    page.locator("#panels-menu").wait_for(state="visible")
+    page.evaluate("document.querySelector('#panels-menu [data-cz-sec=layout]').open = true")
+    page.click('#panels-menu [data-cz="reset-selection"]')
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(600)
+    assert page.evaluate("window.vantage.settings.panelSizes.unitpanel") is None
+    assert page.evaluate("window.vantage.settings.selectionPanel.open") == {}
+    select(page, first)
+    assert page.evaluate(PANEL_STATE)["details"] is False
+    assert page.evaluate(RECT, "unitpanel")[0] > moved[0] + 300, "back in its default place"
+    assert page.errors == []
+    page.context.close()
+
+
+def test_minimal_details_view_stays_open_for_later_selections(browser: Any, base: str) -> None:
+    page = open_page(browser, base, saved={**SEEN, "hud": {"preset": "minimal", "hintSeen": True}})
+    ids = page.evaluate(OWNED)
+    page.evaluate("(id) => { window.vantage.S.selection = new Set([id]); }", ids[0])
+    page.click("#selchip [data-chip]")
+    select(page, ids[0])
+    page.click("#unitpanel details[data-panel-detail] > summary")
+    # Nothing selected, then something else: the full panel again, with Details open.
+    page.evaluate("() => { window.vantage.S.selection = new Set(); }")
+    page.wait_for_timeout(500)
+    select(page, ids[1])
+    assert page.evaluate(PANEL_STATE)["details"] is True
+    page.reload()
+    ready(page)
+    select(page, ids[0])
+    assert page.evaluate(PANEL_STATE)["details"] is True
+    # "compact" returns to the one-line chip, and that is remembered too.
+    page.click("#selchip [data-chip-back]")
+    page.wait_for_function("document.getElementById('unitpanel').getClientRects().length === 0")
+    assert page.evaluate("window.vantage.settings.selectionPanel.expanded") is False
+    page.context.close()
+
+
 # -- the phone layout --------------------------------------------------------------------------
 
 

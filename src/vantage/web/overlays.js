@@ -128,6 +128,8 @@ const chartState = {
   tab: 'score', key: 'score', type: 'line', transform: 'actual', hidden: new Set(), techMarks: true, ecoTechs: false, milTechs: false,
   span: 0, from: 0, // zoom window: span 0 = the whole game
 };
+// The tab and series last looked at come back after a reload (settings.statsWindow).
+if (settings.statsWindow?.tab && TABS[settings.statsWindow.tab]) { chartState.tab = settings.statsWindow.tab; chartState.key = settings.statsWindow.key || null; }
 const SAVED_CHART_KEYS = ['key', 'type', 'transform', 'techMarks', 'ecoTechs', 'milTechs'];
 
 function loadChartDefinition(tab) {
@@ -680,6 +682,7 @@ export async function renderStats(seek, metric = null) {
   el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { if (chartState.tab !== b.dataset.tab) chartState.key = null; chartState.tab = b.dataset.tab; loadChartDefinition(chartState.tab); renderStats(); }));
   $('ch-key').addEventListener('change', (e) => {
     chartState.key = e.target.value;
+    settings.statsWindow = { ...(settings.statsWindow || {}), tab: chartState.tab, key: chartState.key }; saveSettings();
     el.querySelector('.review-investigation').outerHTML = investigationHtml(chartState.key);
     wireInvestigation(el, chartState.key, seekFn(statsSeek), closeAll, investigateRange, !!S.reviewRange); redraw();
   });
@@ -722,6 +725,7 @@ export async function renderStats(seek, metric = null) {
   if (range) range.addEventListener('input', () => { const sk = seekFn(statsSeek); if (sk) sk(+range.value); statsTick(); });
   const hide = $('stc-hide');
   if (hide) hide.addEventListener('click', () => { settings.showStatsTimeControls = false; saveSettings(); renderStats(); });
+  if (settings.statsWindow?.tab !== chartState.tab || settings.statsWindow?.key !== chartState.key) { settings.statsWindow = { ...(settings.statsWindow || {}), tab: chartState.tab, key: chartState.key }; saveSettings(); }
   drawStatsChart();
   updateStrip();
   if (!statsTimer) statsTimer = setInterval(statsTick, 250);
