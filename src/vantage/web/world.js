@@ -579,6 +579,51 @@ function atlasScale(meta, im) {
   return Math.min(1, (im.naturalWidth || im.width) / full);
 }
 
+// A frame of a particle atlas as a picture of its own: [image, x, y] with the
+// frame's source rectangle starting at (x, y) in it, or null while it is being
+// cut out (a frame or two). Drawing from the atlas itself made the canvas take
+// the whole of it as a texture the first time any of it was drawn: 30-40 ms in
+// the middle of a frame for the 2048 x 4096 fire or smoke atlas, four times
+// that on a laptop, each time a new kind of particle first appeared. A frame is
+// a few thousand pixels. Lit (non-fire) frames are brightened as they are cut.
+function atlasFrameImage(a, fr, sx, sy, sw, sh, lit) {
+  // An <img> atlas (no createImageBitmap): drawn from whole, as before.
+  if (typeof ImageBitmap === 'undefined' || !(a.img instanceof ImageBitmap)) return [particleImage(a, lit), sx, sy];
+  const slot = lit ? 'lit' : 'raw';
+  const cut = fr.cut || (fr.cut = {});
+  // One pixel more on each side, so smoothing at the frame's edge reads what it did in the atlas.
+  const x0 = Math.max(0, Math.floor(sx) - 1), y0 = Math.max(0, Math.floor(sy) - 1);
+  if (cut.raw && lit && !cut.lit) cut.lit = litCopy(cut.raw);
+  if (cut[slot]) return [cut[slot], sx - x0, sy - y0];
+  if (cut.failed) return [particleImage(a, lit), sx, sy];
+  if (!cut.pending) {
+    const x1 = Math.min(a.img.width, Math.ceil(sx + sw) + 1), y1 = Math.min(a.img.height, Math.ceil(sy + sh) + 1);
+    cut.pending = createImageBitmap(a.img, x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0))
+      .then((piece) => { cut.raw = piece; }, () => { cut.failed = true; });
+  }
+  return null;
+}
+// A picture times the terrain light (TERRAIN_LIGHT), as particleImage does for a whole atlas.
+function litCopy(piece) {
+  const c = document.createElement('canvas');
+  c.width = piece.width; c.height = piece.height;
+  const g = c.getContext('2d');
+  if (typeof g.filter === 'string') {
+    g.filter = `brightness(${TERRAIN_LIGHT})`;
+    g.drawImage(piece, 0, 0);
+    g.filter = 'none';
+    return c;
+  }
+  g.drawImage(piece, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height), px = d.data, L = TERRAIN_LIGHT;
+  for (let i = 0; i < px.length; i += 4) {
+    if (!px[i + 3]) continue;
+    px[i] = Math.min(255, px[i] * L); px[i + 1] = Math.min(255, px[i + 1] * L); px[i + 2] = Math.min(255, px[i + 2] * L);
+  }
+  g.putImageData(d, 0, 0);
+  return c;
+}
+
 // One atlas frame centred on its pivot at (px, py); s = screen px per atlas px.
 function drawAtlasFrame(a, idx, px, py, s, rot, lit = false) {
   const fr = a.meta.frames[idx % a.meta.frames.length];
@@ -587,20 +632,24 @@ function drawAtlasFrame(a, idx, px, py, s, rot, lit = false) {
   const r = fr.frame, sss = fr.spriteSourceSize, src = fr.sourceSize;
   // Place the trimmed frame inside its source rectangle, centred on the pivot.
   const ox = (sss.x - src.w / 2) * s, oy = (sss.y - src.h / 2) * s;
+  // Stored rotated 90° clockwise in the atlas: its rectangle there is h x w.
+  const sw = (fr.rotated ? r.h : r.w) * k, sh = (fr.rotated ? r.w : r.h) * k;
+  const from = atlasFrameImage(a, fr, r.x * k, r.y * k, sw, sh, lit && TERRAIN_LIGHT !== 1);
+  if (!from) return;
+  const [image, sx, sy] = from;
   if (!rot && !fr.rotated) {
     // Upright (most particles): drawn where it lands, without moving the canvas
     // origin there and back (two state changes per particle).
-    fxDrawn = true; pctx.drawImage(particleImage(a, lit), r.x * k, r.y * k, r.w * k, r.h * k, px + ox, py + oy, sss.w * s, sss.h * s);
+    fxDrawn = true; pctx.drawImage(image, sx, sy, sw, sh, px + ox, py + oy, sss.w * s, sss.h * s);
     return;
   }
   pctx.translate(px, py);
   if (rot) pctx.rotate((rot * Math.PI) / 180);
   if (fr.rotated) {
-    // Stored rotated 90° clockwise in the atlas.
     pctx.rotate(-Math.PI / 2);
-    fxDrawn = true; pctx.drawImage(particleImage(a, lit), r.x * k, r.y * k, r.h * k, r.w * k, -oy - sss.h * s, ox, sss.h * s, sss.w * s);
+    fxDrawn = true; pctx.drawImage(image, sx, sy, sw, sh, -oy - sss.h * s, ox, sss.h * s, sss.w * s);
   } else {
-    fxDrawn = true; pctx.drawImage(particleImage(a, lit), r.x * k, r.y * k, r.w * k, r.h * k, ox, oy, sss.w * s, sss.h * s);
+    fxDrawn = true; pctx.drawImage(image, sx, sy, sw, sh, ox, oy, sss.w * s, sss.h * s);
   }
   pctx.setTransform(viewSize.dpr, 0, 0, viewSize.dpr, 0, 0);
 }
