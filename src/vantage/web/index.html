@@ -48,8 +48,14 @@ html.overlay-mode #initial-load > * { visibility: hidden; }
   <button id="initial-retry" type="button" hidden data-i18n="Reload">Reload</button>
   <noscript>JavaScript is needed to open this match.</noscript>
 </div>
+<nav id="skip-links" aria-label="Skip to">
+  <button type="button" data-skip="time" data-i18n="Time controls">Time controls</button>
+  <button type="button" data-skip="tools" data-i18n="Toolbar">Toolbar</button>
+  <button type="button" data-skip="customize" data-i18n="Customize">Customize</button>
+  <button type="button" data-skip="stats" data-i18n="Statistics">Statistics</button>
+</nav>
 <canvas id="world"></canvas>
-<span id="viewer-build" title="Viewer build" style="position:fixed;right:8px;bottom:3px;font:10px system-ui;color:#9a958a;z-index:20"></span>
+<span id="viewer-build" title="Viewer build"></span>
 
 <div id="hud">
   <header id="scoreboard" class="panel"></header>
@@ -68,11 +74,11 @@ html.overlay-mode #initial-load > * { visibility: hidden; }
     <div id="event-pager" class="hidden" data-i18n="New events ▾">New events ▾</div>
   </section>
   <section id="dashboard" class="panel">
-    <div class="dash-head"><button id="dash-prev" class="dash-nav" title="Previous page (Alt+X)">‹</button><span id="dash-title"></span><button id="dash-next" class="dash-nav" title="Next page (Alt+C)">›</button><span class="hint">Alt+C / Alt+X</span></div>
+    <div class="dash-head"><button id="dash-prev" aria-label="Previous dashboard page" data-i18n-label="Previous dashboard page" class="dash-nav" title="Previous page (Alt+X)">‹</button><span id="dash-title"></span><button id="dash-next" aria-label="Next dashboard page" data-i18n-label="Next dashboard page" class="dash-nav" title="Next page (Alt+C)">›</button><span class="hint">Alt+C / Alt+X</span></div>
     <div class="review-dash-body"><table id="dash-table"></table></div>
   </section>
   <section id="minimap-wrap" class="panel">
-    <div id="minimap-tools">
+    <div id="minimap-tools" role="toolbar" aria-label="Toolbar" data-i18n-label="Toolbar">
       <button id="btn-menu" class="ico ico-menu" title="Menu (Esc)" aria-label="Menu"></button>
       <button id="btn-home" class="ico ico-home" title="Replays &amp; recordings (Ctrl+O)" aria-label="Replays &amp; recordings"></button>
       <a id="btn-native" class="ico ico-native" hidden href="/native" title="Open a replay without the game" aria-label="Open a replay without the game"></a>
@@ -82,32 +88,32 @@ html.overlay-mode #initial-load > * { visibility: hidden; }
       <button id="btn-res" class="ico ico-res" title="Resources left (Alt+R)" aria-label="Resources left"></button>
       <button id="btn-panels" title="Customize: presets, panels and metrics (Alt+V)" class="ico ico-panels" aria-label="Customize" aria-haspopup="dialog" aria-expanded="false" aria-controls="panels-menu"></button>
       <button id="btn-settings" class="ico ico-settings" title="Settings" aria-label="Settings"></button>
-      <button id="btn-help" title="Quick reference (?)">?</button>
+      <button id="btn-help" aria-label="Quick reference" data-i18n-label="Quick reference" title="Quick reference (?)">?</button>
     </div>
     <canvas id="minimap"></canvas>
     <div id="fog-label"></div>
   </section>
   <section id="timebar" class="panel">
-    <div id="time-controls">
-      <button id="tc-back" title="Back 30s (-)">↺30</button>
+    <div id="time-controls" role="group" aria-label="Time controls" data-i18n-label="Time controls">
+      <button id="tc-back" aria-label="Back 30 seconds" data-i18n-label="Back 30 seconds" title="Back 30s (-)">↺30</button>
       <button id="tc-rew" title="Rewind: play backwards; again for faster (2×, 4×, 8×)" class="ico ico-rew" aria-label="Rewind"></button>
       <button id="tc-play" class="ico ico-pause" title="Play/pause (F3)" aria-label="Play/pause"></button>
       <button id="tc-ff" title="Fast forward; again for faster (2×, 4×, 8×)" class="ico ico-ff" aria-label="Fast forward"></button>
-      <button id="tc-fwd" title="Forward 30s (=)">↻30</button>
-      <button id="tc-slower" title="Slower ([)">−</button>
+      <button id="tc-fwd" aria-label="Forward 30 seconds" data-i18n-label="Forward 30 seconds" title="Forward 30s (=)">↻30</button>
+      <button id="tc-slower" aria-label="Slower" data-i18n-label="Slower" title="Slower ([)">−</button>
       <span id="tc-speed">1×</span>
-      <button id="tc-faster" title="Faster (])">+</button>
-      <button id="tc-bookmark" title="Bookmark 30s ago (F4)">⚑</button>
-      <button id="tc-live" title="Jump to live edge">LIVE</button>
+      <button id="tc-faster" aria-label="Faster" data-i18n-label="Faster" title="Faster (])">+</button>
+      <button id="tc-bookmark" aria-label="Bookmark 30 seconds ago" data-i18n-label="Bookmark 30 seconds ago" title="Bookmark 30s ago (F4)">⚑</button>
+      <button id="tc-live" aria-label="Jump to the live edge" data-i18n-label="Jump to the live edge" title="Jump to live edge">LIVE</button>
       <span id="tc-clock">0:00</span>
     </div>
     <div id="time-controls2">
-      <button id="tc-bm-prev" title="Previous bookmark (Shift+[)">◂⚑</button>
-      <button id="tc-bm-next" title="Next bookmark (Shift+])">⚑▸</button>
+      <button id="tc-bm-prev" aria-label="Previous bookmark" data-i18n-label="Previous bookmark" title="Previous bookmark (Shift+[)">◂⚑</button>
+      <button id="tc-bm-next" aria-label="Next bookmark" data-i18n-label="Next bookmark" title="Next bookmark (Shift+])">⚑▸</button>
       <span id="tc-real" title="Real speed: game time advanced per real second, against the target speed"></span>
       <span class="tc-live-only">
-        <button id="tc-rec" title="Record this live session to a .vrec file">● <span data-i18n="REC">REC</span></button>
-        <button id="tc-stop" title="Stop watching">■</button>
+        <button id="tc-rec" aria-label="Record this live session" data-i18n-label="Record this live session" title="Record this live session to a .vrec file">● <span data-i18n="REC">REC</span></button>
+        <button id="tc-stop" aria-label="Stop watching" data-i18n-label="Stop watching" title="Stop watching">■</button>
       </span>
     </div>
     <div id="scrub"><canvas id="scrub-canvas"></canvas><div id="scrub-skips"></div><div id="scrub-hover" class="hidden"><span></span></div></div>

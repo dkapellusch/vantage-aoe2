@@ -77,7 +77,7 @@ body[data-hud-preset="caster"] #minimap-wrap:not(:hover):not(:focus-within) #min
 #minimap-tools { transition: opacity var(--hud-fade) ease-out; }
 
 /* -- hover toolbar and resize handles -------------------------------------------------------------- */
-#panel-tools .pt-name { padding: 0 6px 0 5px; font-size: 11px; line-height: 18px; color: var(--muted); white-space: nowrap; cursor: default; }
+#panel-tools .pt-name { padding: 0 6px 0 5px; font-size: var(--fs-11, 11px); line-height: 18px; color: var(--muted); white-space: nowrap; cursor: default; }
 #panel-resize-handles [data-corner=n], #panel-resize-handles [data-corner=s] { cursor: ns-resize; }
 #panel-resize-handles [data-corner=e], #panel-resize-handles [data-corner=w] { cursor: ew-resize; }
 #panel-resize-handles [data-corner=n]::after, #panel-resize-handles [data-corner=s]::after,
@@ -111,7 +111,7 @@ body:has(.overlay.stats-window:not(.hidden)):not(:has(.overlay:not(.hidden):not(
 #hud-hint b { color: var(--accent); }
 #hud-hint .hint-keys { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); }
 #hud-hint .hint-phone { display: none; color: var(--muted); }
-#hud-hint kbd, #panels-menu kbd, #layout-editor kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); border-radius: 3px; background: rgba(255,255,255,.06); color: var(--text); white-space: nowrap; }
+#hud-hint kbd, #panels-menu kbd, #layout-editor kbd { font: 600 var(--fs-11, 11px) var(--mono); padding: 1px 5px; border: 1px solid var(--line); border-radius: 3px; background: rgba(255,255,255,.06); color: var(--text); white-space: nowrap; }
 body.hud-phone #hud-hint { top: auto; bottom: 132px; }
 body.hud-phone #hud-hint .hint-keys { display: none; }
 body.hud-phone #hud-hint .hint-phone { display: inline; }
@@ -195,7 +195,7 @@ body.overlay-mode #focus.empty { display: none; }
 #panels-menu .cz-row { display: flex; align-items: center; gap: 8px; padding: 2px 6px; border-radius: 3px; min-height: 26px; }
 #panels-menu .cz-row:hover { background: rgba(255,255,255,.07); }
 #panels-menu label { display: flex; gap: 8px; align-items: center; cursor: pointer; flex: 1; min-width: 0; }
-#panels-menu .cz-row button { padding: 0 6px; font-size: 11px; }
+#panels-menu .cz-row button { padding: 0 6px; font-size: var(--fs-11, 11px); }
 #panels-menu .cz-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
 #panels-menu .cz-grid label { padding: 2px 0; }
 #panels-menu .cz-line { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
@@ -340,7 +340,7 @@ body.hud-phone #story [data-st="slower"] { display: none; }
 #le-grid { inset: 0; z-index: 3; pointer-events: none; opacity: .5;
   background-image: linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px); background-size: 40px 40px; }
 #le-safe { z-index: 3; pointer-events: none; border: 1px dashed rgba(111,179,210,.9); border-radius: 2px; }
-#le-safe span, #le-zone span { position: absolute; left: 6px; top: 4px; font-size: 11px; color: var(--accent-2); background: rgba(0,0,0,.55); padding: 0 5px; border-radius: 3px; white-space: nowrap; }
+#le-safe span, #le-zone span { position: absolute; left: 6px; top: 4px; font-size: var(--fs-11, 11px); color: var(--accent-2); background: rgba(0,0,0,.55); padding: 0 5px; border-radius: 3px; white-space: nowrap; }
 #le-zone { z-index: 23; border: 2px dashed #ff3df2; background: repeating-linear-gradient(45deg, rgba(255,61,242,.10) 0 10px, rgba(255,61,242,.03) 10px 20px); cursor: grab; touch-action: none; border-radius: 4px; }
 #le-zone span { color: #ff9cf7; }
 #le-zone [data-zone-size] { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; border: solid #ff3df2; border-width: 0 3px 3px 0; }
@@ -403,3 +403,74 @@ body.hud-editor #hud-hint { display: none; }
 .pulse.multi .pl-stats .pm { min-width: 4.4em; }
 .pulse.multi .pl-stats .pm[data-ui-key="pop"] { min-width: 6em; }
 .pulse.multi .pl-bank .pm { min-width: 6.4em; }
+
+/* -- small windows (a 720p stream, a 1366x768 laptop): nothing under 12 px ---------------------------
+   Every size below 12 px in the stylesheets is written var(--fs-N, Npx). At 1080p and up the
+   fallback applies and nothing changes; in a small window they all become 12 px. */
+@media (max-height: 820px), (max-width: 1400px) {
+  :root { --fs-10: 12px; --fs-10_5: 12px; --fs-11: 12px; --fs-8: 12px; --fs-9: 12px; --fs-9_5: 12px; }
+}
+
+/* -- fix pass ------------------------------------------------------------------------------------- */
+#viewer-build { position: fixed; right: 8px; bottom: 3px; font: var(--fs-10, 10px) system-ui; color: #9a958a; z-index: 20; }
+/* The OBS page: nothing of Vantage's own on the feed, and a canvas that is really transparent.
+   (color-scheme: dark on the root makes the browser paint a dark canvas behind a transparent page.) */
+body.overlay-mode #viewer-build, body.overlay-mode #skip-links { display: none; }
+html.overlay-mode { color-scheme: normal; background: transparent !important; }
+html.overlay-mode body { color-scheme: dark; }
+
+/* Skip links: the first Tab stops, visible only while one of them has the focus. */
+#skip-links { position: fixed; left: 8px; top: 8px; z-index: 60; display: flex; gap: 6px; padding: 6px; border-radius: 6px;
+  background: var(--panel-solid); border: 1px solid var(--accent); transform: translateY(-200%); }
+#skip-links:focus-within { transform: none; }
+#skip-links button { font-size: 14px; padding: 5px 10px; }
+#skip-links button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A moved panel keeps its natural size, and these keep the width they are designed for
+   (content-sized, they would shrink and grow with every line of text). */
+#ticker.hud-custom-size.hud-auto-size { width: min(460px, 36vw) !important; }
+#events.hud-custom-size.hud-auto-size { width: 300px !important; }
+#unitpanel.hud-custom-size.hud-auto-size { width: 320px !important; }
+#focus.hud-custom-size.hud-auto-size { min-width: 300px !important; }
+#story.hud-custom-size.hud-auto-size { width: min(1200px, 64vw) !important; }
+/* In the editor a panel with nothing to show right now is still there to grab, under its name. */
+body.hud-arrange #hud :is(#ticker, #selchip, #focus).empty { display: block !important; opacity: 1; min-width: 200px !important; min-height: 32px !important; }
+body.hud-arrange #hud :is(#ticker, #selchip).empty::before { content: attr(aria-label); display: block; padding: 6px 10px; color: var(--muted); font-size: 13px; }
+#le-grip { z-index: 28; padding: 3px 9px 3px 7px; font: 600 12px var(--font); cursor: grab; touch-action: none; white-space: nowrap;
+  color: #1a1407; background: var(--accent); border-color: var(--accent); border-radius: 4px 4px 4px 0; }
+#le-grip:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* Wording and small things. */
+.pulse .pm-unit { opacity: .8; font-weight: 500; }
+.review-production > span { margin-right: .5em; }
+.review-production > b { margin-left: auto; padding-left: .5em; }
+#panels-menu .cz-note { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 4px; white-space: nowrap; }
+#panels-menu .cz-grid.off { opacity: .55; }
+#panels-menu .cz-off { color: var(--warn); }
+#panels-menu .cz-next { margin-top: 6px; }
+#panels-menu .cz-top { margin: 10px 0 2px; }
+#panels-menu .cz-foot { display: flex; gap: 8px; align-items: center; }
+#panels-menu .cz-done { display: none; }
+
+/* Phone: every target 44 px, and a way out of the drawer where the thumb is. */
+body.hud-phone #panels-menu label { min-height: 44px; }
+body.hud-phone #panels-menu input[type=checkbox] { width: 26px; height: 26px; flex: none; }
+body.hud-phone #panels-menu .cz-row button, body.hud-phone #panels-menu .cz-head button { min-width: 44px; }
+body.hud-phone #panels-menu .cz-grid { grid-template-columns: 1fr; }
+body.hud-phone #panels-menu .cz-foot { position: sticky; bottom: -12px; margin: 14px -14px -12px; padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--panel-solid); border-top: 1px solid var(--line); z-index: 2; }
+body.hud-phone #panels-menu .cz-done { display: block; flex: 1 1 auto; background: var(--accent); color: #1a1407; border-color: var(--accent); font-weight: 700; }
+body.hud-phone .pulse .pm { min-height: 44px; }
+body.hud-phone .pulse .pl-side, body.hud-phone .pulse .pl-side.right { padding-top: 0; padding-bottom: 0; }
+body.hud-phone #story [data-st="slower"], body.hud-phone #story [data-st="mark"] { display: inline-block; }
+body.hud-phone #story .st-bar { flex-wrap: wrap; row-gap: 2px; }
+body.hud-phone #story .st-bar button { min-width: 44px; flex: 1 1 44px; padding: 0; }
+body.hud-phone #story .st-speed { min-width: 34px; }
+body.hud-phone #story .st-clock { flex: 1 1 100%; text-align: right; margin: 0; font-size: 13px; }
+body.hud-phone .overlay .close { min-width: 56px; min-height: 44px; }
+#hud-hint kbd.wide { font-size: 15px; padding: 0 8px; }
+#panels-menu.left { right: auto; left: 8px; }
+#panels-menu .cz-head { gap: 6px; }
+#panels-menu .cz-head h2 { flex: 1 1 auto; }
+body.hud-phone #panels-menu .cz-side { display: none; }
+#selchip.back button { padding: 3px 10px; font-size: 13px; color: var(--accent); width: auto; }
+body.hud-phone #panels-menu .cz-keys { display: none; }

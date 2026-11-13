@@ -74,6 +74,8 @@ export function translateStatic() {
     el.setAttribute('title', mode === 'off' ? '' : mode === 'names' ? tooltipName(text) : mode === 'detail' ? tooltipDetail(text) : text);
   }
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  // Accessible names of controls drawn as a glyph (−, ⚑, ‹): what they do, in the interface language.
+  for (const el of document.querySelectorAll('[data-i18n-label]')) el.setAttribute('aria-label', t(el.dataset.i18nLabel));
 }
 
 // The detail part of a tooltip (everything after the name); the whole text when there is none.
