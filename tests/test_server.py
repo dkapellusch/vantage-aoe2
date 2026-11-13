@@ -958,6 +958,28 @@ def test_versioned_asset_urls_are_cached_for_good(server: tuple[str, Session, Pa
     assert asset_cache_control({"av": "old"}, version) == "max-age=86400"
 
 
+def test_an_interface_change_keeps_cached_assets(tmp_path: Path, monkeypatch) -> None:
+    """Asset URLs carry the server-side code's identity, not the whole
+    deployment's: a script or style change must not empty every browser's cache
+    of sprite strips, a renderer change must."""
+    import shutil
+
+    from vantage import deployment
+
+    copy = tmp_path / "vantage"
+    shutil.copytree(
+        Path(deployment.__file__).parent, copy, ignore=shutil.ignore_patterns("__pycache__")
+    )
+    monkeypatch.setattr(deployment, "__file__", str(copy / "deployment.py"))
+    assets, viewer = deployment.asset_revision(), deployment.deployment_revision()
+    for name in ("web/app.js", "web/style.css", "web/index.html", "web/i18n/de.json"):
+        (copy / name).write_text((copy / name).read_text() + "\n")
+    assert deployment.asset_revision() == assets
+    assert deployment.deployment_revision() != viewer
+    (copy / "sld.py").write_text((copy / "sld.py").read_text() + "\n# changed\n")
+    assert deployment.asset_revision() != assets
+
+
 def test_html_and_relative_modules_share_an_immutable_build_graph(
     server: tuple[str, Session, Path],
 ) -> None:

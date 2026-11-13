@@ -19,6 +19,20 @@ def deployment_revision() -> str:
     return _revision(tuple((str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in paths))
 
 
+def asset_revision() -> str:
+    """Identity of the code that turns game files into what the browser is sent
+    (sprite strips, icons, terrain, particle atlases, sounds): the Python side
+    only. A change to the interface (scripts, styles, markup, translations)
+    changes no asset, and must not make every browser fetch them all again."""
+    root = Path(__file__).parent
+    paths = sorted(
+        p
+        for p in root.rglob("*.py")
+        if p.is_file() and "__pycache__" not in p.parts and "web" not in p.relative_to(root).parts
+    )
+    return _revision(tuple((str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in paths))
+
+
 @lru_cache(maxsize=4)
 def _revision(files: tuple[tuple[str, int, int], ...]) -> str:
     digest = hashlib.sha256()

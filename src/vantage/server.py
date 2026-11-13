@@ -38,7 +38,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from vantage import __version__, recording_summary
 from vantage.certs import cert_status, certs_dir, missing_cert_files
-from vantage.deployment import deployment_revision
+from vantage.deployment import asset_revision, deployment_revision
 from vantage.frames import RecordingWriter, read_header
 from vantage.gamedata import (
     GameData,
@@ -112,6 +112,7 @@ class Session:
     def __init__(self, data: GameData, recordings_dir: Path) -> None:
         self.data = data
         self.viewer_build = deployment_revision()
+        self.asset_build = asset_revision()
         self.server_instance = secrets.token_hex(8)
         self.recordings_dir = recordings_dir
         self.timeline: Timeline | None = None
@@ -1251,7 +1252,9 @@ class App:
         mods = (data.mod_roots("graphics"), data.mod_roots("sprites"), data.mod_roots("terrain"))
         parts = (
             __version__,
-            self.session.viewer_build,
+            # The server-side code, not the whole deployment: an interface change
+            # (most changes) leaves every cached asset valid.
+            self.session.asset_build,
             RENDER_VERSION,
             data.build,
             data.game_dir,
