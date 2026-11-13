@@ -851,3 +851,82 @@ def test_phone_layout_tabs_sheet_and_no_sideways_scroll(browser: Any, base: str)
     assert page.evaluate("document.getElementById('overview').parentElement.id") == "leftcol"
     assert page.errors == []
     page.context.close()
+
+
+@pytest.mark.parametrize("gpu", [False, True], ids=["canvas", "webgl"])
+def test_zoomed_game_art_draws_entities_not_only_selection_rings(
+    browser: Any, base: str, gpu: bool
+) -> None:
+    """Real drawSprites path, synthetic art; no game installation required."""
+    import base64
+
+    page = browser.new_page(viewport={"width": 1280, "height": 800})
+    page.errors = []
+    page.on("pageerror", lambda error: page.errors.append(str(error)))
+    page.goto(base)
+    page.wait_for_function("window.vantage?.S.view && document.body.dataset.startup === 'ready'")
+    page.evaluate("vantage.S.playing = false")
+    # A generated solid square, not a game asset. Initially missing strips must
+    # also survive a frame (the branch with the stale `failed` reference).
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAL0lEQVR4nO3OIQEAAAgDMCIRjYg0gxg3E/Or7bmkEhAQEBAQEBAQEBAQEBAQSAceUUZ8iO1NzJQAAAAASUVORK5CYII="
+    )
+    page.route(
+        "**/sprite/**",
+        lambda route: route.fulfill(
+            body=png,
+            content_type="image/png",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Expose-Headers": "X-Sprite-Meta",
+                "X-Sprite-Meta": json.dumps(
+                    {
+                        "cw": 32,
+                        "ch": 32,
+                        "ax": 16,
+                        "ay": 28,
+                        "n": 1,
+                        "step": 1,
+                        "per": 1,
+                        "duration": 0,
+                        "pc": False,
+                    }
+                ),
+            },
+        ),
+    )
+    before = page.evaluate(
+        """gpu => {
+      const {S, settings, world} = vantage;
+      window.spriteBlits = 0;
+      const draw = CanvasRenderingContext2D.prototype.drawImage;
+      CanvasRenderingContext2D.prototype.drawImage = function(...args) {
+        if (new Error().stack.includes('drawSprites')) window.spriteBlits++;
+        return draw.apply(this, args);
+      };
+      S.gameArt = true; settings.gameGraphics = true; settings.gpuSprites = gpu;
+      settings.waitForGraphics = false;
+      for (const r of S.view.entities) r[8] = [[900001, 0, 0, 0]];
+      S.view = { ...S.view }; S.nextView = null;
+      world.setCamera(2, 2, 1.2);
+      return { frames: world.drawTimes.n, instances: world.gpuSpriteStats().instances };
+    }""",
+        gpu,
+    )
+    for _ in range(100):
+        page.wait_for_timeout(100)
+        stats = page.evaluate("""() => ({
+          sprites: vantage.world.spritesOn(), missing: vantage.world.spriteStats.missing,
+          frames: vantage.world.drawTimes.n, gpu: vantage.world.gpuSpriteStats(),
+          blits: window.spriteBlits,
+        })""")
+        drawn = stats["gpu"]["instances"] - before["instances"] if gpu else stats["blits"]
+        if page.errors or (drawn > 0 and stats["frames"] > before["frames"]):
+            break
+    try:
+        assert not page.errors, (page.errors, stats)
+        assert stats["sprites"]
+        assert stats["frames"] > before["frames"], stats
+        assert drawn > 0, f"No entities drawn, even if missing == 0: {stats}"
+    finally:
+        page.context.close()

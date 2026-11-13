@@ -1,0 +1,13 @@
+{
+  "name": "vantage-viewer-checks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint:web": "eslint \"src/vantage/web/*.js\"",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "eslint": "9.39.5",
+    "globals": "16.5.0"
+  }
+}

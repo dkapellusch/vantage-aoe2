@@ -2,12 +2,13 @@
 
 ## Setup
 
-You need Python 3.12 or newer, [uv](https://docs.astral.sh/uv/), and (for the browser tests) Node.js 18 or newer.
+You need Python 3.12 or newer, [uv](https://docs.astral.sh/uv/), and (for the browser tests) Node.js 22 or newer.
 
 ```sh
 git clone https://github.com/dkapellusch/vantage-aoe2
 cd vantage
 uv sync                      # creates .venv with Vantage and the dev tools
+npm ci --ignore-scripts       # pinned browser lint tools (development only)
 uv run vantage serve --open
 ```
 
@@ -23,7 +24,8 @@ You do not need the game to work on most of Vantage. Any `.vrec` recording exerc
 ```sh
 uv run pytest                # everything (Python, plus the browser tests if Node is installed)
 uv run pytest tests/test_patch.py -q
-node --test tests/*.test.mjs # the browser tests on their own
+node --test tests/*.test.mjs # the browser tests, including the no-undef gate
+npm run lint:web            # no-undef only, all src/vantage/web/*.js modules
 ```
 
 - The tests are **offline and deterministic**. They need neither the game, nor the certificates, nor a network.
@@ -39,6 +41,15 @@ node --test tests/*.test.mjs # the browser tests on their own
   uv run --with playwright python -m playwright install chromium   # once
   uv run --with playwright pytest tests/test_hud_browser.py
   ```
+
+- The zoomed game-art cases in `tests/test_hud_browser.py` use generated sprite strips
+  and exercise both Canvas and WebGL at base zoom. They require completed frames,
+  actual entity sprite draws and no page errors; a zero missing-sprite counter
+  alone cannot pass. CI runs these cases with Chromium, independently of the
+  optional local Playwright installation.
+- `tests/no_undef.test.mjs` runs ESLint's `no-undef` rule on every top-level browser
+  module, including workers. Browser and worker globals are listed by the pinned
+  `globals` package in `eslint.config.mjs`. Both Node and pytest run this gate.
 
 All tests must pass before a change is merged. CI runs them on Linux and Windows. Tests of
 Linux-only behaviour (Proton paths, the freedesktop link handler) pin `sys.platform` or are skipped on
