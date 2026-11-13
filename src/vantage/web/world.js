@@ -552,9 +552,13 @@ function atlas(path) {
     const url = withAssetVersion(`/particle_atlas.png?path=${q}`);
     // Decoded off the main thread: an <img> decodes on its first drawImage, inside
     // a frame (25-40 ms for the 2048 x 4096 fire atlas, a visible hitch the first
-    // time something burns).
+    // time something burns). A plain fetch, as the <img> was: an atlas is up to
+    // 6 MB, and through a slow link requestResource's 5 s an attempt cancelled it
+    // and fetched it again from the start.
     try {
-      const im = await createImageBitmap(await requestResource(url, {}, (r) => r.blob()));
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const im = await createImageBitmap(await r.blob());
       a.k = atlasScale(meta, im); a.img = im;
     } catch {
       const im = new Image();
