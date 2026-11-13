@@ -676,7 +676,13 @@ async function updateView() {
         world.viewReady(v);
         renderHud(); layoutLeftColumn(); placeDashboard();
       }
-      if (S.jump && !S.jump.wait && Math.abs(v.time - S.jump.to) < 2500) S.jump = null;
+      if (S.jump && !S.jump.wait && Math.abs(v.time - S.jump.to) < 2500) {
+        S.jump = null;
+        // The forest and the terrain of the moment jumped to, without the wait
+        // that paces them during playback. Not while the time bar is dragged:
+        // only the released position needs them.
+        if (!S.scrubbing) world.refreshSoon();
+      }
       // Install the next cached target in this same frame. Awaiting it here
       // left one or more frames with no interpolation at every boundary.
       S.nextView = null;

@@ -239,6 +239,7 @@ function spriteStrip(sid, facet, color, opts) {
       // A server that ignores ?layer= answers with the full strip: stop asking.
       if (opts && opts.layer) layerSplit = m.layer === opts.layer;
       e.img = img; e.bytes = img.width * img.height * 4; spriteBytes += e.bytes; spriteRequests--;
+      if (e.wakesGround) wakeGround();
       // A colourless strip asked for in a player's colour, or with the player mask
       // (before the sprite was known to be colourless), also answers for the plain
       // colourless key: its top band is that strip, without a mask to apply.
@@ -255,6 +256,7 @@ function spriteStrip(sid, facet, color, opts) {
       e.failed = true;
       if (err?.status !== 404) e.retryAt = performance.now() + 5000;
       spriteRequests--; notifyAssetsChanged();
+      if (e.wakesGround) wakeGround();
     });
   if (standIn && countingDraw) spriteStats.standIn++;
   return standIn || e;
@@ -371,17 +373,21 @@ export function viewReady(n) {
 
 // Includes decoded images and the painted ground, not merely finished HTTP
 // requests. Hidden first-frame draws also upload the GPU atlas before reveal.
-export function initialFrameReady() {
-  if (!S.map || !S.view || !S.catalog || !terrainCanvas) return false;
+export function initialFrameReady() { return framePending().length === 0; }
+
+/** What the picture of the current view still waits for (empty: it is complete).
+ * Also for the benchmark (tools/perf), which reports what held a seek up. */
+export function framePending() {
+  if (!S.map || !S.view || !S.catalog || !terrainCanvas) return ['data'];
   buildViewTerrain();
-  const terrain = !S.map.terrain_textures || !!viewTerrainCanvas;
-  const sprites = viewReady(S.view);
-  const images = [...imgCache.values()].every((im) => im.failed || (im.complete && im.naturalWidth));
-  const trees = S.view.trees_t == null || S.view.trees_t < 0 || S.view.trees_t === treesT;
-  const tiles = S.view.terrain_t == null || S.view.terrain_t < 0 || S.view.terrain_t === terrainT;
-  return terrain && sprites && !firstFrameSpritesPending && images && trees && tiles
-    && !treesPending && !terrainPending
-    && ground.map === S.map && !!ground.key;
+  const pending = [];
+  if (S.map.terrain_textures && !viewTerrainCanvas) pending.push('terrain textures');
+  if (!viewReady(S.view) || firstFrameSpritesPending) pending.push('sprites');
+  if (![...imgCache.values()].every((im) => im.failed || (im.complete && im.naturalWidth))) pending.push('images');
+  if (!(S.view.trees_t == null || S.view.trees_t < 0 || S.view.trees_t === treesT) || treesPending) pending.push('trees');
+  if (!(S.view.terrain_t == null || S.view.terrain_t < 0 || S.view.terrain_t === terrainT) || terrainPending) pending.push('terrain');
+  if (!(ground.map === S.map && !!ground.key)) pending.push(ground.partialKey && groundMissing ? `ground: ${groundMissing}` : 'ground');
+  return pending;
 }
 
 function collectViewSprites(n) {
@@ -1398,7 +1404,8 @@ export async function refreshTerrain(t, initial = false) {
   if (want < 0 || want === terrainT) return;
   // At 4-8x a new snapshot arrives several times a second; each one rebuilds the
   // terrain chunks it touches, so they are applied at most every 0.7 s of wall time.
-  if (!initial && performance.now() - terrainAt < 700) return;
+  if (!initial && !terrainUrgent && performance.now() - terrainAt < 700) return;
+  terrainUrgent = false;
   terrainAt = performance.now();
   terrainPending = true;
   try {
@@ -1534,13 +1541,21 @@ function drawTrees(c, tw, th, oy, color) {
 }
 
 let treesAt = 0, treesPending = false;
+/** The view of a seek has arrived: its forest and terrain are fetched at once
+ * (as soon as a request under way has answered), not at the next slot of the
+ * 0.7 s throttle that playback uses. */
+let treesUrgent = false, terrainUrgent = false;
+export function refreshSoon() {
+  treesUrgent = true; terrainUrgent = true;
+}
 export async function refreshTrees(t, initial = false) {
   if (!S.map || treesPending) return;
   const want = S.view && S.view.trees_t != null ? S.view.trees_t : -1;
   if (want === treesT) return;
   // A snapshot every 3 game seconds is several a second at 4-8x: fetched (and the
   // forest redrawn) at most every 0.7 s of wall time, like the terrain.
-  if (!initial && performance.now() - treesAt < 700) return;
+  if (!initial && !treesUrgent && performance.now() - treesAt < 700) return;
+  treesUrgent = false;
   treesAt = performance.now();
   treesT = want;
   treesPending = true;
@@ -1701,7 +1716,8 @@ function terrainPattern(i) {
     p._img = im; // the GPU chunk compositor's texture
     textureAvg.set(i, meanColor(im));
     terrainPatterns.set(i, p);
-  }, () => { terrainPatterns.set(i, flat); });
+    wakeGround();
+  }, () => { terrainPatterns.set(i, flat); wakeGround(); });
   return null;
 }
 
@@ -1727,7 +1743,8 @@ function terrainMask(name) {
     p._w = c.width;
     p._img = im; // the GPU compositor reads the noise from the red channel
     terrainMasks.set(name, p);
-  }, () => { terrainMasks.set(name, false); });
+    wakeGround();
+  }, () => { terrainMasks.set(name, false); wakeGround(); });
   return null;
 }
 
@@ -1773,7 +1790,7 @@ function buildChunk(cx, cy, gpu = false) {
   // A GPU-composited chunk has no canvas for the 2D path: build that afresh.
   if (c && c.canvas && c.canvas.composed && !gpu) c = null;
   if (c && c.gen === chunkGen && !c.stale) return c.canvas;
-  if (c && c.gen === chunkGen && c.stale && staleBudget <= 0) { groundIncomplete = true; return c.canvas; }
+  if (c && c.gen === chunkGen && c.stale && staleBudget <= 0) { groundIncomplete = true; groundMissing = 'changed terrain'; return c.canvas; }
   if (c && c.stale) staleBudget--;
   const terrain = S.map._terrain, elev = S.map._elev;
   const x0 = cx * CHUNK, y0 = cy * CHUNK;
@@ -1959,7 +1976,7 @@ function drawTreeSprites() {
       if (!treeTiles[y * mapW + x]) continue;
       const e = treeSprite(x, y);
       const [px, py] = groundScreen(x + 0.5, y + 0.5);
-      if (!e) { if (e !== false) groundIncomplete = true; fallback.push([px, py]); continue; }
+      if (!e) { if (e !== false) { groundIncomplete = true; groundMissing = 'tree graphics'; } fallback.push([px, py]); continue; }
       const m = e.meta;
       const s = (S.camera.zoom * TW) / (e.tile || SPRITE_TILE) * treeScale;
       ctx.drawImage(e.img, 0, 0, m.cw, m.ch, px - m.ax * s, py - m.ay * s, m.cw * s, m.ch * s);
@@ -2081,7 +2098,15 @@ function updateBiome() {
 const GROUND_PAD = 128; // CSS pixels on each side, independent of pixel density
 const ground = { canvas: null, ctx: null, key: '', partialKey: '', retryAt: 0, x: 0, y: 0, zoom: 0, width: 0, height: 0, padding: GROUND_PAD, map: null, treeRange: null, terrainRange: null, dirty: null };
 let groundIncomplete = false;
+let groundMissing = ''; // what the last incomplete paint lacked (framePending)
 let treeGen = 0;
+// A piece the ground layer was drawn without (a tree's strip, a terrain texture
+// or mask) has arrived: redraw the layer in the next frame. Until then an
+// incomplete layer is retried every quarter second, which left a new place
+// without its trees for that long after their strips were in.
+function wakeGround() {
+  if (ground.partialKey) ground.retryAt = 0;
+}
 
 function cachedGroundPoint(x, y, height = 0) {
   const z = ground.zoom;
@@ -2843,6 +2868,7 @@ function treeSprite(x, y) {
   // The facet is the variant the game draws for this tree (see tree_tiles).
   const facet = treeFacets ? treeFacets[y * mapW + x] : 0;
   const e = spriteStrip(u.sprite, facet, -1);
+  if (e && !e.img && !e.failed) e.wakesGround = true; // the ground is drawn without it for now
   return treeSpriteState(e);
 }
 
