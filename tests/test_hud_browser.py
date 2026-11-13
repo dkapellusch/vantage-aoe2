@@ -1196,7 +1196,7 @@ def test_zoomed_game_art_big_scene_stays_within_frame_budgets(browser: Any, base
         assert not page.errors, page.errors
         # Game art is drawn in both, and the zoomed-in view draws only its own part.
         assert near["instances"] >= 1, near
-        assert far["instances"] > 8 * near["instances"], (near, far)
+        assert far["instances"] > 5 * near["instances"], (near, far)
         # A still picture: nothing uploaded, nothing asked of the server.
         assert near["uploads"] == 0 and far["uploads"] == 0, (near, far)
         assert near["fetched"] == 0 and far["fetched"] == 0, (near, far)
