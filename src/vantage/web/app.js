@@ -842,6 +842,7 @@ function tick(now) {
   const tm = performance.now();
   world.drawMinimap();
   firstFrame(now);
+  hudAfterFrame();
   if (perf.on) {
     perf.minimap.push(performance.now() - tm);
     perf.work.push(performance.now() - t0);
@@ -989,6 +990,13 @@ function placeDashboard() {
   up.style.maxHeight = `${Math.max(120, Math.round(a.top - 12 - evBottom))}px`;
 }
 
+// A custom property on the root restyles the whole document, also when it is
+// set to the value it already has: write it only when it changes.
+function setRootVar(name, value) {
+  const style = document.documentElement.style;
+  if (style.getPropertyValue(name) !== value) style.setProperty(name, value);
+}
+
 function layoutLeftColumn() {
   const col = $('leftcol'), sb = $('scoreboard'), tb = $('timebar');
   if (!col || !sb || !tb) return;
@@ -1004,7 +1012,7 @@ function layoutLeftColumn() {
     if (!pulse.classList.contains('panel-off') && pr.height > 0) headBottom = Math.max(headBottom, pr.bottom);
   }
   // Slide-outs and toasts open below the top bar, never over it.
-  document.documentElement.style.setProperty('--sb-bottom', `${headBottom > 0 ? Math.round(headBottom) : 8}px`);
+  setRootVar('--sb-bottom', `${headBottom > 0 ? Math.round(headBottom) : 8}px`);
   const colRight = col.getBoundingClientRect().left + Math.max(col.scrollWidth, 340);
   const overlaps = !sb.classList.contains('hidden') && s.width > 0 && s.left < colRight;
   // Caster: the column fills the height under the scoreboard and its panels stack
@@ -1036,7 +1044,7 @@ function layoutLeftColumn() {
   const left = Math.round(col.getBoundingClientRect().right + 6);
   // Slide-outs (right-anchored) stop short of the left-hand panels.
   const lastRight = Math.max(col.getBoundingClientRect().right, col2.children.length ? col2.getBoundingClientRect().right : 0);
-  document.documentElement.style.setProperty('--left-panels', `${Math.round(lastRight + 6)}px`);
+  setRootVar('--left-panels', `${Math.round(lastRight + 6)}px`);
   col2.style.top = `${top}px`;
   col2.style.maxHeight = maxH;
   col2.style.height = caster && col2.children.length ? maxH : '';
@@ -1080,26 +1088,69 @@ const releasePress = () => { if (uiPress) { uiPress = 0; setTimeout(renderHud, 0
 window.addEventListener('mouseup', releasePress, true);
 window.addEventListener('contextmenu', releasePress, true);
 window.addEventListener('blur', releasePress);
+// The HUD refresh in parts. The 250 ms timer starts one, and each part then runs
+// as a task of its own right after a frame has been drawn (hudAfterFrame), in the
+// gap before the next: done in one go the refresh is 10-15 ms of script and
+// forced layout late in a big game, then as much again of style, layout and
+// paint in the frame after, so every refresh cost a frame or two of the world's
+// animation. A direct renderHud() (a click, a key, a new view while loading)
+// still does it all at once.
+const HUD_PARTS = [
+  () => {
+    reviewStatus(autocast.on ? 'Auto' : S.followSelection ? 'Follow selection' : 'Free');
+    const sp = SPEEDS[S.speedIndex];
+    const label = isLive() && S.followLive ? t('LIVE') : `${S.playing ? '' : t('paused') + ' · '}${sp}×`;
+    panels.renderScoreboard(label);
+    panels.renderOverview();
+  },
+  () => {
+    panels.renderTechs();
+    panels.renderProduction();
+    panels.renderDashboard();
+    if (placeDirty || performance.now() - placedAt > 1000) placeDashboard();
+  },
+  () => {
+    const eventsOn = layout.isVisible('events');
+    if (eventsOn) panels.renderEvents(seek);
+    $('events').classList.toggle('hidden', !eventsOn);
+  },
+  () => {
+    panels.renderUnitPanel();
+    panels.renderResourcesLeft(showResLeft);
+    // A slide-out or the resources strip that just opened is placed in this frame.
+    const floaters = `${S.slideout || ''}|${showResLeft}`;
+    if (floaters !== placedFloaters) { placedFloaters = floaters; placeFloaters(); }
+    panels.renderTimebar();
+  },
+  renderHudRest,
+];
+const pressed = () => uiPress && performance.now() - uiPress < 400;
+let hudPart = -1; // the next part of a refresh in progress (-1: none)
 function renderHud() {
-  reviewStatus(autocast.on ? 'Auto' : S.followSelection ? 'Follow selection' : 'Free');
-  if (uiPress && performance.now() - uiPress < 400) return;
-  const sp = SPEEDS[S.speedIndex];
-  const label = isLive() && S.followLive ? t('LIVE') : `${S.playing ? '' : t('paused') + ' · '}${sp}×`;
-  panels.renderScoreboard(label);
-  panels.renderOverview();
-  panels.renderTechs();
-  panels.renderProduction();
-  panels.renderDashboard();
-  if (placeDirty || performance.now() - placedAt > 1000) placeDashboard();
-  const eventsOn = layout.isVisible('events');
-  if (eventsOn) panels.renderEvents(seek);
-  $('events').classList.toggle('hidden', !eventsOn);
-  panels.renderUnitPanel();
-  panels.renderResourcesLeft(showResLeft);
-  // A slide-out or the resources strip that just opened is placed in this frame.
-  const floaters = `${S.slideout || ''}|${showResLeft}`;
-  if (floaters !== placedFloaters) { placedFloaters = floaters; placeFloaters(); }
-  panels.renderTimebar();
+  hudPart = -1;
+  if (pressed()) { reviewStatus(autocast.on ? 'Auto' : S.followSelection ? 'Follow selection' : 'Free'); return; }
+  for (const part of HUD_PARTS) part();
+}
+/** Start a refresh spread over the next frames (the timer); one already under way carries on. */
+function refreshHud() {
+  if (hudPart < 0) hudPart = 0;
+}
+/** One part of the refresh under way. */
+function hudStep() {
+  if (hudPart < 0) return;
+  if (pressed()) { hudPart = -1; reviewStatus(autocast.on ? 'Auto' : S.followSelection ? 'Follow selection' : 'Free'); return; }
+  const part = HUD_PARTS[hudPart];
+  hudPart = hudPart + 1 < HUD_PARTS.length ? hudPart + 1 : -1;
+  part();
+}
+// A message task runs after the frame that posted it has been rendered.
+const hudChannel = new MessageChannel();
+hudChannel.port1.onmessage = hudStep;
+/** Called at the end of each frame: the next part of a refresh goes after it. */
+function hudAfterFrame() {
+  if (hudPart >= 0) hudChannel.port2.postMessage(0);
+}
+function renderHudRest() {
   // The newer panels (Pulse strip, Focus slot, Match story, widgets): only the visible ones render.
   layout.renderExtras();
   layout.applyPanels();
@@ -2468,7 +2519,7 @@ async function boot() {
   else if (!settings.seenTutorial && !document.body.classList.contains('overlay-mode')
     && !(desc.mode === 'live' && desc.certs && (desc.certs.missing || []).length)) showTutorial(0);
   subscribe();
-  hudTimer = setInterval(() => { if (!document.hidden) renderHud(); }, 250);
+  hudTimer = setInterval(() => { if (!document.hidden) refreshHud(); }, 250);
   // The panels too: a caster column has a fixed height, so only they change size.
   for (const id of ['scoreboard', 'timebar', 'leftcol', 'overview', 'techs', 'production']) if ($(id)) leftColObserver.observe($(id));
   // The Pulse strip is created when a preset first shows it.
