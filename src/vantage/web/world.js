@@ -245,7 +245,7 @@ function spriteStrip(sid, facet, color, opts) {
       if (opts && opts.layer) layerSplit = m.layer === opts.layer;
       e.img = img; e.bytes = img.width * img.height * 4; spriteBytes += e.bytes; spriteRequests--;
       stripDelay += (Math.min(2000, performance.now() - asked) - stripDelay) * 0.2;
-      if (e.wakesGround) wakeGround();
+      if (e.wakesGround) treeStripArrived(e);
       // A colourless strip asked for in a player's colour, or with the player mask
       // (before the sprite was known to be colourless), also answers for the plain
       // colourless key: its top band is that strip, without a mask to apply.
@@ -262,7 +262,7 @@ function spriteStrip(sid, facet, color, opts) {
       e.failed = true;
       if (err?.status !== 404) e.retryAt = performance.now() + 5000;
       spriteRequests--; notifyAssetsChanged();
-      if (e.wakesGround) wakeGround();
+      if (e.wakesGround) treeStripArrived(e);
     });
   if (standIn && countingDraw) spriteStats.standIn++;
   return standIn || e;
@@ -2261,6 +2261,17 @@ let treeGen = 0;
 function wakeGround() {
   if (ground.partialKey) ground.retryAt = 0;
 }
+// Tree strips arrive one by one, over a few hundred ms through a hosted hub. A
+// repaint for each one is a whole ground layer per frame, which on a slow laptop
+// held up the strips still arriving (a jump to a new place took 100 ms longer
+// than with the quarter-second retry): the layer is woken by the last strip it
+// waits for, and repainted every quarter second until then.
+let groundWaits = 0;
+function treeStripArrived(e) {
+  e.wakesGround = false;
+  groundWaits = Math.max(0, groundWaits - 1);
+  if (!groundWaits) wakeGround();
+}
 
 function cachedGroundPoint(x, y, height = 0) {
   const z = ground.zoom;
@@ -3028,7 +3039,7 @@ function treeSprite(x, y) {
   // The facet is the variant the game draws for this tree (see tree_tiles).
   const facet = treeFacets ? treeFacets[y * mapW + x] : 0;
   const e = spriteStrip(u.sprite, facet, -1);
-  if (e && !e.img && !e.failed) e.wakesGround = true; // the ground is drawn without it for now
+  if (e && !e.img && !e.failed && !e.wakesGround) { e.wakesGround = true; groundWaits++; } // the ground is drawn without it for now
   return treeSpriteState(e);
 }
 
