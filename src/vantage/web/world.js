@@ -446,11 +446,20 @@ function atlas(path) {
   a = { img: null, meta: null };
   atlases.set(path, a);
   const q = encodeURIComponent(path);
-  api(`/particle_atlas.json?path=${q}`).then((meta) => {
+  api(`/particle_atlas.json?path=${q}`).then(async (meta) => {
     a.meta = meta;
-    const im = new Image();
-    im.onload = () => { a.k = atlasScale(meta, im); a.img = im; };
-    im.src = withAssetVersion(`/particle_atlas.png?path=${q}`);
+    const url = withAssetVersion(`/particle_atlas.png?path=${q}`);
+    // Decoded off the main thread: an <img> decodes on its first drawImage, inside
+    // a frame (25-40 ms for the 2048 x 4096 fire atlas, a visible hitch the first
+    // time something burns).
+    try {
+      const im = await createImageBitmap(await requestResource(url, {}, (r) => r.blob()));
+      a.k = atlasScale(meta, im); a.img = im;
+    } catch {
+      const im = new Image();
+      im.onload = () => { a.k = atlasScale(meta, im); a.img = im; };
+      im.src = url;
+    }
   }).catch(() => {});
   return a;
 }
@@ -514,7 +523,7 @@ function atlasScale(meta, im) {
     maxX = Math.max(maxX, r.x + (fr.rotated ? r.h : r.w));
   }
   const full = 2 ** Math.ceil(Math.log2(maxX));
-  return Math.min(1, im.naturalWidth / full);
+  return Math.min(1, (im.naturalWidth || im.width) / full);
 }
 
 // One atlas frame centred on its pivot at (px, py); s = screen px per atlas px.
