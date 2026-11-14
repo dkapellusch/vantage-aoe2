@@ -173,6 +173,7 @@ def main():
             r.update(label=args.label, web=args.web, cpu=args.cpu, load=load, where=args.where)
             results.append(r)
             print(summary_line(r), flush=True)
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     prev = json.loads(Path(args.out).read_text()) if Path(args.out).exists() else []
     Path(args.out).write_text(json.dumps(prev + results, indent=1))
 
