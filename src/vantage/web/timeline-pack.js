@@ -192,11 +192,16 @@ export class PackStore {
 
   setFocus(t) { if (this.index) this.focus = this.chunkOf(t); }
 
-  /** The next chunk to fetch: from the playhead to the end, then back to the start. */
+  /** The next chunk to fetch: the playhead's and its neighbours (where a skip
+   * either way lands), then on to the end, then back to the start. */
   nextMissing() {
-    const n = this.chunks;
-    for (let i = this.focus; i < n; i++) if (!this.have.has(i)) return i;
-    for (let i = Math.min(this.focus, n) - 1; i >= 0; i--) if (!this.have.has(i)) return i;
+    const n = this.chunks, f = Math.min(this.focus, n - 1);
+    for (const d of [0, 1, -1, 2, -2, 3, -3]) {
+      const i = f + d;
+      if (i >= 0 && i < n && !this.have.has(i)) return i;
+    }
+    for (let i = f; i < n; i++) if (!this.have.has(i)) return i;
+    for (let i = f - 1; i >= 0; i--) if (!this.have.has(i)) return i;
     return -1;
   }
 

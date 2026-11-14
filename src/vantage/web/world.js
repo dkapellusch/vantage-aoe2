@@ -1545,6 +1545,21 @@ export async function refreshTerrain(t, initial = false) {
   } finally { terrainPending = false; }
 }
 
+/** Ask for the textures of every terrain in the snapshot of time `t` (the end of
+ * the match: what gets built and worn over it), so none is first met in a seek. */
+export async function preloadTerrain(t) {
+  if (!S.map || !S.map._terrain || !S.map.terrain_textures) return;
+  const map = S.map, r = await fetchTiles('terrain', t).catch(() => null);
+  if (!r || S.map !== map) return;
+  const n = map._terrain.length, ids = new Set();
+  for (let i = 0; i < r.bytes.length; i++) if (i < n || r.bytes[i] !== 255) ids.add(r.bytes[i]);
+  for (const i of ids) {
+    const tex = map.terrain_textures[i];
+    terrainPattern(i);
+    terrainMask(tex && tex[2]);
+  }
+}
+
 function repaintTiles(changed) {
   const hw = TERRAIN_TW / 2, hh = TERRAIN_TH / 2, oy = mapW * TERRAIN_TH / 2;
   const rects = [];
@@ -1822,6 +1837,22 @@ function fogIso() {
 
 // -- textured terrain ---------------------------------------------------------------
 
+// A terrain picture, decoded off the main thread where the browser can
+// (createImageBitmap): an <img> is decoded where it is first used, and that was
+// inside a frame (its mean colour is read at once, then it is uploaded as a
+// texture): 20-40 ms on a laptop each time a terrain came into view for the
+// first time (a farm, a road), and a seek waited for it too.
+function loadPicture(url, loaded, failed) {
+  if (typeof createImageBitmap !== 'function') {
+    const im = new Image();
+    trackedImage(im, url, () => loaded(im), failed);
+    return;
+  }
+  // Not premultiplied: the terrain compositor uploads it as the <img> was.
+  trackAsset(url, () => requestResource(url, {}, async (r) => createImageBitmap(await r.blob(), { premultiplyAlpha: 'none' })))
+    .then(loaded, failed);
+}
+
 const terrainPatterns = new Map();
 function terrainPattern(i) {
   if (terrainPatterns.has(i)) return terrainPatterns.get(i);
@@ -1829,8 +1860,7 @@ function terrainPattern(i) {
   const tex = S.map && S.map.terrain_textures && S.map.terrain_textures[i];
   const flat = (S.map && S.map.terrain_colors && S.map.terrain_colors[i]) || '#3c5a28';
   if (!tex || !tex[0]) { terrainPatterns.set(i, flat); return flat; }
-  const im = new Image();
-  trackedImage(im, withAssetVersion(`/terrain/${tex[0]}.png`), () => {
+  loadPicture(withAssetVersion(`/terrain/${tex[0]}.png`), (im) => {
     const p = ctx.createPattern(im, 'repeat');
     p._w = im.width;
     p._img = im; // the GPU chunk compositor's texture
@@ -1848,8 +1878,7 @@ function terrainMask(name) {
   if (!name) return false;
   if (terrainMasks.has(name)) return terrainMasks.get(name);
   terrainMasks.set(name, null);
-  const im = new Image();
-  trackedImage(im, withAssetVersion(`/terrain-mask/${name}.png`), () => {
+  loadPicture(withAssetVersion(`/terrain-mask/${name}.png`), (im) => {
     const c = document.createElement('canvas');
     c.width = im.width; c.height = im.height;
     const g = c.getContext('2d');

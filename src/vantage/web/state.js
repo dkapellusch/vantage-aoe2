@@ -488,21 +488,29 @@ function viewJson(path, signal, t, opts) {
 /**
  * Keep the whole match in this browser (its pack: timeline-pack.js), so seeks,
  * scrubbing and playback stop asking the server for views. Only a finished
- * match has one; `t` is where to start downloading from. Safe to call again.
+ * match has one; `t` is where to start downloading from. Safe to call again
+ * (every frame): true the first time it starts.
  */
-let packStarted = false;
+let packStarted = false, packTries = 0, packTriedAt = 0;
 export function startPack(t) {
-  if (packStarted || settings.localTimeline === false) return;
+  if (settings.localTimeline === false) return false;
+  if (packStarted) {
+    // The index did not arrive (the store is still off a while later): ask
+    // again, a few times. A server without packs answers each time the same.
+    if (packStatus.state !== 'off' || packTries >= 3 || performance.now() - packTriedAt < 10000) return false;
+  }
   if (!workerTried) startViewWorker();
-  if (!viewWorker) return;
-  packStarted = true;
+  if (!viewWorker) return false;
+  const first = !packStarted;
+  packStarted = true; packTries++; packTriedAt = performance.now();
   viewWorker.postMessage({ pack: viewRequestUrl('/api/pack', location.href), t });
+  return first;
 }
 /** Another match was opened in this page: its views are not the pack's. The
  * worker is replaced (requests under way are rejected and asked again). */
 export function resetPack() {
   if (!packStarted) return;
-  packStarted = false;
+  packStarted = false; packTries = 0;
   Object.assign(packStatus, { state: 'off', chunks: 0, have: 0, bytes: 0, key: null });
   if (viewWorker) viewWorker.terminate();
   viewWorker = null; workerTried = false;

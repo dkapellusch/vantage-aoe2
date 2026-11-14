@@ -298,7 +298,7 @@ async function applySession(desc) {
   const tl = desc.timeline;
   if (desc.generation !== generation) {
     generation = desc.generation;
-    resetPack();
+    resetPack(); S.complete = false; // the new match's pack is asked for once it is complete
     clearViewCache();
     resetViews();
     S.events = []; S.eventsTo = -1; S.series = null; S.summary = null; S.selection = new Set();
@@ -622,6 +622,9 @@ const SKIP_MS = 30000;
 let skipsAt = null, skipsHeld = -1;
 function primeSkips() {
   if (S.scrubbing || !S.view || (packStatus.state !== 'ready' && packStatus.state !== 'complete')) return;
+  // Not in fast playback: look-ahead already reaches half a skip, and the targets
+  // would be renewed (two views, their strips) several times a second.
+  if (S.playing && Math.abs(SPEEDS[S.speedIndex] || 1) > 2) return;
   // Again once the playhead has moved on, or when more of the pack has arrived
   // and a landing place was not in it before.
   const moved = skipsAt == null || Math.abs(S.t - skipsAt) >= 5000;
@@ -911,7 +914,9 @@ function tick(now) {
   measureProduction(now);
   // A finished match is kept whole in this browser once the first picture is up
   // (startPack does it once; a growing match has no pack yet).
-  if (S.complete && S.end > 0 && !initialLoad.pending) startPack(S.t);
+  // The textures of terrain that comes later (farms, roads) are asked for now too:
+  // each was a wait the first time a seek or the camera met it.
+  if (S.complete && S.end > 0 && !initialLoad.pending && startPack(S.t)) world.preloadTerrain(S.end);
   const tv = performance.now();
   updateView();
   primeSkips();

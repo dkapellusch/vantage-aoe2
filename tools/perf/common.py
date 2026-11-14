@@ -5,6 +5,7 @@ The page-side half is probe.js, injected before the viewer's own scripts.
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import json
 import mimetypes
@@ -303,10 +304,12 @@ class Viewer:
             )
         except Exception:
             return  # no pack here
-        self.page.wait_for_function(
-            "() => ['complete', 'stopped'].includes(window.vantage.packStatus.state)",
-            timeout=seconds * 1000,
-        )
+        # A long match may not be whole in that time: measured with what arrived (`views`).
+        with contextlib.suppress(Exception):
+            self.page.wait_for_function(
+                "() => ['complete', 'stopped'].includes(window.vantage.packStatus.state)",
+                timeout=seconds * 1000,
+            )
 
     def view_stats(self):
         """View requests so far: how many, how many answered from the pack, their mean ms,
