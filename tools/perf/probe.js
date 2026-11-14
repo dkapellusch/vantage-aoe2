@@ -26,6 +26,7 @@
     fn(now);
     const b = performance.now();
     if (!isTick) return;
+    if (P.motionWatch) { try { P.motionWatch(); } catch (e) { P.errors.push(String(e)); P.motionWatch = null; } }
     // What a slow frame was made of: the viewer's own stage timers and counters.
     if (before && b - a > 40 && P.slow.length < 20) {
       const d = w0.drawTimes, g = w0.gpuSpriteStats(), [d0, g0] = before, part = {};
@@ -128,6 +129,61 @@
     }
   };
   P.start = () => { P.reset(); P.on = true; };
+  // Do units move as the game moved them? After every frame, the rows the world
+  // draws (the page's own RowInterpolator on the same view, target and clock) are
+  // compared with the frame before, unit by unit:
+  //  - a *teleport*: more than a tile in one frame, faster than 6 tiles per game
+  //    second (nothing walks at half that); over 6 tiles is counted apart (the
+  //    interpolator does not slide those: garrisons, transports);
+  //  - *running in place*: a unit in its moving pose that does not move while the
+  //    clock runs, for 400 game ms or more at a stretch;
+  //  - frames drawn with no keyframe to move towards, or from a keyframe more than
+  //    2 s behind the clock (everything stands still, then jumps).
+  // The game itself has a few of each (blocked units, ungarrisoning): compare
+  // speeds and builds, per game minute.
+  P.motion = async () => {
+    const app = [...document.querySelectorAll('script[src]')].map((s) => s.src).find((u) => /\/app\.js/.test(u));
+    const { RowInterpolator } = await import(new URL('./playback.js', app).href);
+    const interp = new RowInterpolator(null);
+    const last = new Map(), stuck = new Map();
+    const m = P.motionStats = { frames: 0, game_ms: 0, unit_frames: 0, teleports: 0, jumps_over_6: 0, in_place_episodes: 0, in_place_unit_ms: 0, moving_unit_ms: 0, no_target_frames: 0, stale_frames: 0, max_lag_ms: 0, worst: [] };
+    let prevT = null;
+    P.motionWatch = () => {
+      const S = window.vantage.S;
+      if (!S.view || !S.playing) { prevT = null; return; }
+      const t = S.t, dt = prevT == null ? 0 : t - prevT;
+      prevT = t;
+      if (dt <= 0 || dt > 5000) { last.clear(); stuck.clear(); return; } // held, or a seek
+      m.frames++; m.game_ms += dt;
+      const lag = t - S.view.time;
+      if (lag > m.max_lag_ms) m.max_lag_ms = Math.round(lag);
+      if (lag > 2000) m.stale_frames++;
+      if (!S.nextView || S.nextView.time <= t) m.no_target_frames++;
+      const rows = interp.at(S.view, S.nextView, t);
+      for (const r of rows) {
+        if (r[0] < 0 || r[1] <= 0 || (r[6] & 1)) continue;
+        const id = r[0], was = last.get(id);
+        if (was) {
+          m.unit_frames++;
+          const d = Math.hypot(r[3] - was[0], r[4] - was[1]);
+          if (d > 6) m.jumps_over_6++;
+          else if (d > 1 && d / (dt / 1000) > 6) { m.teleports++; if (m.worst.length < 8) m.worst.push({ id, tiles: +d.toFixed(2), game_ms: Math.round(dt), t: Math.round(t), lag: Math.round(lag) }); }
+          if (r[9] === 1) {
+            m.moving_unit_ms += dt;
+            if (d < 0.004) {
+              const s = (stuck.get(id) || 0) + dt;
+              if (s >= 400 && s - dt < 400) m.in_place_episodes++;
+              if (s >= 400) m.in_place_unit_ms += s - dt < 400 ? s : dt;
+              stuck.set(id, s);
+            } else stuck.delete(id);
+          } else stuck.delete(id);
+          was[0] = r[3]; was[1] = r[4];
+        } else last.set(id, [r[3], r[4]]);
+      }
+    };
+    return true;
+  };
+
   P.collect = () => {
     const v = window.vantage, w = v.world, s = w.spriteStats;
     return {

@@ -80,6 +80,31 @@ def playback(pw, args, hud, where, zoom, speed):
     return v, r
 
 
+def motion(pw, args, hud, where, zoom, speed):
+    """Do units move as the game moved them at this speed? (probe.js P.motion): teleports,
+    running in place and frames drawn without a keyframe to move towards, per game minute."""
+    lead = min(60000, int(args.seconds * 1000 * speed * 1.7 / 2))
+    v = open_at(pw, args, hud, where, zoom, lead)
+    v.speed(speed)
+    v.ev("() => window.__perf.motion()")
+    v.ev("() => { window.vantage.S.playing = true; }")
+    v.page.wait_for_timeout(args.seconds * 1000)
+    m = v.ev("() => { window.__perf.motionWatch = null; return window.__perf.motionStats; }")
+    minutes = max(1e-9, m["game_ms"] / 60000)
+    out = {
+        **m,
+        "game_minutes": round(minutes, 2),
+        "teleports_per_game_min": round(m["teleports"] / minutes, 2),
+        "in_place_episodes_per_game_min": round(m["in_place_episodes"] / minutes, 2),
+        "in_place_pct_of_moving_time": round(
+            100 * m["in_place_unit_ms"] / max(1, m["moving_unit_ms"]), 2
+        ),
+        "no_target_pct": round(100 * m["no_target_frames"] / max(1, m["frames"]), 2),
+        "stale_pct": round(100 * m["stale_frames"] / max(1, m["frames"]), 2),
+    }
+    return v, out
+
+
 PAN_DRIVER = "([speed, radius]) => window.__perf.pan(speed, radius)"
 
 
@@ -416,6 +441,9 @@ SCENARIOS = {
     "playback": lambda pw, a, hud, where, zoom, **k: playback(
         pw, a, hud, where, zoom, k.get("speed", 1)
     ),
+    "motion": lambda pw, a, hud, where, zoom, **k: motion(
+        pw, a, hud, where, zoom, k.get("speed", 1)
+    ),
     "pan": pan_sweep,
     "pan_playing": lambda pw, a, hud, where, zoom, **k: pan_sweep(
         pw, a, hud, where, zoom, playing=True
@@ -485,7 +513,7 @@ def main():
                     for zoom in [float(z) for z in args.zooms.split(",")]:
                         variants = (
                             [{"speed": float(s)} for s in args.speeds.split(",")]
-                            if name == "playback"
+                            if name in ("playback", "motion")
                             else [{}]
                         )
                         for kw in variants:
@@ -525,7 +553,16 @@ def main():
                                 }
                                 doc["runs"].append(row)
                                 out_path.write_text(json.dumps(doc, indent=1))
-                                brief = r.get("work") or r.get("full_ms") or r.get("failed") or ""
+                                brief = (
+                                    r.get("work")
+                                    or r.get("full_ms")
+                                    or r.get("failed")
+                                    or {
+                                        k: v
+                                        for k, v in r.items()
+                                        if k.endswith(("_min", "_pct", "_time"))
+                                    }
+                                )
                                 print(
                                     name,
                                     hud,
