@@ -133,6 +133,7 @@ test('a second visit finds the chunks in Cache Storage; old packs make room', as
   assert.deepEqual(again.log, ['/api/pack']); // the index only
   assert.deepEqual(await b.view(24000), again.all[24]);
   // More packs than are kept: the one opened longest ago goes, chunks and all.
+  await new Promise((r) => setTimeout(r, 3)); // a later millisecond than that visit
   for (let i = 0; i < PACKS_KEPT; i++) {
     const s = new PackStore({ fetchImpl: fakeServer({ key: `other${i}`, views: 5 }).fetchImpl, cacheStorage });
     await s.start('http://x/api/pack'); await s.pump;

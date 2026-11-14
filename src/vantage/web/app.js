@@ -619,9 +619,12 @@ function resetViews(keepView = false) {
 // complete picture at once instead of waiting for strips. Renewed every 5 s of
 // game time, not at all while the time bar is dragged.
 const SKIP_MS = 30000;
-let skipsAt = null, skipsHeld = -1;
+let skipsAt = null, skipsHeld = -1, seekAt = -1e9;
 function primeSkips() {
   if (S.scrubbing || !S.view || (packStatus.state !== 'ready' && packStatus.state !== 'complete')) return;
+  // Not right after a seek: the worker is rebuilding that moment (its view, forest
+  // and terrain), and two more chunks to open would be ahead of them in its queue.
+  if (performance.now() - seekAt < 500) return;
   // Not in fast playback: look-ahead already reaches half a skip, and the targets
   // would be renewed (two views, their strips) several times a second.
   if (S.playing && Math.abs(SPEEDS[S.speedIndex] || 1) > 2) return;
@@ -1413,6 +1416,7 @@ export function seek(time, force = false) {
   S.jump = { from, to: wait ? target : S.t, at: performance.now(), wait };
   S.followLive = false;
   resetViews(true);
+  seekAt = performance.now();
   packFocus(S.t);
   speedMeter.t = null;
   // Seeking (e.g. "click to jump back") closes the end-game screen.
