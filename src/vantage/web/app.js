@@ -17,7 +17,7 @@ import { fidelityNotice } from './recording-fidelity.js';
 import * as audio from './audio.js';
 import * as layout from './layout.js';
 import { patchHtml } from './dom.js';
-import { shuttleSpeed, eventIndexAfter, replayBufferWait, matchEnded } from './playback.js';
+import { shuttleSpeed, eventIndexAfter, replayBufferWait, matchEnded, followingView, chainedView, playableUntil, pacePlayback, viewGridTime } from './playback.js';
 import { GOTO_BUILDINGS, applyGame } from './games.js';
 import { chooseFight, FightSelection, highlightParticipants } from './autocast-focus.js';
 import { installPanelResizing } from './panel-resize.js';
@@ -613,14 +613,22 @@ function resetViews(keepView = false) {
 
 // Use a shared request grid so adjacent keyframes reuse the same look-ahead
 // requests, even when their actual times are a few milliseconds off the grid.
+// The grid is the last millisecond of each second (playback.js viewGridTime):
+// the timeline keeps at most one keyframe a second, and that request answers
+// with exactly it. Offset 1 is the view's own second; `far` keyframes follow.
 function viewRequests(v) {
   const rate = S.playing ? SPEEDS[S.speedIndex] || 1 : 1;
   const sp = Math.abs(rate);
   const far = !isLive() && sp >= 8 ? 16 : sp >= 4 ? 5 : 4;
-  const base = Math.floor(v.time / 1000) * 1000;
-  const offsets = Array.from({ length: rate < 0 ? 3 : far }, (_, i) => i + 1);
-  if (rate < 0) for (let k = 1; k <= far; k++) offsets.push(-k);
-  return [...new Set(offsets.map((k) => Math.max(S.start, Math.min(S.end, base + k * 1000))))];
+  const offsets = Array.from({ length: rate < 0 ? 3 : far }, (_, i) => i + 2);
+  if (rate < 0) for (let k = 0; k < far; k++) offsets.push(-k);
+  return [...new Set(offsets.map((k) => Math.max(S.start, Math.min(S.end, viewGridTime(v.time, k)))))];
+}
+
+// The keyframe after `v` among the answered look-ahead requests (playback.js
+// followingView): never one beyond a request still under way.
+function follow(v) {
+  return followingView(v, cachedView, { start: S.start, end: S.end, steps: 20 });
 }
 
 function primeViews(v, epoch) {
@@ -630,7 +638,14 @@ function primeViews(v, epoch) {
       // A refetch of a view that was not final (its track was still filling)
       // replaces the one held for the same time.
       const newer = (held) => held && held !== a && held.time === a.time && held.final === false;
-      if (S.view === v && (!S.nextView || a.time < S.nextView.time || newer(S.nextView))) S.nextView = a;
+      // The next view is the keyframe right after this one: a later one that
+      // answered first waits for the requests before it (it would interpolate
+      // across a keyframe not yet in, and skip what happened there).
+      if (S.view === v) {
+        const f = follow(v).next;
+        if (f && (!S.nextView || f.time < S.nextView.time || newer(S.nextView))) S.nextView = f;
+        else if (newer(S.nextView)) S.nextView = a;
+      }
       if (a.time > S.t && !S.upcoming.includes(a)) {
         S.upcoming = [...S.upcoming.filter((u) => u.time > S.t && u.time !== a.time), a].sort((x, y) => x.time - y.time);
         S.aheadView = S.upcoming.at(-1);
@@ -665,10 +680,11 @@ async function updateView() {
   pendingView = (async () => {
     // Crossing into the next view: show that very view, the one graphics
     // buffering checked (a refetch by time can resolve to another keyframe).
-    const n = S.nextView;
-    const cached = cachedViewAt(S.t);
-    const v = n && S.view && n.time > S.view.time && S.t >= n.time && S.t < n.time + 1500
-      ? n : cached && S.t - cached.time < 3000 ? cached : await fetchView(viewRequestTime(S.t));
+    // A frame can cross more than one keyframe (a slow frame at 8x): follow the
+    // chain to the one the clock is in.
+    const chained = chainedView(S.t, S.view, S.nextView, follow);
+    const cached = chained ? null : cachedViewAt(S.t);
+    const v = chained || (cached && S.t - cached.time < 3000 ? cached : await fetchView(viewRequestTime(S.t)));
     if (epoch !== viewEpoch) return;
     if (v && v.time != null) {
       S.view = v;
@@ -685,11 +701,7 @@ async function updateView() {
       }
       // Install the next cached target in this same frame. Awaiting it here
       // left one or more frames with no interpolation at every boundary.
-      S.nextView = null;
-      for (const at of viewRequests(v)) {
-        const a = cachedView(at);
-        if (a && a.time > v.time && (!S.nextView || a.time < S.nextView.time)) S.nextView = a;
-      }
+      S.nextView = follow(v).next || null;
       // Normal speed and live playback need look-ahead too, so the following
       // target and its graphics arrive before this interpolation finishes.
       // Not while the scrub bar is dragged: only the released position matters.
@@ -804,7 +816,7 @@ function tick(now) {
   perfTick(now, dt);
   if (fpsAcc > 0.5) { S.fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
   const live = isLive();
-  S.bufferWait = 0; S.gfxWait = false;
+  S.bufferWait = 0; S.gfxWait = false; S.dataWait = false;
   // A finished match sends nothing more: its last frame is the end, with no 0.4 s hold behind it.
   const over = live && matchEnded(source());
   if (live && S.followLive) {
@@ -821,7 +833,21 @@ function tick(now) {
   } else if (S.playing) {
     const q = S.highlight.seq;
     const prev = S.t;
-    S.t += dt * 1000 * (q && q.rate != null ? q.rate : SPEEDS[S.speedIndex] * gameSpeed());
+    const rate = q && q.rate != null ? q.rate : SPEEDS[S.speedIndex] * gameSpeed();
+    let step = dt * 1000 * rate;
+    // Data buffering (a recording played forwards): the clock runs only as far as
+    // the keyframes in hand reach, and slows as they run short, so units are
+    // never drawn from one keyframe while the clock runs on (they walked on the
+    // spot, then jumped when the next view landed) and the views are not chased
+    // by a clock that outruns them. Through a slow link fast playback settles
+    // at the pace the views arrive.
+    if (!live && step > 0) {
+      const horizon = S.view && S.t >= S.view.time ? playableUntil(S.view, S.nextView, follow) : -Infinity;
+      const paced = pacePlayback(S.t, step, rate, horizon);
+      S.dataWait = paced < step;
+      step = paced;
+    }
+    S.t += step;
     // Live, playback holds 0.4 s behind the newest data (as following the live
     // edge does) so there is a next view to interpolate towards; never backwards.
     const edge = live && !over ? Math.max(S.start, S.end - 400) : S.end;

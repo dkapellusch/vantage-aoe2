@@ -46,6 +46,92 @@ export class ViewCache {
   }
 }
 
+// -- keyframes in order, and a clock that never runs past them ---------------------
+// Views are asked for on a shared grid (app.js viewRequests): the request at t
+// answers with the keyframe at or before t. The timeline keeps at most one
+// keyframe in each second of game time (timeline.py: the first frame at or after
+// the next whole second), so a request at the last millisecond of a second
+// answers with that second's keyframe, or an earlier one if it has none: no
+// keyframe falls between two grid requests unseen. Interpolation needs the view
+// the clock is in and the very next keyframe; a later one with a request still
+// under way before it would interpolate across a keyframe that is not in.
+
+/** The grid request `k` seconds on from the second of `time` (k = 1: its own). */
+export function viewGridTime(time, k) {
+  return Math.floor(time / 1000) * 1000 + k * 1000 - 1;
+}
+
+/**
+ * The keyframe right after `view`, from the answered grid requests (`peek(t)`: the
+ * cached answer to the request at t, or null): { next } when found; { end: true }
+ * when the recording has no later keyframe (the request at `end` answered with
+ * `view` or one before it); {} while a request before the next keyframe is still
+ * unanswered. `steps` bounds how many grid seconds are searched.
+ */
+export function followingView(view, peek, { start = 0, end = Infinity, steps = 6 } = {}) {
+  if (!view) return {};
+  for (let k = 2; k <= steps + 1; k++) {
+    const at = Math.max(start, Math.min(end, viewGridTime(view.time, k)));
+    const a = peek(at);
+    if (!a) return {};
+    if (a.time > view.time) return { next: a };
+    if (at >= end) return { end: true };
+  }
+  return {};
+}
+
+/**
+ * How far the clock may run on the keyframes in hand, in game ms: to the last of
+ * the chain `next`, its following view, that one's... (`follow(v)` is
+ * followingView of v), Infinity once the chain reaches the recording's end.
+ * Without a next view the clock stays at the view (units drawn from one keyframe
+ * only hold still: the clock must not run on while their walk animates).
+ */
+export function playableUntil(view, next, follow, links = 8) {
+  if (!view) return -Infinity;
+  if (!next || next.time <= view.time) return follow(view).end ? Infinity : view.time;
+  let last = next;
+  for (let i = 0; i < links; i++) {
+    const f = follow(last);
+    if (f.end) return Infinity;
+    if (!f.next) break;
+    last = f.next;
+  }
+  return last.time;
+}
+
+/**
+ * The keyframe the clock `t` is in once it has passed `next`, following the chain
+ * (a slow frame at 8x crosses more than one keyframe), or null when `t` has not
+ * reached `next` or lies more than `maxLag` ms past the last keyframe in hand.
+ */
+export function chainedView(t, view, next, follow, maxLag = 1500) {
+  if (!view || !next || next.time <= view.time || t < next.time) return null;
+  let v = next;
+  for (let f = follow(v).next; f && f.time <= t; f = follow(v).next) v = f;
+  return t - v.time < maxLag ? v : null;
+}
+
+/** Wall ms of data ahead of the clock below which playback slows down (pacePlayback). */
+export const PACE_LEAD_MS = 300;
+
+/**
+ * The game ms the clock advances this frame: `step` (rate × frame time) when the
+ * keyframes in hand reach well ahead, less as they run short, never past
+ * `horizon` (playableUntil). Slowing in proportion to the lead makes playback
+ * settle at the pace the views arrive, smoothly, instead of running up to the
+ * last keyframe and stopping there until the next one lands.
+ */
+export function pacePlayback(t, step, rate, horizon, leadMs = PACE_LEAD_MS) {
+  if (!(step > 0)) return step;
+  const lead = horizon - t;
+  if (!(lead > 0)) return 0;
+  if (lead === Infinity) return step;
+  const want = Math.abs(rate) * leadMs;
+  const scaled = want > 0 && lead < want ? step * (lead / want) : step;
+  return Math.min(scaled, lead);
+}
+
 const ACT_MOVING = 1; // world.py ACT_MOVING (row column 9)
 // Slower than this (tiles per second) a unit is nudged or shuffling, not walking:
 // it keeps the game's own facing. Measured on game2.vrec at the game's own
