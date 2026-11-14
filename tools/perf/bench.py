@@ -49,6 +49,11 @@ def open_at(pw, args, hud, where, zoom, lead_ms=0):
     v.seek(max(args.spots_data["start"], t - lead_ms))
     v.camera(x, y, zoom)
     v.settle()
+    if getattr(args, "pack_wait", 0):
+        v.pack_wait(args.pack_wait)
+        # and a moment at rest, as a viewer has before the next click: what the
+        # page fetches ahead for it (in any build) has started
+        v.page.wait_for_timeout(1500)
     v.t, v.x, v.y = t, x, y
     return v
 
@@ -458,6 +463,13 @@ def main():
     ap.add_argument("--memory-seconds", type=float, default=600)
     ap.add_argument("--warmup", type=float, default=4)
     ap.add_argument("--repeat", type=int, default=1)
+    ap.add_argument(
+        "--pack-wait",
+        type=float,
+        default=0,
+        help="wait up to this many seconds for the match's pack to be held by the browser "
+        "before measuring (a match opened a while ago, or opened before): 0 measures at once",
+    )
     args = ap.parse_args()
     args.spots_data = load_spots(args.spots)
     out_path = Path(args.out)
@@ -487,6 +499,7 @@ def main():
                                     if link and "link" not in r:
                                         r["link"] = link
                                     r["renderer"] = v.renderer()
+                                    r["views"] = v.view_stats()
                                     r["load_s"] = v.load_s
                                     r["page_errors"] = v.errors[:5]
                                 except Exception as e:

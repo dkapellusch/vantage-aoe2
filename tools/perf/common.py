@@ -292,6 +292,31 @@ class Viewer:
         """Wait for a complete picture where the camera and clock now are."""
         return self.ev("(timeout) => window.__perf.afterJump(null, 3, timeout)", timeout)
 
+    def pack_wait(self, seconds):
+        """Wait until the browser holds the match's pack (builds that have one, and
+        matches that have one: it is asked for once the first picture is up)."""
+        if not self.ev("() => !!window.vantage.packStatus"):
+            return
+        try:
+            self.page.wait_for_function(
+                "() => window.vantage.packStatus.state !== 'off'", timeout=20000
+            )
+        except Exception:
+            return  # no pack here
+        self.page.wait_for_function(
+            "() => ['complete', 'stopped'].includes(window.vantage.packStatus.state)",
+            timeout=seconds * 1000,
+        )
+
+    def view_stats(self):
+        """View requests so far: how many, how many answered from the pack, their mean ms,
+        and the pack's state."""
+        return self.ev(
+            "() => { const v = window.vantage, s = v.viewStats; return { requests: s.requests,"
+            " local: s.local || 0, mean_ms: s.requests ? +(s.ms / s.requests).toFixed(1) : null,"
+            " recent_ms: v.viewTimings.slice(-40), pack: v.packStatus || null }; }"
+        )
+
     def speed(self, x):
         self.ev("(i) => window.__perf.speed(i)", SPEEDS.index(x))
 
