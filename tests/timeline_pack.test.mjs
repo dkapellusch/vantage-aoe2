@@ -203,23 +203,31 @@ test('no pack (a growing match, an older server) leaves the store off; a missing
   assert.ok(broken.holds(0) && !broken.holds(10000));
 });
 
-test('beside a fast server the worker asks it for a view whose chunk is not open yet', async () => {
-  const { fetchImpl, all, log } = fakeServer();
-  const posts = [];
-  const handle = createHandler((m) => posts.push(m), fetchImpl, fakeCaches());
-  await handle({ id: 1, url: 'http://x/api/view?t=3000', t: 3000 }); // measured: far under QUICK_MS
-  assert.ok(QUICK_MS > 5);
-  await handle({ pack: 'http://x/api/pack', t: 0 });
-  await handle.store.pump;
-  posts.length = 0; log.length = 0;
-  await handle({ id: 2, url: 'http://x/api/view?t=12000', t: 12000 });
-  assert.deepEqual(posts.pop(), { id: 2, value: { time: 12000, net: true } }); // the server, and the chunk opens
-  await handle.store.open(1);
-  await handle({ id: 3, url: 'http://x/api/view?t=13000', t: 13000 });
-  assert.deepEqual(posts.pop(), { id: 3, value: all[13], local: true }); // open now: rebuilt here
-  await handle({ id: 4, url: 'http://x/api/trees?t=600', t: 600, tiles: 'trees' }); // tiles are always local
-  assert.equal(posts.pop().local, true);
-  assert.deepEqual(log, ['/api/view?t=12000']);
+test('beside a fast server the worker asks it, as without a pack; "always" uses the pack', async () => {
+  for (const always of [false, true]) {
+    const { fetchImpl, all, log } = fakeServer();
+    const posts = [];
+    const handle = createHandler((m) => posts.push(m), fetchImpl, fakeCaches());
+    await handle({ id: 1, url: 'http://x/api/view?t=3000', t: 3000 }); // measured: far under QUICK_MS
+    assert.ok(QUICK_MS > 5);
+    await handle({ pack: 'http://x/api/pack', t: 0, always });
+    await handle.store.pump;
+    posts.length = 0; log.length = 0;
+    await handle({ id: 2, url: 'http://x/api/view?t=12000', t: 12000 });
+    await handle({ id: 3, url: 'http://x/api/trees?t=600', t: 600, tiles: 'trees' });
+    if (always) {
+      assert.deepEqual(posts[0], { id: 2, value: all[12], local: true });
+      assert.equal(posts[1].local, true);
+      assert.deepEqual(log, []);
+    } else {
+      assert.deepEqual(posts[0], { id: 2, value: { time: 12000, net: true } });
+      assert.deepEqual(posts[1], { id: 3, value: { t: 5, bytes: new Uint8Array([9, 9]), kinds: [1] } });
+      assert.deepEqual(log, ['/api/view?t=12000', '/api/trees?t=600']);
+    }
+    // A skip target is only ever looked at locally.
+    await handle({ id: 4, url: 'http://x/api/view?t=20000', t: 20000, localOnly: true });
+    assert.deepEqual(posts[2], { id: 4, value: all[20], local: true });
+  }
 });
 
 // A server 30 ms away: every view of a held chunk is rebuilt locally.

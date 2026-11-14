@@ -146,7 +146,7 @@ export const DEFAULT_SETTINGS = {
   colorGrade: 'auto',           // the map's colour grade: auto (from its script) or a preset name
   colorGradeByGame: {},         // game id -> preset picked for that game (random-grade maps)
   waitForGraphics: true,        // hold playback a moment until new graphics are in (no pop-in)
-  localTimeline: true,          // keep a finished match in this browser: seeks and playback need no view requests
+  localTimeline: true,          // keep a finished match in this browser: seeks and playback need no view requests ('always': also beside a fast server, where asking is quicker)
   gpuSprites: true,             // draw sprites with WebGL2 in one batch (sprite-gl.js); off: Canvas 2D
   gpuTint: true,                // with gpuSprites: one uncoloured strip per sprite, coloured on the GPU (no UI)
   healthBars: 'damaged',        // damaged | always | never (the game's own Health Bars option)
@@ -506,7 +506,7 @@ export function startPack(t) {
   if (!viewWorker) return false;
   const first = !packStarted;
   packStarted = true; packTries++; packTriedAt = performance.now();
-  viewWorker.postMessage({ pack: viewRequestUrl('/api/pack', location.href), t });
+  viewWorker.postMessage({ pack: viewRequestUrl('/api/pack', location.href), t, always: settings.localTimeline === 'always' });
   return first;
 }
 /** Another match was opened in this page: its views are not the pack's. The

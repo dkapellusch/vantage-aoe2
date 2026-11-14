@@ -19,13 +19,14 @@ const bytesOf = (text) => {
   return out;
 };
 
-/** A view from the server in under this many ms beats opening a chunk for it. */
+/** With views from the server in under this many ms the pack is not used for them. */
 export const QUICK_MS = 25;
 
 /** The message handler, separate from the worker global so it can be tested. */
 export function createHandler(post, fetchImpl = (...a) => fetch(...a), cacheStorage = null) {
   const inflight = new Map();
   let netMs = Infinity; // how long a view takes from the server, smoothed
+  let quickMs = QUICK_MS;
   const store = new PackStore({ fetchImpl, cacheStorage, notify: (status) => post({ pack: status }) });
   const handle = async (msg) => {
     if (msg.abort != null) {
@@ -33,18 +34,23 @@ export function createHandler(post, fetchImpl = (...a) => fetch(...a), cacheStor
       if (c) { inflight.delete(msg.abort); c.abort(); }
       return;
     }
-    if (msg.pack != null) { await store.start(msg.pack, msg.t || 0); return; }
+    if (msg.pack != null) {
+      if (msg.always) quickMs = 0; // settings.localTimeline 'always': the pack even beside the server
+      await store.start(msg.pack, msg.t || 0);
+      return;
+    }
     if (msg.focus != null) { store.setFocus(msg.focus); return; }
     const ctl = new AbortController();
     inflight.set(msg.id, ctl);
     const live = () => inflight.get(msg.id) === ctl;
     try {
       let value, transfer, local = false;
-      // Beside the server a view arrives sooner than a chunk of a large match
-      // opens (~20 ms and more): then the server is asked, unless the chunk is
-      // open already, and the chunk is opened afterwards for the views that follow.
+      // Beside the server (a view in under QUICK_MS) asking is quicker than opening
+      // a chunk of a large match (~20 ms and more, with everything else this thread
+      // has to answer waiting behind it): views, forest and terrain are then asked
+      // for, exactly as without a pack. Through a hub the pack answers.
       const held = msg.t != null && store.holds(msg.t);
-      const quick = held && !msg.tiles && !msg.localOnly && netMs < QUICK_MS && !store.isOpen(msg.t);
+      const quick = held && !msg.localOnly && netMs < quickMs;
       if (held && !quick) {
         // A chunk that turns out to be gone (the browser cleared it) falls
         // through to the network.
@@ -62,8 +68,6 @@ export function createHandler(post, fetchImpl = (...a) => fetch(...a), cacheStor
       }
       if (msg.tiles && value) transfer = [value.bytes.buffer];
       if (live()) post(local ? { id: msg.id, value, local: true } : { id: msg.id, value }, transfer);
-      // Only now: parsing a chunk would hold this thread while the answer waits.
-      if (quick) store.open(store.chunkOf(msg.t)).catch(() => {});
     } catch (e) {
       if (live()) post({ id: msg.id, error: String((e && e.message) || e) });
     } finally {
