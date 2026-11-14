@@ -280,8 +280,11 @@ function prefetchUpcoming() {
   if (now - upcomingCheckAt > 100) {
     upcomingCheckAt = now;
     for (const n of [S.nextView, ...(S.upcoming || [])]) if (n && n.time > S.t && spriteRequests < 24) viewReady(n);
-    // Then where a skip would land (app.js primeSkips), once playback's own are asked for.
-    for (const n of S.skipViews || []) if (spriteRequests < 12) viewReady(n);
+    // Then where a skip would land (app.js primeSkips), once playback's own are asked
+    // for; only with the camera at rest (what a view draws on screen is worked out
+    // again for every step of a pan, and a pan has nothing to spare for it).
+    const m = cameraMotion;
+    if (Math.abs(m.vx) + Math.abs(m.vy) < 20 && Math.abs(m.vz) < 0.05) for (const n of S.skipViews || []) if (spriteRequests < 12) viewReady(n);
     prefetchAhead();
   }
 }
