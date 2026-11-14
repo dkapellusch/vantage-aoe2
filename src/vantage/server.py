@@ -23,6 +23,7 @@ import mimetypes
 import os
 import re
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -117,6 +118,10 @@ class Session:
         self.recordings_dir = recordings_dir
         self.timeline: Timeline | None = None
         self.tc_idle_villagers = 120
+        #: The `vantage pack` process started for the open recording (build_pack).
+        self._pack_builder: subprocess.Popen[bytes] | None = None
+        self._pack_built_at = -1e9
+        self._pack_lock = threading.Lock()
         self.mode = "idle"
         self.source: dict[str, Any] = {}
         self.error: str | None = None
@@ -170,6 +175,42 @@ class Session:
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(timeout=5)
         self._thread = None
+
+    def build_pack(self, tl: Timeline) -> bool:
+        """Have the view pack of the recording open here built, in a process of its
+        own at the lowest priority (`vantage pack`: it reads the recording again;
+        nothing is encoded where requests are answered). Only where
+        ``VANTAGE_PACK_BUILD`` is set (a hub sets it for its viewers; the desktop
+        app serves a pack only if one was built). True while a builder runs."""
+        if not os.environ.get("VANTAGE_PACK_BUILD") or tl is not self.timeline:
+            return False
+        path = self.source.get("path") if self.mode == "recording" else None
+        if not path or tl.pack_plan() is None or tl.pack_dir is None:
+            return False
+        with self._pack_lock:
+            proc = self._pack_builder
+            if proc is not None and proc.poll() is None:
+                return True
+            # One that ended without a pack (another builder held the folder's
+            # lock, or it failed) is tried again, a minute later at the earliest.
+            if time.monotonic() - self._pack_built_at < 60:
+                return False
+            self._pack_built_at = time.monotonic()
+            cmd = [sys.executable, "-m", "vantage", "pack", str(path)]
+            cmd += ["--tc-idle-villagers", str(self.tc_idle_villagers)]
+            if self.data.game_dir is not None:
+                cmd += ["--game-dir", str(self.data.game_dir)]
+            try:
+                self._pack_builder = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except OSError:
+                return False
+            return True
 
     def open_recording(self, path: str) -> None:
         p = Path(path).expanduser()
@@ -1041,8 +1082,13 @@ class App:
             body = tl.view_json(t) if tl else None
             return _json_body(h, body or b"{}")
         if path == "/api/pack":
-            # Every view of a finished match, for the browser to keep (viewpack.py).
-            return _json(h, (tl.pack_index() if tl else None) or {})
+            # Every view of a finished match, for the browser to keep (viewpack.py):
+            # its index once it has been built. Until then {} (views are asked
+            # for), with "building" while a builder is at work on it.
+            index = tl.pack_index() if tl else None
+            if index is not None:
+                return _json(h, index)
+            return _json(h, {"building": True} if tl and s.build_pack(tl) else {})
         if path == "/api/pack/chunk":
             index = tl.pack_index() if tl else None
             raw_i = q.get("i") or ""

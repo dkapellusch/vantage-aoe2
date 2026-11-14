@@ -113,9 +113,12 @@ All notable changes to Vantage are documented here. The format follows
   opened most recently). Skipping, scrubbing and fast playback then rebuild each moment locally
   instead of asking the server: through a hosted hub the first frame of the moment jumped to comes
   in about 15 ms instead of 115, and a moment already seen is complete in two frames. The viewer
-  also fetches ahead the graphics of where a 30 s skip either way would land. A match still being
-  played or read, an older server or hub, or a browser without workers or storage works as before.
-  *Settings → Renderer → Keep the match in this browser* turns it off.
+  also fetches ahead the graphics of where a 30 s skip either way would land. The pack a browser
+  downloads is built once per match, never while answering a request: by a hub when it imports a
+  match (or, for matches it already has, by a low-priority process the first time one is watched),
+  and for the desktop app with `vantage pack FILE.vrec`. Without a pack, with a match still being
+  played or read, an older server or hub, or a browser without workers or storage, everything
+  works as before. *Settings → Renderer → Keep the match in this browser* turns it off.
 - Terrain textures are decoded off the main thread and fetched ahead: the first farm or road to come
   into view no longer costs a 20-40 ms frame on a laptop, and a seek no longer waits for them.
 - **Trackpads.** Two fingers move the map and a pinch zooms at the pointer, following the fingers;

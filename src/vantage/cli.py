@@ -185,6 +185,21 @@ def build_parser(plugin: Any = None) -> argparse.ArgumentParser:
     i.add_argument("recording", type=Path)
     i.add_argument("--json", action="store_true")
 
+    k = ss.add_parser(
+        "pack",
+        help="build the view pack of a finished .vrec (what a browser keeps to seek "
+        "without asking); `serve` then offers it",
+    )
+    k.add_argument("recording", type=Path)
+    k.add_argument("--game-dir", type=Path, help="AoE2 DE install (default: auto-detect)")
+    k.add_argument("--tc-idle-villagers", type=int, default=120, help=argparse.SUPPRESS)
+    k.add_argument(
+        "--nice",
+        type=int,
+        default=19,
+        help="lower this process's priority by this much first (default: 19, the lowest)",
+    )
+
     d = ss.add_parser("doctor", help="check what Vantage can use on this machine")
     d.add_argument("--recordings-dir", type=Path, default=DEFAULT_RECORDINGS)
     d.add_argument("--game-dir", type=Path, help="AoE2 DE install (default: auto-detect)")
@@ -226,7 +241,38 @@ def run(args: argparse.Namespace, plugin: Any = None) -> int:
         return _register_handler(args)
     if cmd == "doctor":
         return _doctor(args)
+    if cmd == "pack":
+        return _pack(args)
     return 2
+
+
+def _pack(args: argparse.Namespace) -> int:
+    """Build a recording's view pack as `serve` would look for it: the same game
+    data and settings give the same views, and so the same key. 0 when the pack
+    is there afterwards, 3 when another builder holds the folder, 1 otherwise."""
+    import contextlib
+    import os
+
+    from vantage.frames import read_header
+    from vantage.gamedata import GameData
+    from vantage.timeline import load_recording
+
+    if args.nice > 0 and hasattr(os, "nice"):
+        with contextlib.suppress(OSError):
+            os.nice(args.nice)
+    header = read_header(args.recording)
+    game_dir = resolve_game_dir(args.game_dir, recording_only=False)
+    data = GameData(game_dir).with_mode(header.get("game_mode"))
+    tl = load_recording(str(args.recording), data, tc_idle_villagers=args.tc_idle_villagers)
+    if tl.pack_plan() is None:
+        print("no pack: the recording has no complete timeline", file=sys.stderr)
+        return 1
+    index = tl.build_pack()
+    if index is None:
+        print("no pack: another builder is at work in this cache, or it could not be written")
+        return 3
+    print(f"pack {index['key']}: {len(index['times'])} views")
+    return 0
 
 
 def parse_spectate_url(url: str) -> dict[str, str]:

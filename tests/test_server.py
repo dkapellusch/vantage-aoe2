@@ -999,30 +999,39 @@ def test_html_and_relative_modules_share_an_immutable_build_graph(
     assert _get(base + "/api/config")["viewer_build"] == build
 
 
-def test_a_finished_recording_serves_its_view_pack(
+def test_a_finished_recording_serves_its_view_pack_once_it_is_built(
     server: tuple[str, Session, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from vantage import viewpack
+    from vantage.cli import main
 
     base, session, path = server
     assert _get(base + "/api/pack") == {}  # nothing open: no pack
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr("vantage.cli.resolve_game_dir", lambda *a, **k: None)
     session.data = GameData(None)  # its cache folder under tmp_path
     assert _post(base + "/api/open", {"path": str(path)}) == {"ok": True}
     session._thread.join(5)  # type: ignore[union-attr]
+    # Nothing is encoded to answer a request: no pack, and no chunk, until it is built.
+    assert _get(base + "/api/pack") == {}
+    assert _raw(base + "/api/pack/chunk?i=0&k=x")[0] == 404
+    packs = tmp_path / "cache" / "vantage" / "packs"
+    assert not packs.exists()
+    # `vantage pack` (another process, in real use) reads the recording itself and
+    # arrives at the same key; the server then offers what it wrote.
+    assert main(["pack", str(path), "--nice", "0"]) == 0
     index = _get(base + "/api/pack")
     assert index["v"] == viewpack.VERSION and index["chunk_views"] == 30
     assert index["times"] == [0, 1000, 2000, 3000, 4000, 5000, 6000]
     status, headers, body = _raw(base + f"/api/pack/chunk?i=0&k={index['key']}")
     assert status == 200 and headers["Content-Type"] == "application/octet-stream"
     assert "immutable" in headers["Cache-Control"] and headers.get("Content-Encoding") is None
+    assert (packs / index["key"] / "0.gz").read_bytes() == body
     views, trees, _terrain = viewpack.decode_chunk(body)
     assert [v["time"] for v in views] == index["times"] and trees
     for v in views:
         want = _get(base + f"/api/view?t={v['time']}")
         assert viewpack._equal(v, want)
-    # Kept in the cache folder for the next run.
-    assert (tmp_path / "cache" / "vantage" / "packs" / index["key"] / "0.gz").read_bytes() == body
     # Another pack's key, a chunk past the end or no number: not found.
     for query in (
         "i=0&k=other",
@@ -1031,3 +1040,39 @@ def test_a_finished_recording_serves_its_view_pack(
         f"i=x&k={index['key']}",
     ):
         assert _raw(base + "/api/pack/chunk?" + query)[0] == 404
+
+
+def test_where_asked_to_the_server_starts_a_builder_process_for_a_missing_pack(
+    server: tuple[str, Session, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    base, session, path = server
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    session.data = GameData(None)
+    session.tc_idle_villagers = 77
+    assert _post(base + "/api/open", {"path": str(path)}) == {"ok": True}
+    session._thread.join(5)  # type: ignore[union-attr]
+    started: list[list[str]] = []
+
+    class Running:
+        def __init__(self, cmd: list[str], **kw: Any) -> None:
+            started.append(cmd)
+            self.code: int | None = None
+
+        def poll(self) -> int | None:
+            return self.code
+
+    monkeypatch.setattr(subprocess, "Popen", Running)
+    assert _get(base + "/api/pack") == {} and not started  # the desktop app: not asked to
+    monkeypatch.setenv("VANTAGE_PACK_BUILD", "1")
+    assert _get(base + "/api/pack") == {"building": True}
+    assert _get(base + "/api/pack") == {"building": True}  # the same builder
+    assert len(started) == 1
+    assert started[0][1:4] == ["-m", "vantage", "pack"] and started[0][4] == str(path)
+    assert started[0][5:7] == ["--tc-idle-villagers", "77"]
+    # It ended without a pack (the folder was another builder's): not again at once.
+    session._pack_builder.code = 3  # type: ignore[union-attr]
+    assert _get(base + "/api/pack") == {} and len(started) == 1
+    session._pack_built_at -= 61
+    assert _get(base + "/api/pack") == {"building": True} and len(started) == 2

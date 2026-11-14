@@ -35,20 +35,22 @@ import contextlib
 import gc
 import hashlib
 import json
+import os
+import shutil
 import threading
 import time as _time
 import zlib
 from array import array
 from bisect import bisect_left, bisect_right
 from collections import OrderedDict, defaultdict, deque
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from vantage import viewpack
 from vantage import world as W
-from vantage.assetcache import SingleFlight, atomic_write
+from vantage.assetcache import atomic_write
 from vantage.building_activity import BuildingHistory
 from vantage.combat_review import PressureTracker, PressureWorker, military_review
 from vantage.frames import Frame
@@ -423,10 +425,11 @@ class Timeline:
         self._view_cache: OrderedDict[tuple[int, bool], bytes] = OrderedDict()
         self._decoded_cache: OrderedDict[int, dict[str, Any]] = OrderedDict()
         self._cache_lock = threading.Lock()
-        #: The view pack of a complete timeline (:meth:`pack_index`): its index and
-        #: the chunks encoded so far.
-        self._pack: tuple[dict[str, Any], dict[int, bytes]] | None = None
-        self._pack_flight: SingleFlight[bytes] = SingleFlight()
+        #: The view pack of a complete timeline: its plan (:meth:`pack_plan`), whether
+        #: it is built (:meth:`pack_index`), and its chunks when built in memory.
+        self._pack_plan: dict[str, Any] | None = None
+        self._pack_ready = False
+        self._pack_chunks: dict[int, bytes] = {}
         #: Views per chunk of the pack; None picks it from the size of the views.
         self.pack_chunk_views: int | None = None
         #: Where encoded chunks are kept between runs, or None for memory only.
@@ -2082,18 +2085,21 @@ class Timeline:
 
     # -- the view pack ---------------------------------------------------------
     # Every view of a finished match in a few MB (viewpack.py), for the browser to
-    # keep: a seek is then rebuilt locally instead of asked for.
+    # keep: a seek is then rebuilt locally instead of asked for. Encoding one is
+    # work (77 s for a 77-minute 4v4), so it is never done while answering a
+    # request: a pack is *built* (:meth:`build_pack`: `vantage pack`, the hub's
+    # import job) and *served* only once it is whole.
 
-    def pack_index(self) -> dict[str, Any] | None:
-        """What the pack holds: its key (it names the content: another recording,
-        or the same one read by another build, has another key), every keyframe's
-        time and how many views a chunk has. None until the timeline is complete:
-        a growing match is served view by view."""
+    def pack_plan(self) -> dict[str, Any] | None:
+        """What the pack of this timeline holds: its key (it names the content:
+        another recording, or the same one read by another build, has another
+        key), every keyframe's time and how many views a chunk has. None until
+        the timeline is complete: a growing match is served view by view."""
         if not self.complete or not self.keyframes:
             return None
         with self._cache_lock:
-            if self._pack is not None:
-                return self._pack[0]
+            if self._pack_plan is not None:
+                return self._pack_plan
         keyframes = self.keyframes
         per_chunk = self.pack_chunk_views or viewpack.chunk_views(
             sum(len(k.blob) for k in keyframes) / len(keyframes)
@@ -2110,62 +2116,112 @@ class Timeline:
             digest.update(b"t %d %d\n" % (tr[0], zlib.crc32(tr[1])))
         for te in self.terrain:
             digest.update(b"g %d %d\n" % (te[0], zlib.crc32(te[1])))
-        index = {
+        plan = {
             "v": viewpack.VERSION,
             "key": digest.hexdigest()[:20],
             "chunk_views": per_chunk,
             "times": [k.time for k in keyframes],
         }
         with self._cache_lock:
-            if self._pack is None:
-                self._pack = (index, {})
-            return self._pack[0]
+            if self._pack_plan is None:
+                self._pack_plan = plan
+            return self._pack_plan
+
+    def _pack_folder(self, plan: dict[str, Any]) -> Path | None:
+        return self.pack_dir / plan["key"] if self.pack_dir is not None else None
+
+    def pack_index(self) -> dict[str, Any] | None:
+        """The pack's index (:meth:`pack_plan`) once the pack has been built and is
+        whole, in this process's memory or on disk; else None (ask for views)."""
+        plan = self.pack_plan()
+        if plan is None:
+            return None
+        if self._pack_ready:
+            return plan
+        folder = self._pack_folder(plan)
+        if folder is None or not (folder / PACK_DONE).exists():
+            return None
+        self._pack_ready = True
+        with contextlib.suppress(OSError):
+            (folder / PACK_DONE).touch()  # used now: the last to be pruned
+        return plan
 
     def pack_chunk(self, i: int) -> bytes | None:
-        """Chunk ``i`` of the pack (gzip bytes), encoded on first use and kept."""
-        index = self.pack_index()
-        if index is None:
+        """Chunk ``i`` of a built pack (gzip bytes). Never encodes."""
+        plan = self.pack_index()
+        if plan is None or i < 0 or i * plan["chunk_views"] >= len(plan["times"]):
             return None
-        times: list[int] = index["times"]
-        per_chunk: int = index["chunk_views"]
-        first = i * per_chunk
-        if i < 0 or first >= len(times):
-            return None
-        with self._cache_lock:
-            assert self._pack is not None
-            chunks: dict[int, bytes] = self._pack[1]
-            hit = chunks.get(i)
+        hit = self._pack_chunks.get(i)
         if hit is not None:
             return hit
-        path: Path | None = (
-            self.pack_dir / index["key"] / f"{i}.gz" if self.pack_dir is not None else None
+        folder = self._pack_folder(plan)
+        if folder is None:
+            return None
+        try:
+            return (folder / f"{i}.gz").read_bytes()
+        except OSError:
+            return None
+
+    def _encode_chunk(self, plan: dict[str, Any], i: int) -> bytes:
+        times: list[int] = plan["times"]
+        per_chunk: int = plan["chunk_views"]
+        first = i * per_chunk
+        last = min(len(times), first + per_chunk)
+        views = [json.loads(self.view_json(times[k]) or b"{}") for k in range(first, last)]
+        # Requests before the first keyframe answer with the first view, and with
+        # the tiles in force at the time asked for: chunk 0 reaches back.
+        lo = times[first] if i else -(1 << 62)
+        hi = times[last] if last < len(times) else 1 << 62
+        return viewpack.encode_chunk(
+            views,
+            [(t, zlib.decompress(b), kinds) for t, b, kinds in _in_force(self.trees, lo, hi)],
+            [(t, zlib.decompress(b), None) for t, b in _in_force(self.terrain, lo, hi)],
         )
 
-        def build() -> bytes:
-            if path is not None:
+    def build_pack(
+        self, progress: Callable[[int, int], None] | None = None
+    ) -> dict[str, Any] | None:
+        """Encode the whole pack: into :attr:`pack_dir` (chunks already there are
+        kept; the marker that makes it servable is written last, then older packs
+        are pruned to :data:`PACK_CACHE_BYTES`), or into memory without one.
+        Returns the index, or None when there is no pack to build (a growing
+        timeline) or another process is building in the same folder. Slow: run it
+        in a process of its own, not where requests are answered."""
+        plan = self.pack_plan()
+        if plan is None:
+            return None
+        if self._pack_ready or self.pack_index() is not None:
+            return plan
+        folder = self._pack_folder(plan)
+        n = -(-len(plan["times"]) // plan["chunk_views"])
+        if folder is None:
+            for i in range(n):
+                self._pack_chunks[i] = self._encode_chunk(plan, i)
+                if progress is not None:
+                    progress(i + 1, n)
+            self._pack_ready = True
+            return plan
+        with _build_lock(folder.parent) as mine:
+            if not mine:
+                return None
+            total = 0
+            for i in range(n):
+                path = folder / f"{i}.gz"
                 try:
-                    return path.read_bytes()
+                    total += path.stat().st_size
                 except OSError:
-                    pass
-            last = min(len(times), first + per_chunk)
-            views = [json.loads(self.view_json(times[k]) or b"{}") for k in range(first, last)]
-            # Requests before the first keyframe answer with the first view, and
-            # with the tiles in force at the time asked for: chunk 0 reaches back.
-            lo = times[first] if i else -(1 << 62)
-            hi = times[last] if last < len(times) else 1 << 62
-            blob = viewpack.encode_chunk(
-                views,
-                [(t, zlib.decompress(b), kinds) for t, b, kinds in _in_force(self.trees, lo, hi)],
-                [(t, zlib.decompress(b), None) for t, b in _in_force(self.terrain, lo, hi)],
-            )
-            if path is not None and atomic_write(path, blob) and i == 0:
-                _prune_packs(path.parent.parent, keep=path.parent.name)
-            return blob
-
-        blob = self._pack_flight.run(i, build)
-        with self._cache_lock:
-            chunks[i] = blob
-        return blob
+                    blob = self._encode_chunk(plan, i)
+                    if not atomic_write(path, blob):
+                        return None  # a full disk: no pack, views are asked for
+                    total += len(blob)
+                if progress is not None:
+                    progress(i + 1, n)
+            done = json.dumps({"chunks": n, "bytes": total}).encode()
+            if not atomic_write(folder / PACK_DONE, done):
+                return None
+            _prune_packs(folder.parent, keep=folder.name)
+        self._pack_ready = True
+        return plan
 
     def _missiles_json(self, kf_t: int) -> bytes:
         """:meth:`missiles_after` as JSON text."""
@@ -3046,21 +3102,78 @@ def _in_force(snapshots: list[Any], lo: int, hi: int) -> list[Any]:
     return snapshots[a:b]
 
 
-#: Packs kept on disk (one folder per match and build, a few MB to a few tens).
-PACKS_KEPT = 24
+#: The file that marks a pack folder as whole (written last by build_pack).
+PACK_DONE = "done.json"
+#: Bytes of packs kept on disk (a 28-minute 1v1 is 5 MB, a 77-minute 4v4 180 MB);
+#: the ones served longest ago go first. ``VANTAGE_PACK_CACHE_MB`` overrides it.
+PACK_CACHE_BYTES = int(os.environ.get("VANTAGE_PACK_CACHE_MB") or 4096) * 1048576
+#: An unfinished pack folder nobody has written to for this long is removed.
+PACK_STALE_S = 86400
 
 
-def _prune_packs(root: Path, keep: str) -> None:
-    """Remove the packs used longest ago beyond :data:`PACKS_KEPT`."""
+def _pack_size(folder: Path) -> int:
+    total = 0
+    with contextlib.suppress(OSError):
+        for f in folder.iterdir():
+            with contextlib.suppress(OSError):
+                total += f.stat().st_size
+    return total
+
+
+def _prune_packs(root: Path, keep: str, limit: int | None = None) -> None:
+    """Remove the packs served longest ago until the folder holds at most ``limit``
+    bytes (:data:`PACK_CACHE_BYTES`; ``keep`` always stays), and unfinished ones
+    left behind by a builder that died."""
+    limit = PACK_CACHE_BYTES if limit is None else limit
+    now = _time.time()
+    packs: list[tuple[float, int, Path]] = []
     try:
-        packs = sorted(
-            (p for p in root.iterdir() if p.is_dir() and p.name != keep),
-            key=lambda p: p.stat().st_mtime,
-        )
+        folders = [p for p in root.iterdir() if p.is_dir()]
     except OSError:
         return
-    for old in packs[: max(0, len(packs) + 1 - PACKS_KEPT)]:
-        for f in old.glob("*.gz"):
-            f.unlink(missing_ok=True)
-        with contextlib.suppress(OSError):
-            old.rmdir()
+    for folder in folders:
+        try:
+            used = (folder / PACK_DONE).stat().st_mtime
+        except OSError:
+            # Unfinished: being built right now (by a holder of the build lock in
+            # another data folder it would not be here), or abandoned.
+            with contextlib.suppress(OSError):
+                if folder.name != keep and now - folder.stat().st_mtime > PACK_STALE_S:
+                    shutil.rmtree(folder, ignore_errors=True)
+            continue
+        packs.append((used, _pack_size(folder), folder))
+    total = sum(size for _, size, _ in packs)
+    for _, size, folder in sorted(packs, key=lambda p: p[0]):
+        if total <= limit:
+            break
+        if folder.name == keep:
+            continue
+        shutil.rmtree(folder, ignore_errors=True)
+        total -= size
+
+
+@contextlib.contextmanager
+def _build_lock(root: Path) -> Iterator[bool]:
+    """One pack builder at a time per pack folder (each holds a whole timeline in
+    memory): True when this process is it, False when another one is. Where the
+    platform has no file locks every builder goes ahead."""
+    try:
+        import fcntl
+    except ImportError:  # Windows
+        yield True
+        return
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        fh = open(root / ".build.lock", "w")  # noqa: SIM115 (held across the yield)
+    except OSError:
+        yield True
+        return
+    try:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        yield True
+    finally:
+        fh.close()

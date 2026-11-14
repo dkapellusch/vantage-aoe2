@@ -63,6 +63,8 @@ def base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     urllib.request.urlopen(req, timeout=5).read()
     assert session._thread is not None
     session._thread.join(10)
+    # The match's view pack, as `vantage pack` or a hub's import job builds it.
+    assert session.timeline is not None and session.timeline.build_pack()
     try:
         yield url
     finally:

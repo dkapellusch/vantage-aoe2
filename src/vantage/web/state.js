@@ -435,7 +435,7 @@ const workerCalls = new Map();
 export const viewTimings = [];
 export const viewStats = { issued: 0, requests: 0, ms: 0, local: 0 }; // issued: including cancelled ones; local: answered from the pack
 /** The match's pack in this browser: { state, chunks, have, bytes, key } (PackStore.status). */
-export const packStatus = { state: 'off', chunks: 0, have: 0, bytes: 0, key: null };
+export const packStatus = { state: 'off', chunks: 0, have: 0, bytes: 0, key: null, building: false };
 function startViewWorker() {
   workerTried = true;
   try {
@@ -497,7 +497,10 @@ export function startPack(t) {
   if (packStarted) {
     // The index did not arrive (the store is still off a while later): ask
     // again, a few times. A server without packs answers each time the same.
-    if (packStatus.state !== 'off' || packTries >= 3 || performance.now() - packTriedAt < 10000) return false;
+    // While the server is still building the pack it is asked every 20 s, for
+    // as long as that takes (a long team game: minutes, once).
+    if (packStatus.state !== 'off' || performance.now() - packTriedAt < (packStatus.building ? 20000 : 10000)) return false;
+    if (!packStatus.building && packTries >= 3) return false;
   }
   if (!workerTried) startViewWorker();
   if (!viewWorker) return false;
@@ -511,7 +514,7 @@ export function startPack(t) {
 export function resetPack() {
   if (!packStarted) return;
   packStarted = false; packTries = 0;
-  Object.assign(packStatus, { state: 'off', chunks: 0, have: 0, bytes: 0, key: null });
+  Object.assign(packStatus, { state: 'off', chunks: 0, have: 0, bytes: 0, key: null, building: false });
   if (viewWorker) viewWorker.terminate();
   viewWorker = null; workerTried = false;
   for (const call of workerCalls.values()) call.reject(new Error('view worker replaced'));

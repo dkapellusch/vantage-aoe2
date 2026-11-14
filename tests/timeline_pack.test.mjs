@@ -183,6 +183,16 @@ test('no pack (a growing match, an older server) leaves the store off; a missing
   const off = new PackStore({ fetchImpl: async () => new Response('{}') });
   await off.start('http://x/api/pack');
   assert.equal(off.status().state, 'off');
+  assert.equal(off.status().building, false);
+  // A pack being built: off for now, and the page knows to ask again; then it is there.
+  const server = fakeServer();
+  let built = false;
+  const later = new PackStore({ fetchImpl: async (url, opts) => (!built && url.endsWith('/api/pack') ? new Response('{"building":true}') : server.fetchImpl(url, opts)) });
+  await later.start('http://x/api/pack');
+  assert.deepEqual([later.status().state, later.status().building], ['off', true]);
+  built = true;
+  await later.start('http://x/api/pack'); await later.pump;
+  assert.deepEqual([later.status().state, later.status().building, later.status().have], ['complete', false, 3]);
   assert.equal(off.holds(0), false);
   const old = new PackStore({ fetchImpl: async () => new Response('nope', { status: 404 }) });
   await old.start('http://x/api/pack');

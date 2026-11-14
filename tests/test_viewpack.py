@@ -164,8 +164,13 @@ def _timeline(seconds: int = 25, complete: bool = True) -> Timeline:
 
 def test_the_timelines_pack_rebuilds_every_view_and_tile_request() -> None:
     tl = _timeline()
-    index = tl.pack_index()
-    assert index is not None and index["v"] == viewpack.VERSION
+    # Nothing is encoded for a request: there is no pack until one is built.
+    assert tl.pack_index() is None and tl.pack_chunk(0) is None
+    plan = tl.pack_plan()
+    assert plan is not None and plan["v"] == viewpack.VERSION
+    seen: list[tuple[int, int]] = []
+    index = tl.build_pack(lambda done, of: seen.append((done, of)))
+    assert index == plan == tl.pack_index() and seen == [(1, 3), (2, 3), (3, 3)]
     times = index["times"]
     assert times == [k.time for k in tl.keyframes] and len(times) == 26
     n = index["chunk_views"]
@@ -195,41 +200,92 @@ def test_chunks_hold_fewer_views_the_larger_the_views_are() -> None:
     assert [viewpack.chunk_views(n) for n in (0, 12_000, 25_000, 60_000)] == [30, 30, 20, 10]
     tl = _timeline()
     tl.pack_chunk_views = None
-    index = tl.pack_index()
+    index = tl.build_pack()
     assert index is not None and index["chunk_views"] == 30  # small views
     assert tl.pack_chunk(0) and tl.pack_chunk(1) is None  # 26 views: one chunk
-    other = _timeline().pack_index()
+    other = _timeline().pack_plan()
     assert other is not None and other["key"] != index["key"]  # cut differently
 
 
 def test_a_growing_timeline_has_no_pack_and_another_match_another_key() -> None:
     growing = _timeline(complete=False)
+    assert growing.pack_plan() is None and growing.build_pack() is None
     assert growing.pack_index() is None and growing.pack_chunk(0) is None
     a, b, c = _timeline(), _timeline(), _timeline(24)
-    ka, kb, kc = (t.pack_index()["key"] for t in (a, b, c))  # type: ignore[index]
+    ka, kb, kc = (t.pack_plan()["key"] for t in (a, b, c))  # type: ignore[index]
     assert ka == kb != kc
 
 
-def test_chunks_are_kept_on_disk_and_old_packs_removed(tmp_path: Path, monkeypatch: Any) -> None:
+def test_a_pack_is_built_on_disk_by_one_process_and_served_by_another(tmp_path: Path) -> None:
+    import vantage.timeline as T
+
+    builder = _timeline()
+    builder.pack_dir = tmp_path
+    server = _timeline()
+    server.pack_dir = tmp_path
+    key = server.pack_plan()["key"]  # type: ignore[index]
+    assert server.pack_index() is None  # not built yet: views are asked for
+    # A builder that stopped half way leaves chunks but no marker: still no pack.
+    (tmp_path / key).mkdir()
+    half = builder._encode_chunk(builder.pack_plan(), 1)  # type: ignore[arg-type]
+    (tmp_path / key / "1.gz").write_bytes(half)
+    assert server.pack_index() is None and server.pack_chunk(1) is None
+    index = builder.build_pack()
+    assert index is not None and index["key"] == key
+    done = json.loads((tmp_path / key / T.PACK_DONE).read_text())
+    assert done["chunks"] == 3 and done["bytes"] == sum(
+        (tmp_path / key / f"{i}.gz").stat().st_size for i in range(3)
+    )
+    # The process that serves the same recording finds it; it encodes nothing.
+    server._encode_chunk = None  # type: ignore[method-assign,assignment]
+    assert server.pack_index() == index
+    assert server.pack_chunk(1) == half == builder.pack_chunk(1)
+    assert server.pack_chunk(3) is None
+    assert builder.build_pack() == index  # built already: nothing to do
+
+
+def test_one_builder_at_a_time_and_a_disk_that_cannot_be_written(tmp_path: Path) -> None:
     import vantage.timeline as T
 
     tl = _timeline()
     tl.pack_dir = tmp_path
-    key = tl.pack_index()["key"]  # type: ignore[index]
-    blob = tl.pack_chunk(1)
-    assert (tmp_path / key / "1.gz").read_bytes() == blob
-    # Another process reading the same recording takes the stored chunk.
-    again = _timeline()
-    again.pack_dir = tmp_path
-    (tmp_path / key / "2.gz").write_bytes(b"stored")
-    assert again.pack_chunk(2) == b"stored" and again.pack_chunk(1) == blob
-    monkeypatch.setattr(T, "PACKS_KEPT", 2)
-    for name in ("old1", "old2", "old3"):
+    with T._build_lock(tmp_path) as mine:
+        assert mine
+        assert tl.build_pack() is None and tl.pack_index() is None  # another builder is at work
+    assert tl.build_pack() is not None
+    blocked = _timeline(24)
+    blocked.pack_dir = tmp_path / "file-in-the-way" / "packs"
+    (tmp_path / "file-in-the-way").write_text("x")
+    assert blocked.build_pack() is None and blocked.pack_index() is None
+
+
+def test_packs_served_longest_ago_are_removed_beyond_the_size_limit(tmp_path: Path) -> None:
+    import os
+
+    import vantage.timeline as T
+
+    def pack(name: str, size: int, used: float, done: bool = True) -> None:
         (tmp_path / name).mkdir()
-        (tmp_path / name / "0.gz").write_bytes(b"x")
-    assert again.pack_chunk(0)  # writing chunk 0 prunes
-    left = sorted(p.name for p in tmp_path.iterdir())
-    assert key in left and len(left) == 2
+        (tmp_path / name / "0.gz").write_bytes(b"x" * size)
+        if done:
+            (tmp_path / name / T.PACK_DONE).write_text("{}")
+            os.utime(tmp_path / name / T.PACK_DONE, (used, used))
+
+    now = 1_800_000_000.0
+    pack("oldest", 400, now - 300)
+    pack("old", 400, now - 200)
+    pack("mine", 400, now - 250)
+    pack("newest", 400, now - 100)
+    pack("unfinished", 400, now, done=False)  # a builder may be writing it
+    pack("abandoned", 400, now, done=False)
+    os.utime(tmp_path / "abandoned", (1, 1))
+    T._prune_packs(tmp_path, keep="mine", limit=900)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["mine", "newest", "unfinished"]
+    # Serving a pack marks it used: it is then the last to go.
+    tl = _timeline()
+    tl.pack_dir = tmp_path
+    assert tl.build_pack() is not None  # prunes to the default limit: all stay
+    assert len(list(tmp_path.iterdir())) == 5  # + its folder and the lock file
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "viewpack-chunk.json"
@@ -242,11 +298,12 @@ def test_the_browser_decoders_fixture_is_what_the_encoder_writes() -> None:
     import os
 
     tl = _timeline()
+    index = tl.build_pack()
     blob = tl.pack_chunk(1)
-    assert blob is not None
+    assert index is not None and blob is not None
     views, trees, terrain = viewpack.decode_chunk(blob)
     doc = {
-        "index": tl.pack_index(),
+        "index": index,
         "chunk": 1,
         "gzip": base64.b64encode(blob).decode(),
         "views": views,

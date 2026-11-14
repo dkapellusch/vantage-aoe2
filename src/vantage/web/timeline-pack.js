@@ -154,12 +154,13 @@ export class PackStore {
     this.focus = 0;
     this.bytes = 0;         // downloaded this session
     this.failed = 0;
+    this.building = false;  // the server said its pack is being built
     this.state = 'off';     // off | loading | ready (index held) | complete | stopped
     this.pump = null;
   }
 
   get chunks() { return this.index ? Math.ceil(this.index.times.length / this.index.chunk_views) : 0; }
-  status() { return { state: this.state, chunks: this.chunks, have: this.have.size, bytes: this.bytes, key: this.index ? this.index.key : null }; }
+  status() { return { state: this.state, chunks: this.chunks, have: this.have.size, bytes: this.bytes, key: this.index ? this.index.key : null, building: this.building }; }
   chunkUrl(i) { return `${this.base}/chunk?i=${i}&k=${this.index.key}`; }
   chunkOf(t) { return Math.floor(keyframeIndex(this.index.times, t) / this.index.chunk_views); }
   /** Can a request for time `t` be answered without the network? */
@@ -174,7 +175,13 @@ export class PackStore {
     try {
       const r = await this.fetchImpl(base, { priority: 'low' });
       const index = r.ok ? await r.json() : null;
-      if (!index || index.v !== PACK_VERSION || !index.key || !Array.isArray(index.times) || !index.times.length) { this.state = 'off'; return; }
+      if (!index || index.v !== PACK_VERSION || !index.key || !Array.isArray(index.times) || !index.times.length) {
+        // No pack (yet): `building` says the server has one on the way, worth asking again.
+        this.state = 'off'; this.building = !!(index && index.building);
+        this.notify(this.status());
+        return;
+      }
+      this.building = false;
       this.index = index;
     } catch { this.state = 'off'; return; }
     try {
