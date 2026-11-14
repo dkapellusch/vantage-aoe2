@@ -1480,7 +1480,9 @@ def test_a_finished_match_is_kept_in_the_browser_and_seeks_are_answered_from_it(
     page.wait_for_function(PACK_DONE, timeout=20000)
     first = page.evaluate("() => ({ ...window.vantage.packStatus })")
     assert first["chunks"] == first["have"] == 1 and first["bytes"] > 0
-    for t in (7000, 2500, 11999):
+    # (Beside the server the first view of a chunk not opened yet is asked for,
+    # which opens the chunk; the following ones are rebuilt in the page.)
+    for t in (9000, 7000, 2500, 11999):
         page.evaluate("(t) => window.vantage.seek(t)", t)
         page.wait_for_function(
             "(t) => window.vantage.S.view && window.vantage.S.view.time === t",
@@ -1489,7 +1491,7 @@ def test_a_finished_match_is_kept_in_the_browser_and_seeks_are_answered_from_it(
         )
         got = page.evaluate(VIEW_AS_SERVED, t)
         assert got["same"], t
-    assert got["local"] >= 3  # rebuilt here, not asked for
+    assert got["local"] >= 2  # rebuilt here, not asked for
     # The forest and terrain of a seek come from the pack as well: no such request.
     asked: list[str] = []
     page.on("request", lambda r: asked.append(r.url))

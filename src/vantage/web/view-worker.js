@@ -19,9 +19,13 @@ const bytesOf = (text) => {
   return out;
 };
 
+/** A view from the server in under this many ms beats opening a chunk for it. */
+export const QUICK_MS = 25;
+
 /** The message handler, separate from the worker global so it can be tested. */
 export function createHandler(post, fetchImpl = (...a) => fetch(...a), cacheStorage = null) {
   const inflight = new Map();
+  let netMs = Infinity; // how long a view takes from the server, smoothed
   const store = new PackStore({ fetchImpl, cacheStorage, notify: (status) => post({ pack: status }) });
   const handle = async (msg) => {
     if (msg.abort != null) {
@@ -36,7 +40,13 @@ export function createHandler(post, fetchImpl = (...a) => fetch(...a), cacheStor
     const live = () => inflight.get(msg.id) === ctl;
     try {
       let value, transfer, local = false;
-      if (msg.t != null && store.holds(msg.t)) {
+      // Beside the server a view arrives sooner than a chunk of a large match
+      // opens (~20 ms and more): then the server is asked, unless the chunk is
+      // open already, and the chunk is opened for the views that follow.
+      const held = msg.t != null && store.holds(msg.t);
+      const quick = held && !msg.tiles && !msg.localOnly && netMs < QUICK_MS && !store.isOpen(msg.t);
+      if (quick) store.open(store.chunkOf(msg.t)).catch(() => {});
+      if (held && !quick) {
         // A chunk that turns out to be gone (the browser cleared it) falls
         // through to the network.
         try {
@@ -46,7 +56,9 @@ export function createHandler(post, fetchImpl = (...a) => fetch(...a), cacheStor
       }
       if (!local && msg.localOnly) value = null;
       else if (!local) {
+        const t0 = performance.now();
         value = await requestResource(msg.url, { priority: 'high', signal: ctl.signal }, r => r.json(), fetchImpl);
+        if (!msg.tiles) netMs = netMs === Infinity ? performance.now() - t0 : netMs * 0.7 + (performance.now() - t0) * 0.3;
         if (msg.tiles) value = value && value.tiles ? { t: value.t, bytes: bytesOf(value.tiles), kinds: value.kinds || [] } : null;
       }
       if (msg.tiles && value) transfer = [value.bytes.buffer];

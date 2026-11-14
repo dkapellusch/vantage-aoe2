@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { gzipSync } from 'node:zlib';
 import { applyDelta, PackChunk, PackStore, keyframeIndex, tilesAt, gunzipText, PACK_VERSION, PACK_CACHE, PACKS_KEPT, PACK_BYTES } from '../src/vantage/web/timeline-pack.js';
-import { createHandler } from '../src/vantage/web/view-worker.js';
+import { createHandler, QUICK_MS } from '../src/vantage/web/view-worker.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/viewpack-chunk.json', import.meta.url), 'utf8'));
 const fromB64 = (s) => new Uint8Array(Buffer.from(s, 'base64'));
@@ -193,8 +193,31 @@ test('no pack (a growing match, an older server) leaves the store off; a missing
   assert.ok(broken.holds(0) && !broken.holds(10000));
 });
 
+test('beside a fast server the worker asks it for a view whose chunk is not open yet', async () => {
+  const { fetchImpl, all, log } = fakeServer();
+  const posts = [];
+  const handle = createHandler((m) => posts.push(m), fetchImpl, fakeCaches());
+  await handle({ id: 1, url: 'http://x/api/view?t=3000', t: 3000 }); // measured: far under QUICK_MS
+  assert.ok(QUICK_MS > 5);
+  await handle({ pack: 'http://x/api/pack', t: 0 });
+  await handle.store.pump;
+  posts.length = 0; log.length = 0;
+  await handle({ id: 2, url: 'http://x/api/view?t=12000', t: 12000 });
+  assert.deepEqual(posts.pop(), { id: 2, value: { time: 12000, net: true } }); // the server, and the chunk opens
+  await handle.store.open(1);
+  await handle({ id: 3, url: 'http://x/api/view?t=13000', t: 13000 });
+  assert.deepEqual(posts.pop(), { id: 3, value: all[13], local: true }); // open now: rebuilt here
+  await handle({ id: 4, url: 'http://x/api/trees?t=600', t: 600, tiles: 'trees' }); // tiles are always local
+  assert.equal(posts.pop().local, true);
+  assert.deepEqual(log, ['/api/view?t=12000']);
+});
+
+// A server 30 ms away: every view of a held chunk is rebuilt locally.
+const slow = (fetchImpl) => async (url, opts) => { if (url.includes('/api/view')) await new Promise((r) => setTimeout(r, 30)); return fetchImpl(url, opts); };
+
 test('the worker answers a view from the pack when it holds it, else from /api/view', async () => {
-  const { fetchImpl, all, log } = fakeServer({ failChunk: 2 });
+  const server = fakeServer({ failChunk: 2 });
+  const { all, log } = server, fetchImpl = slow(server.fetchImpl);
   const posts = [];
   const handle = createHandler((m, transfer) => posts.push([m, transfer]), fetchImpl, fakeCaches());
   await handle({ id: 1, url: 'http://x/api/view?t=3000', t: 3000 }); // before the pack: the network

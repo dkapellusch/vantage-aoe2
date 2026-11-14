@@ -150,6 +150,7 @@ export class PackStore {
     this.memoryBytes = 0;
     this.unnoted = 0;       // bytes stored since the manifest was last told
     this.parsed = new Map(); // chunk number -> Promise<PackChunk>, most recent last
+    this.opened = new Set(); // the ones of those that have finished opening
     this.focus = 0;
     this.bytes = 0;         // downloaded this session
     this.failed = 0;
@@ -253,6 +254,9 @@ export class PackStore {
     return new Uint8Array(await hit.arrayBuffer());
   }
 
+  /** Is the chunk of time `t` already open (a view from it costs well under a ms)? */
+  isOpen(t) { return !!this.index && this.opened.has(this.chunkOf(t)); }
+
   /** Chunk `i`, parsed (a few are kept: playback and scrubbing stay in one or two). */
   open(i) {
     let p = this.parsed.get(i);
@@ -261,11 +265,12 @@ export class PackStore {
       const doc = JSON.parse(text);
       const chunk = new PackChunk(doc);
       chunk.trees = doc.trees || []; chunk.terrain = doc.terrain || [];
+      if (this.parsed.get(i) === p) this.opened.add(i);
       return chunk;
     });
     p.catch(() => { if (this.parsed.get(i) === p) this.parsed.delete(i); });
     this.parsed.set(i, p);
-    while (this.parsed.size > this.parsedLimit) this.parsed.delete(this.parsed.keys().next().value);
+    while (this.parsed.size > this.parsedLimit) { const old = this.parsed.keys().next().value; this.parsed.delete(old); this.opened.delete(old); }
     return p;
   }
 
