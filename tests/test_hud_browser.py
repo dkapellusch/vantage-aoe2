@@ -44,6 +44,7 @@ def base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     tmp = tmp_path_factory.mktemp("hud")
     patch = pytest.MonkeyPatch()
     patch.setenv("VANTAGE_DATA_DIR", str(tmp / "data"))
+    patch.setenv("XDG_CACHE_HOME", str(tmp / "cache"))  # the match's view pack is kept there
     rec = tmp / "recs"
     rec.mkdir()
     path = rec / "game.vrec"
@@ -1460,3 +1461,58 @@ def test_fast_playback_through_a_slow_link_draws_units_where_they_are(
     assert times[-1] - times[0] > 8000, f"played only {times[-1] - times[0]:.0f} game ms in 4 s"
     off = [(t, x, walker_x(t), v, n) for t, x, v, n in frames if abs(x - walker_x(t)) > 0.05]
     assert not off, f"{len(off)} of {len(frames)} frames drew the knight off its path: {off[:5]}"
+
+
+PACK_DONE = "() => window.vantage.packStatus.state === 'complete'"
+VIEW_AS_SERVED = """async (t) => {
+  const v = window.vantage, want = await (await fetch('/api/view?t=' + t)).json();
+  // what the page adds to a view it holds (decoded fog and the like) starts with _
+  const mine = JSON.parse(JSON.stringify(v.S.view, (k, x) => (k.startsWith('_') ? undefined : x)));
+  return { same: JSON.stringify(mine) === JSON.stringify(want), time: v.S.view.time,
+    local: v.viewStats.local, pack: { ...v.packStatus } };
+}"""
+
+
+def test_a_finished_match_is_kept_in_the_browser_and_seeks_are_answered_from_it(
+    browser: Any, base: str
+) -> None:
+    page = open_page(browser, base)
+    page.wait_for_function(PACK_DONE, timeout=20000)
+    first = page.evaluate("() => ({ ...window.vantage.packStatus })")
+    assert first["chunks"] == first["have"] == 1 and first["bytes"] > 0
+    for t in (7000, 2500, 11999):
+        page.evaluate("(t) => window.vantage.seek(t)", t)
+        page.wait_for_function(
+            "(t) => window.vantage.S.view && window.vantage.S.view.time === t",
+            arg=t // 1000 * 1000,
+            timeout=10000,
+        )
+        got = page.evaluate(VIEW_AS_SERVED, t)
+        assert got["same"], t
+    assert got["local"] >= 3  # rebuilt here, not asked for
+    # The forest and terrain of a seek come from the pack as well: no such request.
+    asked: list[str] = []
+    page.on("request", lambda r: asked.append(r.url))
+    page.evaluate("() => window.vantage.seek(4000)")
+    page.wait_for_function("() => window.vantage.S.view.time === 4000", timeout=10000)
+    page.wait_for_timeout(500)
+    assert not [u for u in asked if "/api/view" in u or "/api/trees" in u or "/api/terrain" in u]
+    assert page.errors == []
+    # The same browser again: the chunks are in its Cache Storage, nothing is downloaded.
+    page.reload()
+    ready(page)
+    page.wait_for_function(PACK_DONE, timeout=20000)
+    again = page.evaluate("() => ({ ...window.vantage.packStatus })")
+    assert again["key"] == first["key"] and again["have"] == 1 and again["bytes"] == 0
+    page.context.close()
+
+
+def test_without_the_setting_views_are_asked_for_as_before(browser: Any, base: str) -> None:
+    page = open_page(browser, base, saved={**QUIET, "localTimeline": False})
+    page.wait_for_timeout(1500)
+    page.evaluate("() => window.vantage.seek(7000)")
+    page.wait_for_function("() => window.vantage.S.view.time === 7000", timeout=10000)
+    got = page.evaluate(VIEW_AS_SERVED, 7000)
+    assert got["same"] and got["local"] == 0 and got["pack"]["state"] == "off"
+    assert page.errors == []
+    page.context.close()

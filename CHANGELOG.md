@@ -107,6 +107,17 @@ All notable changes to Vantage are documented here. The format follows
   and Caster the full panel opened from the chip stays the full panel until you press "compact".
   Customize → Layout has **Reset Selection panel**, and saved layouts carry all of it. Statistics
   reopens on the tab and series last looked at.
+- **A finished match is kept in the browser.** Once the first picture is up, the viewer downloads the
+  whole match in the background (5 MB for a 28-minute 1v1, about 180 MB for a 77-minute 4v4, from
+  the playhead on) and keeps it in the browser's storage for the next visit (the twelve matches
+  opened most recently). Skipping, scrubbing and fast playback then rebuild each moment locally
+  instead of asking the server: through a hosted hub the first frame of the moment jumped to comes
+  in about 15 ms instead of 115, and a moment already seen is complete in two frames. The viewer
+  also fetches ahead the graphics of where a 30 s skip either way would land. A match still being
+  played or read, an older server or hub, or a browser without workers or storage works as before.
+  *Settings → Renderer → Keep the match in this browser* turns it off.
+- Terrain textures are decoded off the main thread and fetched ahead: the first farm or road to come
+  into view no longer costs a 20-40 ms frame on a laptop, and a seek no longer waits for them.
 - **Trackpads.** Two fingers move the map and a pinch zooms at the pointer, following the fingers;
   before, both zoomed, eased over a second, and the map could only be moved with a two-finger
   click-drag. A mouse wheel zooms as it did. *Settings → Camera → Two-finger scrolling* can make

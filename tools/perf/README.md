@@ -28,6 +28,10 @@ uv run --with playwright --with pillow --with numpy python tools/perf/golden.py 
     --base http://127.0.0.1:8792 --spots spots.json --name 4v4 --out golden/after
 uv run --with pillow --with numpy python tools/perf/golden.py compare golden/before golden/after
 
+# 5b. the match kept in the browser (the view pack) rebuilds exactly what the server
+#     answers: views, forest and terrain at random times, with the page's own decoder
+node tools/perf/pack_parity.mjs http://127.0.0.1:8792 --times 500 --seed 1
+
 # 6. before/after table (one column per file; repeats reduced to their median)
 uv run python tools/perf/report.py before.json after.json
 ```
@@ -62,6 +66,12 @@ compare medians when the machine is shared.
 | `jumps` | minimap-style camera jumps between far places, twice | ms to a complete picture, first visit and revisit |
 | `seek` | +-30 s skips, then a scrub (a seek every 80 ms) | ms to the first frame of the right moment and to a complete picture |
 | `memory` | `--memory-seconds` of 8x playback, sampled every 15 s after a forced GC | JS heap, decoded strips, atlas size; heap growth over the second half |
+
+`--pack-wait 90` waits (up to that many seconds) until the browser holds the match's
+view pack before measuring, then 1.5 s more: the state of a match opened a little while
+ago or opened before. Without it the measurement starts as the page is ready, while the
+pack is still arriving. Every result has `views`: view requests made, how many were
+answered from the pack (`local`), and the pack's state.
 
 `--zooms 1,3.5` covers small game art and large game art; add `0.5` for icons.
 `--hud full,minimal` covers both HUD presets. `--where early.base,late.base,late.fight`.
