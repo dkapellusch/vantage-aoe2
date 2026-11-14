@@ -18,6 +18,7 @@ export const S = {
   catalogVersion: -1,
   view: null,          // keyframe at/below t
   nextView: null,      // keyframe after, for interpolation
+  skipViews: [],       // the views a 30 s skip either way lands on, when the pack holds them: their graphics are fetched early
   t: 0,                // playback clock, game ms
   playing: true,
   speedIndex: 2,       // into SPEEDS
@@ -145,6 +146,7 @@ export const DEFAULT_SETTINGS = {
   colorGrade: 'auto',           // the map's colour grade: auto (from its script) or a preset name
   colorGradeByGame: {},         // game id -> preset picked for that game (random-grade maps)
   waitForGraphics: true,        // hold playback a moment until new graphics are in (no pop-in)
+  localTimeline: true,          // keep a finished match in this browser: seeks and playback need no view requests
   gpuSprites: true,             // draw sprites with WebGL2 in one batch (sprite-gl.js); off: Canvas 2D
   gpuTint: true,                // with gpuSprites: one uncoloured strip per sprite, coloured on the GPU (no UI)
   healthBars: 'damaged',        // damaged | always | never (the game's own Health Bars option)
@@ -420,34 +422,57 @@ export function abortViews() {
   previousAbort = viewAbort;
   viewAbort = new AbortController();
 }
-const viewCache = new ViewCache((t) => viewJson(`/api/view?t=${t}`, viewAbort.signal));
+const viewCache = new ViewCache((t, opts) => viewJson(`/api/view?t=${t}`, viewAbort.signal, t, opts));
 
-// Views are fetched and parsed in a worker (view-worker.js): at 8x that is ~14
-// documents of a few hundred KB a second kept off the main thread. Without
-// workers (or if it fails) they are fetched here as before.
+// Views come from a worker (view-worker.js): rebuilt from the match's pack when
+// this browser holds that stretch of it (startPack; no network at all), else
+// fetched and parsed there: at 8x that is ~14 documents of a few hundred KB a
+// second kept off the main thread. Without workers (or if it fails) they are
+// fetched here as before.
 let viewWorker = null, workerTried = false, workerSeq = 0;
 const workerCalls = new Map();
 /** View request timings (ms, newest last) for the performance view, and totals. */
 export const viewTimings = [];
-export const viewStats = { issued: 0, requests: 0, ms: 0 }; // issued: including cancelled ones
+export const viewStats = { issued: 0, requests: 0, ms: 0, local: 0 }; // issued: including cancelled ones; local: answered from the pack
+/** The match's pack in this browser: { state, chunks, have, bytes, key } (PackStore.status). */
+export const packStatus = { state: 'off', chunks: 0, have: 0, bytes: 0, key: null };
 function startViewWorker() {
   workerTried = true;
   try {
     viewWorker = new Worker(new URL('./view-worker.js', import.meta.url), { type: 'module' });
     viewWorker.onmessage = (e) => {
+      if (e.data.pack) { Object.assign(packStatus, e.data.pack); return; }
       const call = workerCalls.get(e.data.id);
       if (!call) return;
       workerCalls.delete(e.data.id);
+      if (e.data.local) viewStats.local++;
       if (e.data.error != null) call.reject(new Error(e.data.error)); else call.resolve(e.data.value);
     };
     viewWorker.onerror = () => {
       viewWorker = null;
+      packStatus.state = 'off';
       for (const call of workerCalls.values()) call.reject(new Error('view worker failed'));
       workerCalls.clear();
     };
   } catch { viewWorker = null; }
 }
-function viewJson(path, signal) {
+// One request to the worker: `extra` is merged into the message ({ t } for a
+// view, { t, tiles } for a snapshot of the forest or the terrain).
+function workerCall(path, signal, extra) {
+  return new Promise((resolve, reject) => {
+    const id = ++workerSeq;
+    workerCalls.set(id, { resolve, reject });
+    viewWorker.postMessage({ id, url: viewRequestUrl(path, location.href), ...extra });
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        if (!workerCalls.delete(id)) return;
+        if (viewWorker) viewWorker.postMessage({ abort: id });
+        reject(new DOMException('view request cancelled', 'AbortError'));
+      }, { once: true });
+    }
+  });
+}
+function viewJson(path, signal, t, opts) {
   if (!workerTried) startViewWorker();
   viewStats.issued++;
   const t0 = performance.now();
@@ -458,20 +483,57 @@ function viewJson(path, signal) {
     return v;
   };
   if (!viewWorker) return api(path, undefined, { priority: 'high', signal }).then(done);
-  return new Promise((resolve, reject) => {
-    const id = ++workerSeq;
-    workerCalls.set(id, { resolve, reject });
-    viewWorker.postMessage({ id, url: viewRequestUrl(path, location.href) });
-    if (signal) {
-      signal.addEventListener('abort', () => {
-        if (!workerCalls.delete(id)) return;
-        if (viewWorker) viewWorker.postMessage({ abort: id });
-        reject(new DOMException('view request cancelled', 'AbortError'));
-      }, { once: true });
-    }
-  }).then(done);
+  return workerCall(path, signal, opts && opts.localOnly ? { t, localOnly: true } : { t }).then(done);
+}
+/**
+ * Keep the whole match in this browser (its pack: timeline-pack.js), so seeks,
+ * scrubbing and playback stop asking the server for views. Only a finished
+ * match has one; `t` is where to start downloading from. Safe to call again.
+ */
+let packStarted = false;
+export function startPack(t) {
+  if (packStarted || settings.localTimeline === false) return;
+  if (!workerTried) startViewWorker();
+  if (!viewWorker) return;
+  packStarted = true;
+  viewWorker.postMessage({ pack: viewRequestUrl('/api/pack', location.href), t });
+}
+/** Another match was opened in this page: its views are not the pack's. The
+ * worker is replaced (requests under way are rejected and asked again). */
+export function resetPack() {
+  if (!packStarted) return;
+  packStarted = false;
+  Object.assign(packStatus, { state: 'off', chunks: 0, have: 0, bytes: 0, key: null });
+  if (viewWorker) viewWorker.terminate();
+  viewWorker = null; workerTried = false;
+  for (const call of workerCalls.values()) call.reject(new Error('view worker replaced'));
+  workerCalls.clear();
+}
+/** The playhead jumped to `t`: the pack downloads from there on. */
+export function packFocus(t) {
+  if (packStarted && viewWorker && packStatus.state === 'ready') viewWorker.postMessage({ focus: t });
+}
+/**
+ * The forest ('trees') or terrain snapshot in force at `t`: { t, bytes, kinds }
+ * (the tile bytes of /api/trees or /api/terrain), or null when there is none.
+ * From the pack when it is held, else from the server.
+ */
+export async function fetchTiles(kind, t) {
+  const path = `/api/${kind}?t=${Math.round(t)}`;
+  if (!workerTried) startViewWorker();
+  if (viewWorker) {
+    try { return await workerCall(path, null, { t: Math.round(t), tiles: kind }); } catch { /* the worker failed: ask here */ }
+  }
+  const r = await api(path);
+  if (!r || !r.tiles) return null;
+  return { t: r.t, bytes: Uint8Array.from(atob(r.tiles), (c) => c.charCodeAt(0)), kinds: r.kinds || [] };
 }
 export function fetchView(t) { return viewCache.fetch(t); }
+/** The view of `t` if the pack holds it (no request is made for it), else null. */
+export function fetchLocalView(t) {
+  if (!packStarted || !viewWorker || (packStatus.state !== 'ready' && packStatus.state !== 'complete')) return Promise.resolve(null);
+  return viewCache.fetch(t, { localOnly: true });
+}
 export function cachedView(t) { return viewCache.peek(t); }
 export function cachedViewAt(t) { return viewCache.at(t); }
 export function clearViewCache() { viewCache.clear(); }

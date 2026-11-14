@@ -2153,6 +2153,7 @@ function graphicsTab() {
     <div class="form-row">${lab('Terrain grid intensity', 'Lines along the tile edges; 0 % = off')}<input type="range" min="0" max="1" step="0.05" data-set="terrainGrid" data-type="num" value="${+getSetting('terrainGrid') || 0}"><output class="num">${fmtSetting('terrainGrid', +getSetting('terrainGrid') || 0)}</output>
       <button class="link" id="grid-recommended" ${tip(t('Reset to recommended (50 %)'))}>${t('Reset to recommended (50 %)')}</button></div>
     ${chk('waitForGraphics', 'Wait for graphics', 'Playback holds a moment until new units\' graphics are loaded, so nothing pops in')}
+    ${chk('localTimeline', 'Keep the match in this browser', 'A finished match is downloaded once (a few MB to a few tens) and kept: skipping, scrubbing and fast playback no longer wait for the server')}
     ${chk('gpuSprites', 'GPU rendering', 'Draw sprites, unit outlines and terrain with WebGL2 (much faster); off draws them with Canvas 2D')}
     ${chk('limitToSixtyFps', 'Limit to 60 FPS', 'Saves power and GPU time')}
     ${numIn('atlasMemoryNormal', 'Sprite memory (MB)', 32, 4096, 32, 'Decoded game graphics kept in memory; older ones are reloaded when needed')}

@@ -1,7 +1,7 @@
 // Vantage: boot, playback clock, data refresh, actions.
 
 import {
-  S, settings, saveSettings, SPEEDS, api, fetchView, cachedView, cachedViewAt, clearViewCache, toast, players, playerName,
+  S, settings, saveSettings, SPEEDS, api, fetchView, fetchLocalView, cachedView, cachedViewAt, clearViewCache, startPack, resetPack, packFocus, packStatus, toast, players, playerName,
   playerMarkColor, fmtTime, unitInfo, unitIcon, applyServerConfig, tip, esc, tooltipLevel, refreshSeries, probeAssetOrigin, abortViews, viewTimings, viewStats,
 } from './state.js';
 import * as world from './world.js';
@@ -298,6 +298,7 @@ async function applySession(desc) {
   const tl = desc.timeline;
   if (desc.generation !== generation) {
     generation = desc.generation;
+    resetPack();
     clearViewCache();
     resetViews();
     S.events = []; S.eventsTo = -1; S.series = null; S.summary = null; S.selection = new Set();
@@ -608,7 +609,33 @@ function resetViews(keepView = false) {
   viewRetryAt = 0;
   abortViews();
   if (!keepView) S.view = null;
-  S.nextView = null; S.aheadView = null; S.upcoming = [];
+  S.nextView = null; S.aheadView = null; S.upcoming = []; S.skipViews = [];
+  skipsAt = null;
+}
+
+// Where a 30 s skip either way would land: with the match's pack in this
+// browser those views cost nothing to look at, and the world asks for the
+// graphics they draw on screen (world.prefetchUpcoming), so the skip shows a
+// complete picture at once instead of waiting for strips. Renewed every 5 s of
+// game time, not at all while the time bar is dragged.
+const SKIP_MS = 30000;
+let skipsAt = null, skipsHeld = -1;
+function primeSkips() {
+  if (S.scrubbing || !S.view || (packStatus.state !== 'ready' && packStatus.state !== 'complete')) return;
+  // Again once the playhead has moved on, or when more of the pack has arrived
+  // and a landing place was not in it before.
+  const moved = skipsAt == null || Math.abs(S.t - skipsAt) >= 5000;
+  const wanted = [S.t + SKIP_MS, S.t - SKIP_MS].filter((at) => at >= S.start && at <= S.end);
+  if (!moved && (S.skipViews.length >= wanted.length || skipsHeld === packStatus.have)) return;
+  skipsAt = S.t; skipsHeld = packStatus.have;
+  const epoch = viewEpoch, found = [];
+  for (const at of wanted) {
+    fetchLocalView(Math.round(at)).then((v) => {
+      if (!v || epoch !== viewEpoch) return;
+      found.push(v);
+      S.skipViews = found.slice();
+    });
+  }
 }
 
 // Use a shared request grid so adjacent keyframes reuse the same look-ahead
@@ -882,8 +909,12 @@ function tick(now) {
   measureSpeed(now);
   startReadAhead();
   measureProduction(now);
+  // A finished match is kept whole in this browser once the first picture is up
+  // (startPack does it once; a growing match has no pack yet).
+  if (S.complete && S.end > 0 && !initialLoad.pending) startPack(S.t);
   const tv = performance.now();
   updateView();
+  primeSkips();
   if (perf.on) perf.update.push(performance.now() - tv);
   world.refreshTerrain(S.t); // no-op unless a throttled terrain change is still waiting
   world.refreshTrees(S.t); // likewise for the forest
@@ -1377,6 +1408,7 @@ export function seek(time, force = false) {
   S.jump = { from, to: wait ? target : S.t, at: performance.now(), wait };
   S.followLive = false;
   resetViews(true);
+  packFocus(S.t);
   speedMeter.t = null;
   // Seeking (e.g. "click to jump back") closes the end-game screen.
   if (overlays.isOpen('overlay-endgame')) overlays.closeAll();
@@ -2612,6 +2644,6 @@ async function boot() {
 
 // Debug/automation handle (used by the headless UI checks). openDocs and
 // hotkey conflicts are also reachable from other modules through it.
-window.vantage = { S, settings, initialLoad, seek, viewTimings, viewStats, actions: ACTIONS, world, openDocs, heroes, startSequence, topKiller, autocastEntity, reloadSkins };
+window.vantage = { S, settings, initialLoad, seek, viewTimings, viewStats, packStatus, actions: ACTIONS, world, openDocs, heroes, startSequence, topKiller, autocastEntity, reloadSkins };
 
 boot().catch((error) => { console.error(error); startupError(error); });

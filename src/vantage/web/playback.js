@@ -22,12 +22,13 @@ export class ViewCache {
   }
   clear() { this.entries.clear(); }
 
-  fetch(t) {
+  /** `opts` goes to the loader ({ localOnly }: only if no request is needed). */
+  fetch(t, opts) {
     const key = this.key(t);
     const cached = this.entries.get(key);
     if (cached) return cached.promise;
     const entry = { value: null, promise: null };
-    entry.promise = this.load(key).catch(() => null).then((value) => {
+    entry.promise = this.load(key, opts).catch(() => null).then((value) => {
       // Before the first keyframe the server returns {}. It is not a view;
       // caching it would pin a paused startup clock at t=0 forever.
       if (!Number.isFinite(value?.time)) value = null;

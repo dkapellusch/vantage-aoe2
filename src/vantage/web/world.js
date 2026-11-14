@@ -16,7 +16,7 @@
 // graded in its shader) and an overlay (bars, flames, range circles, particles,
 // fog). Terrain chunks are then composited by terrain-gl.js composeChunk.
 
-import { S, settings, playerColor, unitInfo, unitIcon, entityInfo, entityStatsValid, players, api, gameKey, assetUrl, withAssetVersion } from './state.js';
+import { S, settings, playerColor, unitInfo, unitIcon, entityInfo, entityStatsValid, players, api, fetchTiles, gameKey, assetUrl, withAssetVersion } from './state.js';
 import * as TG from './terrain-gl.js';
 import * as SG from './sprite-gl.js';
 import { RowInterpolator, sortByKey } from './playback.js';
@@ -280,6 +280,8 @@ function prefetchUpcoming() {
   if (now - upcomingCheckAt > 100) {
     upcomingCheckAt = now;
     for (const n of [S.nextView, ...(S.upcoming || [])]) if (n && n.time > S.t && spriteRequests < 24) viewReady(n);
+    // Then where a skip would land (app.js primeSkips), once playback's own are asked for.
+    for (const n of S.skipViews || []) if (spriteRequests < 12) viewReady(n);
     prefetchAhead();
   }
 }
@@ -1527,10 +1529,10 @@ export async function refreshTerrain(t, initial = false) {
   terrainAt = performance.now();
   terrainPending = true;
   try {
-    const r = await api(`/api/terrain?t=${Math.round(t)}`).catch(() => null);
+    const r = await fetchTiles('terrain', t).catch(() => null);
     terrainT = want;
-    if (!r || !r.tiles) return;
-    const both = Uint8Array.from(atob(r.tiles), (c) => c.charCodeAt(0));
+    if (!r) return;
+    const both = r.bytes;
     const cur = S.map._terrain, curL = S.map._layers;
     const n = cur.length;
     if (both.length !== n && both.length !== 2 * n) return;
@@ -1677,9 +1679,9 @@ export async function refreshTrees(t, initial = false) {
   treesAt = performance.now();
   treesT = want;
   treesPending = true;
-  const r = await api(`/api/trees?t=${Math.round(t)}`).catch(() => null).finally(() => { treesPending = false; });
-  if (!r || !r.tiles) return;
-  const both = Uint8Array.from(atob(r.tiles), (c) => c.charCodeAt(0));
+  const r = await fetchTiles('trees', t).catch(() => null).finally(() => { treesPending = false; });
+  if (!r) return;
+  const both = r.bytes;
   const n = mapW * mapH;
   const next = { tiles: both.subarray(0, n), facets: both.length >= 2 * n ? both.subarray(n, 2 * n) : null, kinds: r.kinds || [] };
   const before = { tiles: treeTiles, facets: treeFacets, kinds: treeKinds };
