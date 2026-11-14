@@ -1665,5 +1665,7 @@
  "As the display (sharpest)": "Как у экрана (самое чёткое)",
  "Balanced (1.5x on a high-density display)": "Сбалансированное (1,5x на экране высокой плотности)",
  "Fast (1x)": "Быстрое (1x)",
- "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Меньше пикселей на экране высокой плотности (Retina); панели остаются чёткими"
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Меньше пикселей на экране высокой плотности (Retina); панели остаются чёткими",
+ "Keep the match in this browser": "Хранить матч в этом браузере",
+ "A finished match is downloaded once in the background and kept: skipping, scrubbing and fast playback no longer wait for the server": "Завершённый матч один раз загружается в фоне и сохраняется: переходы, перемотка и быстрое воспроизведение больше не ждут сервера"
 }

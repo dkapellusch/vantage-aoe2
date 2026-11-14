@@ -1665,5 +1665,7 @@
  "As the display (sharpest)": "디스플레이와 동일(가장 선명)",
  "Balanced (1.5x on a high-density display)": "균형(고밀도 디스플레이에서 1.5배)",
  "Fast (1x)": "빠름(1배)",
- "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "고밀도(Retina) 디스플레이에서 그릴 픽셀을 줄입니다. 패널은 선명하게 유지됩니다"
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "고밀도(Retina) 디스플레이에서 그릴 픽셀을 줄입니다. 패널은 선명하게 유지됩니다",
+ "Keep the match in this browser": "경기를 이 브라우저에 보관",
+ "A finished match is downloaded once in the background and kept: skipping, scrubbing and fast playback no longer wait for the server": "끝난 경기를 백그라운드에서 한 번 내려받아 보관합니다. 건너뛰기, 탐색, 빠른 재생이 더 이상 서버를 기다리지 않습니다"
 }

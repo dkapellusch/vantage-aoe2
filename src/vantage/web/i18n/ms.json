@@ -1665,5 +1665,7 @@
  "As the display (sharpest)": "Seperti paparan (paling tajam)",
  "Balanced (1.5x on a high-density display)": "Seimbang (1.5x pada paparan berketumpatan tinggi)",
  "Fast (1x)": "Pantas (1x)",
- "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Kurang piksel untuk dilukis pada paparan berketumpatan tinggi (Retina); panel kekal tajam"
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Kurang piksel untuk dilukis pada paparan berketumpatan tinggi (Retina); panel kekal tajam",
+ "Keep the match in this browser": "Simpan perlawanan dalam pelayar ini",
+ "A finished match is downloaded once in the background and kept: skipping, scrubbing and fast playback no longer wait for the server": "Perlawanan yang tamat dimuat turun sekali di latar belakang dan disimpan: langkau, seret bar masa dan main balik pantas tidak lagi menunggu pelayan"
 }

@@ -1665,5 +1665,7 @@
  "As the display (sharpest)": "與顯示器相同（最清晰）",
  "Balanced (1.5x on a high-density display)": "均衡（高密度顯示器上為 1.5 倍）",
  "Fast (1x)": "快速（1 倍）",
- "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "在高密度（Retina）顯示器上繪製較少的像素；面板保持清晰"
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "在高密度（Retina）顯示器上繪製較少的像素；面板保持清晰",
+ "Keep the match in this browser": "將比賽保存在此瀏覽器中",
+ "A finished match is downloaded once in the background and kept: skipping, scrubbing and fast playback no longer wait for the server": "已結束的比賽在背景下載一次並保存：跳轉、拖曳時間列和快速播放不再等待伺服器"
 }

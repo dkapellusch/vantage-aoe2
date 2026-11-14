@@ -1683,5 +1683,7 @@
  "As the display (sharpest)": "Jak ekran (najostrzejsza)",
  "Balanced (1.5x on a high-density display)": "Zrównoważona (1,5x na ekranie o dużej gęstości)",
  "Fast (1x)": "Szybka (1x)",
- "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Mniej pikseli do narysowania na ekranie o dużej gęstości (Retina); panele pozostają ostre"
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Mniej pikseli do narysowania na ekranie o dużej gęstości (Retina); panele pozostają ostre",
+ "Keep the match in this browser": "Zachowaj mecz w tej przeglądarce",
+ "A finished match is downloaded once in the background and kept: skipping, scrubbing and fast playback no longer wait for the server": "Zakończony mecz jest pobierany raz w tle i zachowywany: przeskoki, przewijanie i szybkie odtwarzanie nie czekają już na serwer"
 }

@@ -1665,5 +1665,7 @@
  "As the display (sharpest)": "डिस्प्ले जैसा (सबसे साफ़)",
  "Balanced (1.5x on a high-density display)": "संतुलित (उच्च-घनत्व डिस्प्ले पर 1.5x)",
  "Fast (1x)": "तेज़ (1x)",
- "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "उच्च-घनत्व (Retina) डिस्प्ले पर कम पिक्सेल बनाने पड़ते हैं; पैनल साफ़ रहते हैं"
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "उच्च-घनत्व (Retina) डिस्प्ले पर कम पिक्सेल बनाने पड़ते हैं; पैनल साफ़ रहते हैं",
+ "Keep the match in this browser": "मैच को इस ब्राउज़र में रखें",
+ "A finished match is downloaded once in the background and kept: skipping, scrubbing and fast playback no longer wait for the server": "समाप्त मैच एक बार पृष्ठभूमि में डाउनलोड होकर रखा जाता है: आगे-पीछे जाना, टाइम बार खींचना और तेज़ प्लेबैक अब सर्वर की प्रतीक्षा नहीं करते"
 }

@@ -1665,5 +1665,7 @@
  "As the display (sharpest)": "Theo màn hình (sắc nét nhất)",
  "Balanced (1.5x on a high-density display)": "Cân bằng (1,5x trên màn hình mật độ cao)",
  "Fast (1x)": "Nhanh (1x)",
- "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Ít điểm ảnh phải vẽ hơn trên màn hình mật độ cao (Retina); các bảng vẫn sắc nét"
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Ít điểm ảnh phải vẽ hơn trên màn hình mật độ cao (Retina); các bảng vẫn sắc nét",
+ "Keep the match in this browser": "Giữ trận đấu trong trình duyệt này",
+ "A finished match is downloaded once in the background and kept: skipping, scrubbing and fast playback no longer wait for the server": "Trận đã kết thúc được tải về một lần ở chế độ nền và lưu lại: tua, kéo thanh thời gian và phát nhanh không còn phải chờ máy chủ"
 }

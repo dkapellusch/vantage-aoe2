@@ -1665,5 +1665,7 @@
  "As the display (sharpest)": "ディスプレイと同じ（最も鮮明）",
  "Balanced (1.5x on a high-density display)": "バランス（高密度ディスプレイで1.5倍）",
  "Fast (1x)": "高速（1倍）",
- "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "高密度（Retina）ディスプレイで描画するピクセルを減らします。パネルは鮮明なままです"
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "高密度（Retina）ディスプレイで描画するピクセルを減らします。パネルは鮮明なままです",
+ "Keep the match in this browser": "試合をこのブラウザーに保存",
+ "A finished match is downloaded once in the background and kept: skipping, scrubbing and fast playback no longer wait for the server": "終了した試合をバックグラウンドで一度だけダウンロードして保存します。スキップ、シーク、高速再生がサーバーを待たなくなります"
 }

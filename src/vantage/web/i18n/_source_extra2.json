@@ -1279,5 +1279,7 @@
  "Latest",
  "Fight to recap",
  "No fight yet",
- "One card at a time: production, economy or fights"
+ "One card at a time: production, economy or fights",
+ "Keep the match in this browser",
+ "A finished match is downloaded once in the background and kept: skipping, scrubbing and fast playback no longer wait for the server"
 ]

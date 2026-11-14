@@ -1665,5 +1665,7 @@
  "As the display (sharpest)": "A da tela (mais nítida)",
  "Balanced (1.5x on a high-density display)": "Equilibrada (1,5x em telas de alta densidade)",
  "Fast (1x)": "Rápida (1x)",
- "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Menos pixels para desenhar em telas de alta densidade (Retina); os painéis continuam nítidos"
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp": "Menos pixels para desenhar em telas de alta densidade (Retina); os painéis continuam nítidos",
+ "Keep the match in this browser": "Manter a partida neste navegador",
+ "A finished match is downloaded once in the background and kept: skipping, scrubbing and fast playback no longer wait for the server": "Uma partida terminada é baixada uma vez em segundo plano e mantida: pular, arrastar a barra de tempo e a reprodução rápida não esperam mais pelo servidor"
 }
