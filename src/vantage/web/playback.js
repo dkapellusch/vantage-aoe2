@@ -172,8 +172,10 @@ export function headingOf(dx, dy, n) {
  * - while it moves it faces along the current stretch of its path (headingOf;
  *   the number of facings from `facetsOf(row)`, 0 when unknown);
  * - while it moves it keeps its moving pose, from whichever snapshot shows it
- *   moving (column 9, the activity); otherwise facing and pose switch to the
- *   later snapshot's halfway through.
+ *   moving (column 9, the activity), until it arrives: a unit that has stopped by
+ *   the later snapshot takes that snapshot's pose where its path ends (it walked
+ *   on the spot until the next keyframe); otherwise facing and pose switch to
+ *   the later snapshot's halfway through.
  * A pose taken from the later snapshot carries that snapshot's time in column 11
  * (the animation clock's origin). Buildings and projectiles are left alone.
  */
@@ -216,18 +218,24 @@ export class RowInterpolator {
         const out = r.slice();
         const path = [[view.time, r[3], r[4], r[7]], ...(track || []), [next.time, q[3], q[4], q[7]]];
         const moves = path.some((p) => p[1] !== r[3] || p[2] !== r[4]);
-        let n = 0, pose = null;
+        let n = 0, pose = null, arrive = Infinity;
         if (unit && moves) {
           n = this.facetsOf ? this.facetsOf(r) : 0;
           if (!samePose(r[8], q[8])) pose = r[9] === ACT_MOVING ? 'start' : q[9] === ACT_MOVING ? 'end' : null;
           else pose = 'start';
+          // Walking at the start and stopped at the end: where the path stops moving.
+          if (pose === 'start' && q[9] !== ACT_MOVING) {
+            let j = path.length - 1;
+            while (j > 0 && path[j - 1][1] === path[j][1] && path[j - 1][2] === path[j][2]) j--;
+            arrive = path[j][0];
+          }
         }
-        this.moving.push([out, r, q, path, n, pose, unit]);
+        this.moving.push([out, r, q, path, n, pose, unit, arrive]);
         return out;
       });
     }
     const f = Math.min(1, (time - view.time) / (next.time - view.time));
-    for (const [out, r, q, path, n, pose, unit] of this.moving) {
+    for (const [out, r, q, path, n, pose, unit, arrive] of this.moving) {
       // The stretch of the path the time falls in.
       let k = 0;
       while (k < path.length - 2 && time >= path[k + 1][0]) k++;
@@ -236,8 +244,11 @@ export class RowInterpolator {
       const sx = b[1] - a[1], sy = b[2] - a[2];
       out[3] = a[1] + sx * g; out[4] = a[2] + sy * g;
       if (!unit) continue;
-      const late = pose ? pose === 'end' : f >= 0.5;
+      // Arrived (and stopped by the later snapshot): its pose and activity, not a walk on the spot.
+      const arrived = time >= arrive;
+      const late = pose ? pose === 'end' || arrived : f >= 0.5;
       out[8] = late ? q[8] : r[8];
+      out[9] = arrived ? q[9] : r[9];
       if (late) out[11] = next.time;
       else if (out.length > r.length) out.length = r.length;
       // Facing: along the stretch while walking it, else the game's own at its start.

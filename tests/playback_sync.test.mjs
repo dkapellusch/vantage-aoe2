@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
-  followingView, playableUntil, pacePlayback, chainedView, viewGridTime,
+  RowInterpolator, followingView, playableUntil, pacePlayback, chainedView, viewGridTime,
 } from '../src/vantage/web/playback.js';
 
 // Keyframes about a second apart, at most one in each second (timeline.py), off
@@ -139,4 +139,26 @@ test('on a fast link pacing changes nothing: 8x plays at 8x', () => {
   const fast = simulate({ paced: true, latency: 20, lanes: 6, seconds: 10 });
   assert.equal(fast.frames.filter((f) => !f.synced).length, 0);
   assert.ok(fast.game > 10 * 13600 * 0.97, `played ${fast.game} game ms in 10 s`);
+});
+
+test('a walker that stops before the next keyframe takes that keyframe\'s pose where it arrives', () => {
+  const WALK = [[70, 0, 0, 0]], WORK = [[71, 0, 0, 0]];
+  const a = [500, 1, 83, 10, 10, 1, 4, 0, WALK, 1];
+  const b = [500, 1, 83, 12, 10, 1, 4, 0, WORK, 2];
+  // The track: at 12,10 already half way through the second.
+  const view = { time: 1000, entities: [a], unit_track: [[1500, [[500, 12, 10, 0]]]] };
+  const next = { time: 2000, entities: [b] };
+  const lerp = new RowInterpolator(() => 8);
+  let r = lerp.at(view, next, 1250)[0];
+  assert.deepEqual([r[3], r[8], r[9]], [11, WALK, 1]); // walking there
+  r = lerp.at(view, next, 1600)[0];
+  assert.deepEqual([r[3], r[8], r[9]], [12, WORK, 2]); // arrived: no walk on the spot
+  assert.equal(r[11], 2000);
+  r = lerp.at(view, next, 1400)[0];
+  assert.deepEqual([r[8], r[9]], [WALK, 1]);
+  assert.equal(r.length, a.length);
+  // Still walking at the next keyframe: the walk is kept throughout.
+  const c = [500, 1, 83, 12, 10, 1, 4, 0, [[72, 0, 0, 0]], 1];
+  const r2 = new RowInterpolator(() => 8).at(view, { time: 2000, entities: [c] }, 1700)[0];
+  assert.deepEqual([r2[8], r2[9]], [WALK, 1]);
 });
