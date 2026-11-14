@@ -12,6 +12,7 @@ deterministic, like the rest of the suite.
 
 from __future__ import annotations
 
+import itertools
 import json
 import threading
 import urllib.request
@@ -1355,3 +1356,107 @@ def test_trackpad_scroll_pans_pinch_zooms_and_a_mouse_wheel_still_zooms(
         assert not page.errors, page.errors
     finally:
         page.context.close()
+
+
+# -- playback in step with its keyframes -------------------------------------------------
+
+WALK_S = 120  # the recording's length, game seconds
+SPEED = 0.25  # tiles per game second
+
+
+def walker_x(t_ms: float) -> float:
+    """The knight's x at game time t: up and down between 0.5 and 3.5, turning on
+    whole keyframes (every 12 s), so interpolating the keyframes is exact."""
+    leg = 3.0 / SPEED * 1000
+    k, r = divmod(t_ms, leg)
+    return 0.5 + SPEED * r / 1000 if int(k) % 2 == 0 else 3.5 - SPEED * r / 1000
+
+
+@pytest.fixture(scope="module")
+def walking_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """A two-minute match in which the knight (104) walks steadily back and forth."""
+    from tests.helpers import delta, set_entity, snapshot_frame
+    from vantage.frames import Frame
+
+    tmp = tmp_path_factory.mktemp("walk")
+    patch = pytest.MonkeyPatch()
+    patch.setenv("VANTAGE_DATA_DIR", str(tmp / "data"))
+    rec = tmp / "recs"
+    rec.mkdir()
+    path = rec / "walk.vrec"
+    with RecordingWriter(path, {"source": "test"}) as w:
+        w.write(snapshot_frame(0))
+        for i in range(1, WALK_S * 2 + 1):
+            t = i * 500
+            step = set_entity(104, "Entity", "worldX", "Float", walker_x(t))
+            w.write(Frame(time=t, patch=delta(t, step).forward(), events=[], commands=[]))
+    session = Session(GameData(None), rec)
+    srv = serve("127.0.0.1", 0, session, [])
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}"
+    req = urllib.request.Request(
+        url + "/api/open",
+        data=json.dumps({"path": str(path)}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    urllib.request.urlopen(req, timeout=5).read()
+    assert session._thread is not None
+    session._thread.join(10)
+    try:
+        yield url
+    finally:
+        session.stop()
+        srv.shutdown()
+        srv.server_close()
+        patch.undo()
+
+
+# Views fetched on the page (no worker) and answered 600 ms late: a slow link. At 8x
+# that is eight game seconds a request.
+SLOW_VIEWS = """
+window.Worker = undefined;
+const realFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  const p = realFetch(input, init);
+  return String((input && input.url) || input).includes('/api/view')
+    ? p.then((r) => new Promise((done) => setTimeout(() => done(r), 600))) : p;
+};
+"""
+
+# After every frame of the viewer: the clock and where the knight was drawn.
+SAMPLE_FRAMES = """() => {
+  const V = window.vantage; window.__walk = [];
+  const loop = () => {
+    const row = V.world.currentRows().find((r) => r[0] === 104);
+    const n = V.S.nextView;
+    if (V.S.playing && row) window.__walk.push([V.S.t, row[3], V.S.view.time, n ? n.time : -1]);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}"""
+
+
+def test_fast_playback_through_a_slow_link_draws_units_where_they_are(
+    browser: Any, walking_base: str
+) -> None:
+    """At 8x with every view arriving 0.6 s late, each drawn frame shows the knight
+    where it was at the clock's time: the clock waits for the keyframes instead of
+    running on while the knight stands still (then jumps when the view lands)."""
+    page = open_page(browser, walking_base, init=SLOW_VIEWS)
+    page.evaluate("() => { const V = window.vantage; V.world.setCamera(2, 2, 1); }")
+    page.evaluate("() => { window.vantage.seek(5000); }")
+    page.wait_for_function("Math.abs(window.vantage.S.view.time - 5000) < 1000", timeout=10000)
+    page.evaluate("() => { const S = window.vantage.S; S.speedIndex = 9; }")  # 8x (SPEEDS)
+    page.evaluate(SAMPLE_FRAMES)
+    page.evaluate("() => { window.vantage.S.playing = true; }")
+    page.wait_for_timeout(4000)
+    frames = page.evaluate("() => window.__walk")
+    page.close()
+    assert not page.errors
+    assert len(frames) > 30
+    times = [f[0] for f in frames]
+    assert all(b >= a for a, b in itertools.pairwise(times)), "the clock went backwards"
+    # It played (at the pace the views arrive), it did not stall.
+    assert times[-1] - times[0] > 8000, f"played only {times[-1] - times[0]:.0f} game ms in 4 s"
+    off = [(t, x, walker_x(t), v, n) for t, x, v, n in frames if abs(x - walker_x(t)) > 0.05]
+    assert not off, f"{len(off)} of {len(frames)} frames drew the knight off its path: {off[:5]}"
