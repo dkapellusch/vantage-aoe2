@@ -60,7 +60,7 @@ export function defaultHud() {
     edits: {},          // preset -> { panels?: [ids], metrics?: [ids] }: only what differs from stock
     hintSeen: false,    // the first-run presets hint was shown
     lock: false,        // panels move and resize only in Edit layout
-    focus: 'production', // the Focus slot's card: production | techs | eco | fight | none
+    focus: 'production', // the Focus slot's card: production | eco | fight | none
     sceneHide: {},      // panel id -> scenes it is hidden in
     scene: 'auto',      // auto, or a scene forced by hand
     snap: true, safeArea: false, // layout editor options
@@ -97,7 +97,9 @@ export function normalizeHud(raw) {
   }
   if (out.preset === CUSTOM && !out.edits[CUSTOM]) out.preset = 'full';
   for (const key of ['hintSeen', 'lock', 'snap', 'safeArea', 'dedupe', 'drawerLeft']) if (typeof raw[key] === 'boolean') out[key] = raw[key];
-  if (['production', 'techs', 'eco', 'fight', 'none'].includes(raw.focus)) out.focus = raw.focus;
+  if (['production', 'eco', 'fight', 'none'].includes(raw.focus)) out.focus = raw.focus;
+  // The research card was removed (the Live research panel shows the same): its slot shows fights.
+  else if (raw.focus === 'techs') out.focus = 'fight';
   if (raw.scene === 'auto' || SCENE_IDS.includes(raw.scene)) out.scene = raw.scene;
   if (raw.sceneHide && typeof raw.sceneHide === 'object') {
     for (const [id, scenes] of Object.entries(raw.sceneHide)) {

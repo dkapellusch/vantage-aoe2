@@ -105,7 +105,7 @@ The **Name** column is the action's name, which you use when rebinding keys as J
 | <kbd>Alt+L</kbd> | Edit layout: move, resize and place panels | `arrangePanels` |
 | <kbd>Ctrl+Alt+D</kbd> | Statistics window: dock right / float | `toggleStatsDock` |
 
-<kbd>F6</kbd>–<kbd>F9</kbd> are free in browsers and in the game. Full sits on <kbd>Shift+F6</kbd> because <kbd>F10</kbd> shows the frame rate. If a Stream Deck or OBS already uses these keys, rebind them in Settings → Hotkeys. <kbd>Alt+C</kbd> / <kbd>Alt+X</kbd> cycle the Focus slot's card while the Dashboard is hidden.
+<kbd>F6</kbd>–<kbd>F9</kbd> are free in browsers and in the game. Full sits on <kbd>Shift+F6</kbd> because <kbd>F10</kbd> shows the frame rate. If a Stream Deck or OBS already uses these keys, rebind them in Settings → Hotkeys. <kbd>Alt+C</kbd> / <kbd>Alt+X</kbd> cycle the Focus slot's card (production, economy, fights, empty) while the Dashboard is hidden.
 
 ### Display
 

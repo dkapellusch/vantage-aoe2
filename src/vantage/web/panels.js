@@ -915,18 +915,6 @@ function staticTechCell(tid, pid, done, active, big = false) {
 function researchingCell(a, pid) { return `<div class="tech doing" data-tech="${a.tech}" data-pid="${a.player || pid}" data-building="${a.building || ''}" ${tip(techInfoFor(a.tech, a.player || pid).name, `${t('researching {p}%', { p: Math.round(a.progress * 100) })} · ${t('click: go to its building')}`)}><img src="${techIconFor(a.tech, a.player || pid)}" alt=""><div class="prog" style="width:${Math.round(a.progress * 100)}%"></div></div>`; }
 function lingerCell(e) { return `<div class="tech yes linger" data-tech="${e.tech}" data-pid="${e.player}" data-x="${e.x ?? ''}" data-y="${e.y ?? ''}" ${tip(techInfoFor(e.tech, e.player).name, t('researched'))}><img src="${techIconFor(e.tech, e.player)}" alt=""></div>`; }
 
-/** Research in progress and just finished, a row per player or team (the Focus slot's Techs card). */
-function researchRowsHtml() {
-  const rows = [];
-  for (const { pid, s, pids } of techRows()) {
-    if (!s) continue;
-    const active = s.research_active || [];
-    const cells = active.map((a) => researchingCell(a, pid)).join('') + lingering(pids, new Set(active.map((a) => a.tech))).map(lingerCell).join('');
-    rows.push(`<div class="tech-row${isDead(pid) ? ' dead' : ''}"><div class="who" style="background:${playerMarkColor(pid)}"></div><div class="dyn-techs">${cells || `<span class="hint">${t('No research')}</span>`}</div></div>`);
-  }
-  return rows.join('');
-}
-
 export function renderTechs() {
   renderSlideout();
   const el = $('techs');
@@ -2582,7 +2570,7 @@ export function scrubTime(ev) {
 
 /** What the newer panels (pulse.js, focus-slot.js, story.js, widgets.js) reuse from here. */
 export const HUD_PARTS = {
-  setHtml, delegate, hudEl, ageShield, series, orderedTeams, isDead, productionRowsHtml, productionClick, researchRowsHtml, techClick,
+  setHtml, delegate, hudEl, ageShield, series, orderedTeams, isDead, productionRowsHtml, productionClick,
   eventLi, isHigh, eventText, eventCat, goToBuilding, miniChart, sideKey, setText, unitRows: () => unitRows,
 };
 export { player, setText };

@@ -737,6 +737,80 @@ def test_new_panels_keep_contrast_in_the_default_and_high_contrast_skins(
         page.context.close()
 
 
+DASH = "\u2013"  # the en dash in the fight card's time ranges
+FIGHTS = """() => { const S = window.vantage.S;
+  const kill = (t, owner) => ({ t, kind: 'kill', cat: 'combat', friendly: false, x: 20, y: 30,
+    victim: { owner, master: 4, kind: 'unit', cost: { food: 25, wood: 45 } } });
+  for (const t of [20000, 21000, 60000, 61000, 62000]) S.events.push(kill(t, t % 2000 ? 2 : 1));
+  S.events.sort((a, b) => a.t - b.t); }"""
+
+
+def test_focus_slot_has_no_tech_card_and_the_fight_card_picks_any_fight(
+    browser: Any, base: str
+) -> None:
+    saved = {**SEEN, "hud": {"preset": "caster", "hintSeen": True, "focus": "techs"}}
+    page = open_page(browser, base, saved=saved)
+    page.wait_for_function("document.querySelector('#focus .fs-tabs')")
+    # The research card is gone, and a saved Tech card opens on the Fight card.
+    cards = page.eval_on_selector_all("#focus [data-focus]", "bs => bs.map((b) => b.dataset.focus)")
+    assert cards == ["production", "eco", "fight", "none"]
+    assert page.get_attribute('#focus [data-focus="fight"]', "aria-pressed") == "true"
+    assert "No fight yet" in page.inner_text("#focus .fs-body")
+
+    # The Eco card keeps its rows and adds the new ones the recording has.
+    page.click('#focus [data-focus="eco"]')
+    page.wait_for_selector("#focus .ctable")
+    rows = page.eval_on_selector_all(
+        "#focus .ctable tbody th", "ths => ths.map((th) => th.textContent)"
+    )
+    for label in ("Gatherers F / W / G / S", "Idle villagers", "Idle TC (growth)", "Banked"):
+        assert label in rows, rows
+    page.click('#focus [data-focus="fight"]')
+
+    # Two fights (kills ten seconds apart or more are separate); the clock is after both.
+    page.evaluate(FIGHTS)
+    page.evaluate("() => { window.vantage.S.t = 90000; }")
+    page.wait_for_selector("#fs-fight-pick")
+    labels = page.eval_on_selector_all("#fs-fight-pick option", "os => os.map((o) => o.text)")
+    assert labels == [
+        "Latest",
+        f"1:00{DASH}1:02 · 3 kills · 210 res",
+        f"0:20{DASH}0:21 · 2 kills · 140 res",
+    ]
+    assert page.input_value("#fs-fight-pick") == "latest"
+    assert page.inner_text("#focus .fs-fight-when").startswith(f"1:00{DASH}1:02")
+
+    # Pick the older one: it stays picked, in the same <select>, across re-renders.
+    page.evaluate("() => { document.getElementById('fs-fight-pick').marked = true; }")
+    page.select_option("#fs-fight-pick", "20000")
+    page.wait_for_function(
+        "document.querySelector('#focus .fs-fight-when').textContent.startsWith('0:20')"
+    )
+    page.evaluate("() => { window.vantage.S.t = 95000; }")
+    page.wait_for_timeout(600)
+    assert page.input_value("#fs-fight-pick") == "20000"
+    assert page.evaluate("document.getElementById('fs-fight-pick').marked") is True
+    assert page.inner_text("#focus .fs-fight-when").startswith(f"0:20{DASH}0:21")
+    # Its jump button seeks to three seconds before it (this recording ends sooner).
+    page.click("#focus .fs-fight-when")
+    page.wait_for_function("window.vantage.S.t === Math.min(17000, window.vantage.S.end)")
+    # Seeking back before the picked fight falls back to Latest (and to no fight at all here).
+    page.wait_for_function(
+        "document.querySelector('#focus .fs-body').textContent.includes('No fight yet')"
+    )
+    page.evaluate("() => { window.vantage.S.t = 90000; }")
+    page.wait_for_function("document.getElementById('fs-fight-pick')?.value === 'latest'")
+    assert page.inner_text("#focus .fs-fight-when").startswith(f"1:00{DASH}1:02")
+    # Latest from the list again after a pick.
+    page.select_option("#fs-fight-pick", "20000")
+    page.select_option("#fs-fight-pick", "latest")
+    page.wait_for_function(
+        "document.querySelector('#focus .fs-fight-when').textContent.startsWith('1:00')"
+    )
+    assert not page.errors
+    page.context.close()
+
+
 def test_obs_overlay_is_transparent_and_carries_nothing_of_its_own(browser: Any, base: str) -> None:
     page = open_page(browser, base + "/?overlay=1#hud=caster")
     page.wait_for_function("document.getElementById('pulse')?.textContent.trim()")

@@ -114,7 +114,7 @@ export function installLayoutEditor(ctx) {
   // -- the inspector -------------------------------------------------------------------------------
   function contentHtml(id) {
     const w = (hud().widgets || {})[id] || {};
-    if (id === 'focus') return `<label>${esc(t('Card'))} <select data-le-focus>${[['production', 'Production & composition'], ['techs', 'Research'], ['eco', 'Economy'], ['fight', 'Last fight'], ['none', 'Empty']].map(([k, l]) => `<option value="${k}" ${hud().focus === k ? 'selected' : ''}>${esc(t(l))}</option>`).join('')}</select></label>`;
+    if (id === 'focus') return `<label>${esc(t('Card'))} <select data-le-focus>${[['production', 'Production & composition'], ['eco', 'Economy'], ['fight', 'Fights'], ['none', 'Empty']].map(([k, l]) => `<option value="${k}" ${hud().focus === k ? 'selected' : ''}>${esc(t(l))}</option>`).join('')}</select></label>`;
     if (id === 'w-chart') return `<label>${esc(t('Series'))} <select data-le-widget="series">${Object.keys(SERIES_LABEL).map((k) => `<option value="${k}" ${(w.series || 'army_value') === k ? 'selected' : ''}>${esc(seriesLabel(k))}</option>`).join('')}</select></label>`;
     if (id === 'w-text') return `<label>${esc(t('Text'))} <input data-le-widget="text" maxlength="200" value="${esc(w.text || '')}"></label><label>${esc(t('Image address'))} <input data-le-widget="image" maxlength="2000" placeholder="https://…" value="${esc(w.image || '')}"></label>`;
     if (id === 'pulse') return `<p class="hint">${esc(t('Its metrics are ticked in Customize → Pulse strip metrics.'))}</p>`;

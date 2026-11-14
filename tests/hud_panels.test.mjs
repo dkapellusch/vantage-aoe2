@@ -69,12 +69,9 @@ test('fights: kills within ten seconds form one, with what each side lost', () =
   assert.equal(fights[1].kills, 2, 'a friendly kill is not counted');
   assert.equal(fights[1].value, 130);
   assert.deepEqual(F.findFights([]), []);
-  // The recap shows a fight while it runs and for 45 seconds after.
-  assert.equal(F.fightForRecap(fights, 12000), fights[0]);
-  assert.equal(F.fightForRecap(fights, 19000 + 45000), fights[0]);
-  assert.equal(F.fightForRecap(fights, 19000 + 45001), null);
-  assert.equal(F.fightForRecap(fights, 5000), null);
-  assert.equal(F.fightForRecap(fights, 200000), null);
+  // The Fight card lists them all, newest first, with no cut-off after a fight ends (focus_slot.test.mjs).
+  assert.deepEqual(F.fightsUpTo(events, fights, 200000), [fights[1], fights[0]]);
+  assert.deepEqual(F.fightsUpTo(events, fights, 5000), []);
   assert.equal(F.fightsOf(events), F.fightsOf(events), 'cached per event list');
 });
 

@@ -1,7 +1,7 @@
 // Fights and key events, found in the event log: kills closer together than GAP form one
 // fight. Each fight carries what every player lost (units, resource value,
 // by unit type), so the Match story can size its bar by resources lost and the
-// Focus slot can print a recap. Pure; cached per event list by the callers.
+// Focus slot can list them and print a recap. Pure; cached per event list by the callers.
 
 import { TOWN_CENTERS, GOTO_BUILDINGS } from './games.js';
 
@@ -30,14 +30,30 @@ export function findFights(events, gap = GAP_MS, minKills = MIN_KILLS) {
   return fights;
 }
 
-/** The fight to recap at time `at`: the one under way, or the last that ended within `keep` ms. */
-export function fightForRecap(fights, at, keep = 45000) {
+// The index of the first event after `t` (strictly later with `after`); events are in time order.
+function indexAt(events, t, after = false) {
+  let lo = 0, hi = events.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (events[mid].t < t || (after && events[mid].t === t)) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+
+/**
+ * The fights begun by time `at`, newest first (the Focus slot's Fight card). The one under way
+ * is cut at `at`: a recording holds the kills still to come, and the recap must not show them
+ * (until its second kill it is not a fight yet). `fights` is findFights(events).
+ */
+export function fightsUpTo(events, fights, at) {
+  const out = [];
   for (let i = fights.length - 1; i >= 0; i--) {
     const f = fights[i];
     if (f.from > at) continue;
-    return at - f.to <= keep ? f : null;
+    if (f.to <= at) out.push(f);
+    else {
+      const cut = findFights(events.slice(indexAt(events, f.from), indexAt(events, at, true)))[0];
+      if (cut) out.push(cut);
+    }
   }
-  return null;
+  return out;
 }
 
 let cache = { events: null, n: -1, fights: [] };

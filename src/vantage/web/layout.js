@@ -39,7 +39,7 @@ export const PANELS = [
   { id: 'unitpanel', label: 'Selection panel', collapse: true, action: 'toggleSelectionPanel' },
   { id: 'timebar', label: 'Time controls', collapse: true, action: 'toggleScrubbingBar' },
   { id: 'minimap', host: 'minimap-wrap', label: 'Minimap' },
-  { id: 'focus', label: 'Focus slot', extra: true, module: 'focus-slot', action: 'toggleFocusSlot', detail: 'One card at a time: production, techs, economy or the last fight' },
+  { id: 'focus', label: 'Focus slot', extra: true, module: 'focus-slot', action: 'toggleFocusSlot', detail: 'One card at a time: production, economy or fights' },
   { id: 'ticker', label: 'Event ticker', extra: true, module: 'focus-slot', detail: 'Key events only, two lines, fading after 8 seconds' },
   { id: 'selchip', label: 'Selection chip', extra: true, module: 'focus-slot', detail: 'One line for the selection; opens the Selection panel' },
   { id: 'reviewcards', label: 'Review cards', extra: true, module: 'story', detail: 'Six mistake metrics, side against side' },

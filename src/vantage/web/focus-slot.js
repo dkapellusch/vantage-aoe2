@@ -1,8 +1,9 @@
 // Three small caster panels:
 //
-// Focus slot (#focus)  one card at a time: Production, Techs, Eco or the last
-//                      fight. Alt+C / Alt+X cycle it (when the dashboard is
-//                      hidden); empty is a valid state.
+// Focus slot (#focus)  one card at a time: Production, Eco or a fight (the
+//                      latest, or one picked from every fight so far). Alt+C /
+//                      Alt+X cycle it (when the dashboard is hidden); empty is
+//                      a valid state.
 // Event ticker (#ticker) the event log cut down to key events (age-ups, a town
 //                      centre or castle lost, wonders, resignations), two
 //                      lines, fading after about 8 seconds.
@@ -15,12 +16,13 @@ import { HUD_PARTS } from './panels.js';
 import { centerOn, selectedRows } from './world.js';
 import { METRICS } from './metrics.js';
 import { sumStat } from './team-board.js';
-import { fightsOf, fightForRecap, tickerEvents } from './fights.js';
+import { fightsOf, fightsUpTo, tickerEvents } from './fights.js';
 import { compareTableHtml, sideStats } from './compare-table.js';
 import { hud, setHud, expandSelection, selectionExpanded, isVisible } from './layout.js';
 
 // The card titles say "Focus": the production card is not the Production & composition panel.
-const CARDS = [['production', 'Prod', 'Focus: production'], ['techs', 'Tech', 'Focus: research'], ['eco', 'Eco', 'Focus: economy'], ['fight', 'Fight', 'Focus: last fight']];
+// (The research card is gone: the Live research panel shows the same.)
+const CARDS = [['production', 'Prod', 'Focus: production'], ['eco', 'Eco', 'Focus: economy'], ['fight', 'Fight', 'Focus: fights']];
 
 function sides() {
   const teams = HUD_PARTS.orderedTeams();
@@ -30,36 +32,89 @@ function sides() {
 
 // -- Focus slot --------------------------------------------------------------------------------
 
+// The activities that count as work in worker efficiency (timeline.py _PRODUCTIVE).
+const PRODUCTIVE = ['gather_food', 'gather_wood', 'gather_gold', 'gather_stone', 'building', 'repairing'];
+
+/**
+ * A side's worker efficiency (%), whole game (`all`) or over the last minute (`last_minute`).
+ * One player: the game's own figure. A team: its players' villager-seconds pooled (productive
+ * over all, garrisoned left out, as timeline.py counts them), so a player with more villagers
+ * weighs more; when a player's breakdown is missing, the plain mean of the percentages.
+ */
+export function sideEfficiency(stats, window = 'all') {
+  const pctKey = window === 'all' ? 'pct' : 'pct_lm';
+  const effs = stats.map((s) => s && s.efficiency).filter((e) => e && typeof e[pctKey] === 'number');
+  if (!effs.length) return null;
+  if (effs.length === 1) return effs[0][pctKey];
+  if (effs.every((e) => e[window] && typeof e[window] === 'object')) {
+    let work = 0, time = 0;
+    for (const e of effs) {
+      for (const [k, v] of Object.entries(e[window])) if (k !== 'garrisoned' && Number.isFinite(v)) time += v;
+      for (const k of PRODUCTIVE) work += Number.isFinite(e[window][k]) ? e[window][k] : 0;
+    }
+    return time > 0 ? Math.round(1000 * work / time) / 10 : null;
+  }
+  return effs.reduce((a, e) => a + e[pctKey], 0) / effs.length;
+}
+
+// As on the Review cards.
+const TC_IDLE_DETAIL = 'Town centre time without a villager in production, while still growing';
+
 export function ecoRows(list) {
   const stats = list.map(sideStats);
   const of = (f) => stats.map((s) => sumStat(s, f));
+  const num = (vals, f = (v) => v) => vals.map((v) => fmtNum(f(v ?? 0)));
+  const time = (vals) => vals.map((v) => (v == null ? '–' : fmtTime(v * 1000)));
+  const pct = (vals) => vals.map((v) => (v == null ? '–' : `${Math.round(v)}%`));
   const gather = stats.map((s) => RES.map((r) => sumStat(s, (x) => x.tasks?.[r] ?? 0) ?? 0));
+  const rate = of(METRICS.rate.f), collected = of(METRICS.collected.f), bonus = of(METRICS.bonus.f), banked = of(METRICS.banked.f);
+  const tcIdle = of((s) => s.tc_idle_seconds);
+  const effLm = stats.map((s) => sideEfficiency(s, 'last_minute')), eff = stats.map((s) => sideEfficiency(s, 'all'));
   return [
     { label: 'Gatherers F / W / G / S', values: gather.map((g) => g.reduce((a, b) => a + b, 0)), text: gather.map((g) => g.join('/')) },
-    { label: METRICS.rate.label, detail: METRICS.rate.detail, values: of(METRICS.rate.f), text: of(METRICS.rate.f).map((v) => fmtNum(v ?? 0)), series: 'rate_total' },
-    { label: METRICS.collected.label, detail: METRICS.collected.detail, values: of(METRICS.collected.f), text: of(METRICS.collected.f).map((v) => fmtNum(v ?? 0)), series: 'col_total' },
+    { label: METRICS.rate.label, detail: METRICS.rate.detail, values: rate, text: num(rate), series: 'rate_total' },
+    { label: METRICS.collected.label, detail: METRICS.collected.detail, values: collected, text: num(collected), series: 'col_total' },
+    { label: METRICS.bonus.label, detail: METRICS.bonus.detail, values: bonus, text: num(bonus, Math.round), series: METRICS.bonus.series },
     { label: METRICS.idle_villagers.label, values: of(METRICS.idle_villagers.f), lower: true, warnWorst: true, series: 'idle' },
-    { label: METRICS.banked.label, detail: METRICS.banked.detail, values: of(METRICS.banked.f), text: of(METRICS.banked.f).map((v) => fmtNum(Math.floor(v ?? 0))), lower: true },
+    { label: METRICS.tc_idle.label, detail: TC_IDLE_DETAIL, values: tcIdle, text: time(tcIdle), lower: true, warnWorst: true, series: METRICS.tc_idle.series },
+    { label: 'Worker efficiency (last minute)', detail: METRICS.efficiency.detail, values: effLm, text: pct(effLm), margin: 3, series: 'efficiency_lm' },
+    { label: 'Worker efficiency (whole game)', detail: METRICS.efficiency.detail, values: eff, text: pct(eff), margin: 3, series: METRICS.efficiency.series },
+    { label: METRICS.banked.label, detail: METRICS.banked.detail, values: banked, text: num(banked, Math.floor), lower: true },
   ];
 }
 
+// The fight picked in the Fight card ({ from, events }), or null to follow the latest. It
+// lasts until a seek goes back before the fight began (or another recording opens).
+let pinned = null;
+
+/** The Fight card's dropdown entry for a fight: "12:34–13:10 · 23 kills · 4120 res". */
+export function fightLabel(f) {
+  return `${fmtTime(f.from)}–${fmtTime(f.to)} · ${t('{n} kills', { n: f.kills })} · ${fmtNum(f.value)} ${t('res')}`;
+}
+
 function fightHtml() {
-  const f = fightForRecap(fightsOf(S.events), S.t);
-  if (!f) return `<p class="hint fs-empty">${t('No fight in the last 45 seconds')}</p>`;
+  const list = fightsUpTo(S.events, fightsOf(S.events), S.t);
+  if (pinned && (pinned.events !== S.events || !list.some((x) => x.from === pinned.from))) pinned = null;
+  if (!list.length) return `<p class="hint fs-empty">${t('No fight yet')}</p>`;
+  const f = pinned ? list.find((x) => x.from === pinned.from) : list[0];
+  // Keyed options: a new fight is inserted, the open list is not rebuilt on every tick.
+  const options = [`<option value="latest" data-ui-key="latest"${pinned ? '' : ' selected'}>${esc(t('Latest'))}</option>`]
+    .concat(list.map((x) => `<option value="${x.from}" data-ui-key="fight-${x.from}"${pinned && x === f ? ' selected' : ''}>${esc(fightLabel(x))}</option>`)).join('');
+  const pick = `<select id="fs-fight-pick" class="fs-fight-pick" data-fight-pick aria-label="${esc(t('Fight to recap'))}">${options}</select>`;
   const rows = Object.entries(f.lost).sort((a, b) => b[1].value - a[1].value).map(([pid, lost]) => {
     const units = Object.entries(lost.masters).sort((a, b) => b[1] - a[1]).slice(0, 6)
       .map(([mid, n]) => `<span class="icon-count" title="${esc(unitInfo(+mid, +pid).name)}"><img src="${unitIcon(+mid, +pid)}" alt="${esc(unitInfo(+mid, +pid).name)}"><b>${n}</b></span>`).join('');
     return `<div class="fs-fight-row" data-ui-key="lost-${pid}"><i style="background:${playerMarkColor(+pid)}"></i><span class="fs-who" style="color:${playerTextColor(+pid)}">${esc(playerName(+pid))}</span>
       <span class="fs-lost">${t('lost {n}', { n: lost.n })} · <b>${fmtNum(lost.value)}</b> ${t('res')}</span><span class="fs-units">${units}</span></div>`;
   }).join('');
-  return `<button type="button" class="fs-fight-when" data-fight-t="${f.from}" data-x="${f.x}" data-y="${f.y}" aria-label="${esc(t('Jump to the fight at {time}', { time: fmtTime(f.from) }))}">${fmtTime(f.from)}–${fmtTime(f.to)} · ${t('{n} kills', { n: f.kills })} ▸</button>${rows}`;
+  return `${pick}<button type="button" class="fs-fight-when" data-fight-t="${f.from}" data-x="${f.x}" data-y="${f.y}" aria-label="${esc(t('Jump to the fight at {time}', { time: fmtTime(f.from) }))}">${fmtTime(f.from)}–${fmtTime(f.to)} · ${t('{n} kills', { n: f.kills })} ▸</button>${rows}`;
 }
 
 function renderFocus(el, ctx) {
   HUD_PARTS.delegate(el, 'click', '[data-focus]', (d) => { setHud({ ...hud(), focus: d.dataset.focus }); ctx.onChange(); });
   HUD_PARTS.delegate(el, 'click', '.icon-count[data-line], .icon-count[data-where]', HUD_PARTS.productionClick);
-  HUD_PARTS.delegate(el, 'click', '.tech', HUD_PARTS.techClick);
   HUD_PARTS.delegate(el, 'click', '[data-series]', (d) => window.dispatchEvent(new CustomEvent('vantage-investigate', { detail: { pid: +d.dataset.pid, metric: d.dataset.series } })));
+  HUD_PARTS.delegate(el, 'change', '[data-fight-pick]', (d) => { pinned = d.value === 'latest' ? null : { from: +d.value, events: S.events }; ctx.onChange(); });
   HUD_PARTS.delegate(el, 'click', '[data-fight-t]', (d) => { ctx.seek(+d.dataset.fightT - 3000); centerOn(+d.dataset.x, +d.dataset.y); ctx.onChange(); });
   const card = hud().focus;
   const tabs = `<span class="fs-tabs" role="group" aria-label="${esc(t('Focus slot card'))}">${CARDS.map(([id, short, name]) => `<button type="button" data-focus="${id}" aria-pressed="${card === id}" aria-label="${esc(t(name))}">${esc(t(short))}</button>`).join('')}<button type="button" data-focus="none" aria-pressed="${card === 'none'}" aria-label="${esc(t('Empty the Focus slot'))}">–</button></span>`;
@@ -67,12 +122,16 @@ function renderFocus(el, ctx) {
   let body = '';
   if (S.view && info) {
     if (card === 'production') body = `<div class="fs-prod">${HUD_PARTS.productionRowsHtml()}</div>`;
-    else if (card === 'techs') body = `<div class="fs-techs">${HUD_PARTS.researchRowsHtml()}</div>`;
     else if (card === 'eco') body = compareTableHtml(sides(), ecoRows(sides()));
     else if (card === 'fight') body = `<div class="fs-fight">${fightHtml()}</div>`;
   }
   el.classList.toggle('empty', !info);
   HUD_PARTS.setHtml(el, `<div class="fs-head"><span class="fs-title">${info ? esc(t(info[2])) : esc(t('Focus slot'))}</span>${tabs}</div>${info ? `<div class="fs-body">${body}</div>` : ''}`);
+  // The selected option follows the pin even after the viewer's own pick made the list "dirty"
+  // (a changed selected attribute no longer moves the selection then).
+  const pick = card === 'fight' && el.querySelector('#fs-fight-pick');
+  const want = pinned ? String(pinned.from) : 'latest';
+  if (pick && pick.value !== want) pick.value = want;
 }
 
 // -- Event ticker --------------------------------------------------------------------------------

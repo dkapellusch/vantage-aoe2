@@ -1266,5 +1266,18 @@
  "As the display (sharpest)",
  "Balanced (1.5x on a high-density display)",
  "Fast (1x)",
- "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp"
+ "Fewer pixels to draw on a high-density (Retina) display; the panels stay sharp",
+ "Bonus resources",
+ "Civilization, technology and event grants, including the starting bonus",
+ "Idle TC (growth)",
+ "Town centre time without a villager in production, while still growing",
+ "Worker efficiency (last minute)",
+ "Worker efficiency (whole game)",
+ "Share of villager time spent working",
+ "Focus: fights",
+ "Fights",
+ "Latest",
+ "Fight to recap",
+ "No fight yet",
+ "One card at a time: production, economy or fights"
 ]

@@ -38,7 +38,7 @@ A new viewer starts on Minimal when Vantage is embedded in another page, hosted 
 The panels the presets add:
 
 - **Pulse strip**: one row per side. Name, age, villagers, military, army value (with the lead printed on the leading side), idle villagers (amber at two or more per player), population (flashing when housed), and each banked resource with its per-minute rate beside it. Every value is a button that opens Statistics on that series; the clock pauses and plays.
-- **Focus slot**: one card at a time (production, research, economy, the last fight). <kbd>Alt+C</kbd> / <kbd>Alt+X</kbd> cycle it while the Dashboard is hidden; empty is a valid state.
+- **Focus slot**: one card at a time: production, economy (gatherers, collection rate, bonus resources, idle villagers, idle TC time, worker efficiency, bank) or fights. The Fight card follows the latest fight; its list holds every fight so far, newest first, and picking one keeps its recap on screen until you pick **Latest** again or seek back before it. <kbd>Alt+C</kbd> / <kbd>Alt+X</kbd> cycle it while the Dashboard is hidden; empty is a valid state.
 - **Event ticker**: key events only (age-ups, a town centre or castle lost, wonders, resignations), two lines, fading after about 8 seconds.
 - **Selection chip**: one line for the selection; press it for the full Selection panel.
 - **Match story timeline**: the army-value lead (above the centre line the left side leads), age-ups, fights sized by the resources lost, idle town centres and bookmarks on one time axis, with the playback buttons. Click to jump, drag across a span to open Investigate on it, arrow keys step 5 seconds.

@@ -16,7 +16,7 @@ All notable changes to Vantage are documented here. The format follows
 - The **Pulse strip**, a new panel beside the Scoreboard: one row per side with age, villagers,
   military, army value (the lead on the leading side), idle villagers, population, and each banked
   resource with its per-minute rate. Every value is a labelled button that opens Statistics.
-- The **Focus slot** (one card at a time: production, research, economy, the last fight), the
+- The **Focus slot** (one card at a time: production, economy, or fights with a list of every fight so far), the
   **Event ticker** (key events, two lines, fading), the **Selection chip**, the **Match story
   timeline** (army lead, age-ups, fights sized by resources lost, idle town centres and bookmarks on
   one axis, with the playback buttons; drag a span to investigate it) and **Review cards** (six

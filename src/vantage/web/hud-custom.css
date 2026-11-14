@@ -144,8 +144,9 @@ body.stats-docked[data-hud-layout="caster"] :is(#minimap-wrap, #timebar, #events
 #focus.empty { opacity: .35; min-width: 0; }
 #focus.empty:hover, #focus.empty:focus-within { opacity: 1; }
 body.overlay-mode #focus.empty { display: none; }
-#focus .fs-prod .prod-row:last-child, #focus .tech-row:last-child { border-bottom: 0; }
+#focus .fs-prod .prod-row:last-child { border-bottom: 0; }
 #focus .fs-empty { margin: 6px 2px; font-size: 13px; }
+#focus .fs-fight-pick { display: block; width: 100%; margin-bottom: 4px; font: 600 12px var(--mono); }
 #focus .fs-fight-when { margin-bottom: 4px; font: 600 12px var(--mono); }
 #focus .fs-fight-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-top: 1px solid var(--line); font-size: 14px; }
 #focus .fs-fight-row > i { width: 5px; align-self: stretch; border-radius: 2px; }

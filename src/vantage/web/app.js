@@ -2109,7 +2109,7 @@ function escapeLayerOrOpenMenu() {
 
 // -- actions ------------------------------------------------------------------------------
 
-const FOCUS_CARDS = ['production', 'techs', 'eco', 'fight', 'none'];
+const FOCUS_CARDS = ['production', 'eco', 'fight', 'none'];
 // Alt+C / Alt+X: the Focus slot's next card, when it is on screen and the dashboard is not.
 function cycleFocus(dir) {
   if (layout.isVisible('dashboard') || !layout.isVisible('focus')) return false;
