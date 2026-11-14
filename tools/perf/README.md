@@ -86,3 +86,32 @@ Frame `interval` is the time between frame callbacks (what the eye sees; 16.7 ms
 is the display's limit). Frame `work` is the time inside the viewer's own frame
 callback: the number to compare between builds, because it is not clamped by
 the display.
+
+## Playback sync (`playsync.py`)
+
+Is fast playback drawn from the right data? It plays at `--speeds` with the
+camera on a busy spot and checks every frame the world draws
+(`world.currentRows()`, after the viewer's frame callback) against the clock:
+
+| count | what it is |
+|---|---|
+| teleports | a unit's drawn position moved further in one frame than any unit walks in the game time the frame covered (3 tiles per game second plus 0.15). `>6 tiles` are mostly the game's own (a villager leaving a building) |
+| run in place | a unit in its walking activity whose drawn position did not move while the clock advanced; `why` splits it: `noBracket` (no pair of keyframes around the clock), `interpolated` (the interpolation stopped it), `standsInData`/`notInNext` (the game's own) |
+| no bracket | frames where the clock advanced without a next view, or past it: every unit holds still while its animation runs on, then jumps when the view lands |
+| stale, back, viewBack, badPair | the view more than 1.5 s behind the clock; the clock, or the view in use, going backwards; a next view not after the view |
+| gfxWait, dataWait | frames held for graphics (graphics buffering) or slowed for keyframes (data buffering) |
+
+```sh
+uv run --with playwright python tools/perf/playsync.py --base http://127.0.0.1:8792 \
+    --spots spots.json --where late.fight --speeds 8,4 --seconds 30 --out sync.json \
+    [--web <checkout>/src/vantage/web] [--timeline tl/run]   # per-frame [wall, t, view, next, waits, ...]
+# the laptop-through-a-hub profile: through remote_proxy.py, Retina, CPU 4x slower
+uv run --with playwright python tools/perf/playsync.py --base https://localhost:8797 \
+    --spots spots.json --dpr 2 --size 1440 900 --cpu 4 --hud full --out sync-mac.json
+```
+
+A slow link (`remote_proxy.py --rtt 250 --mbps 10`) is the stress case for the
+clock against the views: before the views were paced, 8x there flipped between
+two outcomes per run, either graphics buffering happened to hold the clock (in
+step, slow) or the clock outran the views for good (99 % of the game time
+without a pair of keyframes, thousands of teleports a minute).
