@@ -1040,6 +1040,21 @@ class App:
             t = int(q["t"]) if q.get("t") not in (None, "") else None
             body = tl.view_json(t) if tl else None
             return _json_body(h, body or b"{}")
+        if path == "/api/pack":
+            # Every view of a finished match, for the browser to keep (viewpack.py).
+            return _json(h, (tl.pack_index() if tl else None) or {})
+        if path == "/api/pack/chunk":
+            index = tl.pack_index() if tl else None
+            raw_i = q.get("i") or ""
+            # A chunk is named with its pack's key: a page that holds the index of
+            # another timeline (a reload of the session) must not mix the two.
+            if index is None or not raw_i.isdigit() or q.get("k") != index["key"]:
+                return _error(h)
+            assert tl is not None
+            blob = tl.pack_chunk(int(raw_i))
+            if blob is None:
+                return _error(h)
+            return _bytes(h, blob, "application/octet-stream", cache=ASSET_IMMUTABLE)
         m = re.match(r"^/api/unit/(-?\d+)$", path)
         if m:
             t = int(q["t"]) if q.get("t") else None

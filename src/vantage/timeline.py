@@ -31,6 +31,7 @@ commands always count, because repeating them queues more work.
 from __future__ import annotations
 
 import base64
+import contextlib
 import gc
 import hashlib
 import json
@@ -42,9 +43,12 @@ from bisect import bisect_left, bisect_right
 from collections import OrderedDict, defaultdict, deque
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from vantage import viewpack
 from vantage import world as W
+from vantage.assetcache import SingleFlight, atomic_write
 from vantage.building_activity import BuildingHistory
 from vantage.combat_review import PressureTracker, PressureWorker, military_review
 from vantage.frames import Frame
@@ -419,6 +423,15 @@ class Timeline:
         self._view_cache: OrderedDict[tuple[int, bool], bytes] = OrderedDict()
         self._decoded_cache: OrderedDict[int, dict[str, Any]] = OrderedDict()
         self._cache_lock = threading.Lock()
+        #: The view pack of a complete timeline (:meth:`pack_index`): its index and
+        #: the chunks encoded so far.
+        self._pack: tuple[dict[str, Any], dict[int, bytes]] | None = None
+        self._pack_flight: SingleFlight[bytes] = SingleFlight()
+        #: Views per chunk of the pack; None picks it from the size of the views.
+        self.pack_chunk_views: int | None = None
+        #: Where encoded chunks are kept between runs, or None for memory only.
+        cache_dir = getattr(self.data, "cache_dir", None)
+        self.pack_dir: Path | None = Path(cache_dir) / "packs" if cache_dir else None
         #: :meth:`series_json` at a version: (version, result).
         self._series_cache: tuple[int, dict[str, list[dict[str, Any]]]] | None = None
 
@@ -2067,6 +2080,93 @@ class Timeline:
                     self._view_cache.popitem(last=False)
         return out
 
+    # -- the view pack ---------------------------------------------------------
+    # Every view of a finished match in a few MB (viewpack.py), for the browser to
+    # keep: a seek is then rebuilt locally instead of asked for.
+
+    def pack_index(self) -> dict[str, Any] | None:
+        """What the pack holds: its key (it names the content: another recording,
+        or the same one read by another build, has another key), every keyframe's
+        time and how many views a chunk has. None until the timeline is complete:
+        a growing match is served view by view."""
+        if not self.complete or not self.keyframes:
+            return None
+        with self._cache_lock:
+            if self._pack is not None:
+                return self._pack[0]
+        keyframes = self.keyframes
+        per_chunk = self.pack_chunk_views or viewpack.chunk_views(
+            sum(len(k.blob) for k in keyframes) / len(keyframes)
+        )
+        digest = hashlib.sha1(b"viewpack %d %d\n" % (viewpack.VERSION, per_chunk))
+        for k in keyframes:
+            digest.update(b"%d %d %d\n" % (k.time, len(k.blob), zlib.crc32(k.blob)))
+        for name, tracks in (("m", self.missiles), ("u", self.unit_tracks)):
+            for t in sorted(tracks):
+                digest.update(b"%s %d %d\n" % (name.encode(), t, zlib.crc32(tracks[t])))
+        for f in self.fog:
+            digest.update(b"f %d %d\n" % (f[0], zlib.crc32(f[1])))
+        for tr in self.trees:
+            digest.update(b"t %d %d\n" % (tr[0], zlib.crc32(tr[1])))
+        for te in self.terrain:
+            digest.update(b"g %d %d\n" % (te[0], zlib.crc32(te[1])))
+        index = {
+            "v": viewpack.VERSION,
+            "key": digest.hexdigest()[:20],
+            "chunk_views": per_chunk,
+            "times": [k.time for k in keyframes],
+        }
+        with self._cache_lock:
+            if self._pack is None:
+                self._pack = (index, {})
+            return self._pack[0]
+
+    def pack_chunk(self, i: int) -> bytes | None:
+        """Chunk ``i`` of the pack (gzip bytes), encoded on first use and kept."""
+        index = self.pack_index()
+        if index is None:
+            return None
+        times: list[int] = index["times"]
+        per_chunk: int = index["chunk_views"]
+        first = i * per_chunk
+        if i < 0 or first >= len(times):
+            return None
+        with self._cache_lock:
+            assert self._pack is not None
+            chunks: dict[int, bytes] = self._pack[1]
+            hit = chunks.get(i)
+        if hit is not None:
+            return hit
+        path: Path | None = (
+            self.pack_dir / index["key"] / f"{i}.gz" if self.pack_dir is not None else None
+        )
+
+        def build() -> bytes:
+            if path is not None:
+                try:
+                    return path.read_bytes()
+                except OSError:
+                    pass
+            last = min(len(times), first + per_chunk)
+            views = [json.loads(self.view_json(times[k]) or b"{}") for k in range(first, last)]
+            # Requests before the first keyframe answer with the first view, and
+            # with the tiles in force at the time asked for: chunk 0 reaches back.
+            lo = times[first] if i else -(1 << 62)
+            hi = times[last] if last < len(times) else 1 << 62
+            blob = viewpack.encode_chunk(
+                views,
+                [(t, zlib.decompress(b), kinds) for t, b, kinds in _in_force(self.trees, lo, hi)],
+                [(t, zlib.decompress(b), None) for t, b in _in_force(self.terrain, lo, hi)],
+            )
+            if path is not None and atomic_write(path, blob) and i == 0:
+                _prune_packs(path.parent.parent, keep=path.parent.name)
+            return blob
+
+        blob = self._pack_flight.run(i, build)
+        with self._cache_lock:
+            chunks[i] = blob
+        return blob
+
     def _missiles_json(self, kf_t: int) -> bytes:
         """:meth:`missiles_after` as JSON text."""
         return _track_json(self.missiles, kf_t, lambda: self._missile_kf, lambda: self._missile_buf)
@@ -2935,3 +3035,32 @@ def load_recording(
             progress(tl)
     tl.finish()
     return tl
+
+
+def _in_force(snapshots: list[Any], lo: int, hi: int) -> list[Any]:
+    """The snapshots (time first, in time order) a request for a time in
+    ``[lo, hi)`` can be answered with: the one in force at ``lo`` and every later
+    one before ``hi``."""
+    a = max(0, bisect_right(snapshots, lo, key=lambda f: f[0]) - 1)
+    b = bisect_left(snapshots, hi, key=lambda f: f[0])
+    return snapshots[a:b]
+
+
+#: Packs kept on disk (one folder per match and build, a few MB to a few tens).
+PACKS_KEPT = 24
+
+
+def _prune_packs(root: Path, keep: str) -> None:
+    """Remove the packs used longest ago beyond :data:`PACKS_KEPT`."""
+    try:
+        packs = sorted(
+            (p for p in root.iterdir() if p.is_dir() and p.name != keep),
+            key=lambda p: p.stat().st_mtime,
+        )
+    except OSError:
+        return
+    for old in packs[: max(0, len(packs) + 1 - PACKS_KEPT)]:
+        for f in old.glob("*.gz"):
+            f.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            old.rmdir()

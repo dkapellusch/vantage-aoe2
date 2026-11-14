@@ -997,3 +997,37 @@ def test_html_and_relative_modules_share_an_immutable_build_graph(
     assert error.value.code == 410
     assert _get(base + "/api/session")["viewer_build"] == build
     assert _get(base + "/api/config")["viewer_build"] == build
+
+
+def test_a_finished_recording_serves_its_view_pack(
+    server: tuple[str, Session, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vantage import viewpack
+
+    base, session, path = server
+    assert _get(base + "/api/pack") == {}  # nothing open: no pack
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    session.data = GameData(None)  # its cache folder under tmp_path
+    assert _post(base + "/api/open", {"path": str(path)}) == {"ok": True}
+    session._thread.join(5)  # type: ignore[union-attr]
+    index = _get(base + "/api/pack")
+    assert index["v"] == viewpack.VERSION and index["chunk_views"] == 30
+    assert index["times"] == [0, 1000, 2000, 3000, 4000, 5000, 6000]
+    status, headers, body = _raw(base + f"/api/pack/chunk?i=0&k={index['key']}")
+    assert status == 200 and headers["Content-Type"] == "application/octet-stream"
+    assert "immutable" in headers["Cache-Control"] and headers.get("Content-Encoding") is None
+    views, trees, _terrain = viewpack.decode_chunk(body)
+    assert [v["time"] for v in views] == index["times"] and trees
+    for v in views:
+        want = _get(base + f"/api/view?t={v['time']}")
+        assert viewpack._equal(v, want)
+    # Kept in the cache folder for the next run.
+    assert (tmp_path / "cache" / "vantage" / "packs" / index["key"] / "0.gz").read_bytes() == body
+    # Another pack's key, a chunk past the end or no number: not found.
+    for query in (
+        "i=0&k=other",
+        f"i=1&k={index['key']}",
+        f"k={index['key']}",
+        f"i=x&k={index['key']}",
+    ):
+        assert _raw(base + "/api/pack/chunk?" + query)[0] == 404
