@@ -422,7 +422,7 @@ export function abortViews() {
   previousAbort = viewAbort;
   viewAbort = new AbortController();
 }
-const viewCache = new ViewCache((t, opts) => viewJson(`/api/view?t=${t}`, viewAbort.signal, t, opts));
+const viewCache = new ViewCache((t) => viewJson(`/api/view?t=${t}`, viewAbort.signal, t));
 
 // Views come from a worker (view-worker.js): rebuilt from the match's pack when
 // this browser holds that stretch of it (startPack; no network at all), else
@@ -472,7 +472,7 @@ function workerCall(path, signal, extra) {
     }
   });
 }
-function viewJson(path, signal, t, opts) {
+function viewJson(path, signal, t) {
   if (!workerTried) startViewWorker();
   viewStats.issued++;
   const t0 = performance.now();
@@ -483,7 +483,7 @@ function viewJson(path, signal, t, opts) {
     return v;
   };
   if (!viewWorker) return api(path, undefined, { priority: 'high', signal }).then(done);
-  return workerCall(path, signal, opts && opts.localOnly ? { t, localOnly: true } : { t }).then(done);
+  return workerCall(path, signal, { t }).then(done);
 }
 /**
  * Keep the whole match in this browser (its pack: timeline-pack.js), so seeks,
@@ -537,10 +537,12 @@ export async function fetchTiles(kind, t) {
   return { t: r.t, bytes: Uint8Array.from(atob(r.tiles), (c) => c.charCodeAt(0)), kinds: r.kinds || [] };
 }
 export function fetchView(t) { return viewCache.fetch(t); }
-/** The view of `t` if the pack holds it (no request is made for it), else null. */
+/** The view of `t` if the pack holds it (no request is made for it), else null.
+ * Not kept in the view cache: playback takes a cached view up to 3 s old as the
+ * current one, and a lone view from here must never stand in for the moment. */
 export function fetchLocalView(t) {
   if (!packStarted || !viewWorker || (packStatus.state !== 'ready' && packStatus.state !== 'complete')) return Promise.resolve(null);
-  return viewCache.fetch(t, { localOnly: true });
+  return workerCall(`/api/view?t=${t}`, viewAbort.signal, { t, localOnly: true }).catch(() => null);
 }
 export function cachedView(t) { return viewCache.peek(t); }
 export function cachedViewAt(t) { return viewCache.at(t); }

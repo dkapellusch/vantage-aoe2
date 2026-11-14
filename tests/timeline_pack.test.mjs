@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { gzipSync } from 'node:zlib';
-import { applyDelta, PackChunk, PackStore, keyframeIndex, tilesAt, gunzipText, PACK_VERSION, PACK_CACHE, PACKS_KEPT } from '../src/vantage/web/timeline-pack.js';
+import { applyDelta, PackChunk, PackStore, keyframeIndex, tilesAt, gunzipText, PACK_VERSION, PACK_CACHE, PACKS_KEPT, PACK_BYTES } from '../src/vantage/web/timeline-pack.js';
 import { createHandler } from '../src/vantage/web/view-worker.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/viewpack-chunk.json', import.meta.url), 'utf8'));
@@ -141,6 +141,29 @@ test('a second visit finds the chunks in Cache Storage; old packs make room', as
   const urls = [...cacheStorage.stores.get(PACK_CACHE).keys()];
   assert.equal(urls.filter((u) => u.includes('k=k1')).length, 0);
   assert.equal(urls.filter((u) => u.includes('/chunk')).length, PACKS_KEPT);
+});
+
+test('packs are also removed by size: the oldest beyond the byte limit', async () => {
+  const cacheStorage = fakeCaches();
+  const open = async (key) => {
+    const s = new PackStore({ fetchImpl: fakeServer({ key, views: 5 }).fetchImpl, cacheStorage });
+    await s.start('http://x/api/pack'); await s.pump;
+    await new Promise((r) => setTimeout(r, 2));
+    return s;
+  };
+  const a = await open('a'); await open('b');
+  const manifest = async () => JSON.parse(Buffer.from(cacheStorage.stores.get(PACK_CACHE).get('http://x/__vantage_pack_manifest')).toString());
+  const sizes = await manifest();
+  assert.equal(sizes.a[1], a.status().bytes); // what was stored is recorded
+  // As if "a" and "b" were long team games: together over the limit.
+  sizes.a[1] = sizes.b[1] = PACK_BYTES * 0.6;
+  cacheStorage.stores.get(PACK_CACHE).set('http://x/__vantage_pack_manifest', new TextEncoder().encode(JSON.stringify(sizes)).buffer);
+  await open('c');
+  const left = await manifest();
+  assert.deepEqual(Object.keys(left).sort(), ['b', 'c']);
+  const urls = [...cacheStorage.stores.get(PACK_CACHE).keys()];
+  assert.equal(urls.filter((u) => u.includes('k=a')).length, 0);
+  assert.equal(urls.filter((u) => u.includes('k=b')).length, 1);
 });
 
 test('without Cache Storage the chunks are held in memory, up to a limit', async () => {

@@ -122,6 +122,8 @@ export function tilesAt(rows, t) {
 const MANIFEST = '/__vantage_pack_manifest';
 /** Packs kept in the browser (Cache Storage): the ones opened longest ago go first. */
 export const PACKS_KEPT = 12;
+/** ...and bytes: the other packs together, beyond the one being watched. */
+export const PACK_BYTES = 600 * 1048576;
 export const PACK_CACHE = 'vantage-pack-v1';
 
 /**
@@ -146,6 +148,7 @@ export class PackStore {
     this.have = new Set();  // chunk numbers held (in the cache or in memory)
     this.memory = new Map(); // chunk number -> bytes, without Cache Storage
     this.memoryBytes = 0;
+    this.unnoted = 0;       // bytes stored since the manifest was last told
     this.parsed = new Map(); // chunk number -> Promise<PackChunk>, most recent last
     this.focus = 0;
     this.bytes = 0;         // downloaded this session
@@ -231,6 +234,9 @@ export class PackStore {
       try {
         await this.cache.put(this.chunkUrl(i), new Response(bytes, { headers: { 'Content-Type': 'application/octet-stream' } }));
         this.have.add(i);
+        // Its size goes into the manifest every few chunks and with the last one.
+        this.unnoted += bytes.length;
+        if (this.unnoted > 4 * 1048576 || this.nextMissing() < 0) { const n = this.unnoted; this.unnoted = 0; await this.noteBytes(n); }
         return;
       } catch { this.cache = null; } // quota, private mode: keep what fits in memory
     }
@@ -277,14 +283,25 @@ export class PackStore {
     return got && { t: got.t, bytes: got.bytes.slice(), kinds: got.kinds };
   }
 
-  // Which packs this browser holds and when each was last opened; the oldest
-  // beyond PACKS_KEPT are removed, chunk by chunk.
-  async touchManifest() {
+  // Which packs this browser holds: { key: [last opened, bytes] }. The ones opened
+  // longest ago are removed, chunk by chunk, beyond PACKS_KEPT packs or once the
+  // others together pass PACK_BYTES (a long team game is ~180 MB).
+  async manifest() {
     const hit = await this.cache.match(MANIFEST);
     let packs = {};
     try { packs = hit ? await hit.json() : {}; } catch { packs = {}; }
-    packs[this.index.key] = Date.now();
-    const old = Object.keys(packs).sort((a, b) => packs[b] - packs[a]).slice(PACKS_KEPT);
+    for (const k in packs) if (!Array.isArray(packs[k])) packs[k] = [Number(packs[k]) || 0, 0];
+    return packs;
+  }
+
+  async touchManifest() {
+    const packs = await this.manifest();
+    const mine = this.index.key;
+    packs[mine] = [Date.now(), (packs[mine] || [0, 0])[1]];
+    const others = Object.keys(packs).filter((k) => k !== mine).sort((a, b) => packs[b][0] - packs[a][0]);
+    const old = [];
+    let bytes = 0;
+    others.forEach((k, i) => { bytes += packs[k][1]; if (i >= PACKS_KEPT - 1 || bytes > PACK_BYTES) old.push(k); });
     if (old.length) {
       const gone = new Set(old);
       for (const req of await this.cache.keys()) {
@@ -294,5 +311,15 @@ export class PackStore {
       for (const k of old) delete packs[k];
     }
     await this.cache.put(MANIFEST, new Response(JSON.stringify(packs), { headers: { 'Content-Type': 'application/json' } }));
+  }
+
+  /** Note how much of this pack is stored (for the byte limit above). */
+  async noteBytes(added) {
+    try {
+      const packs = await this.manifest();
+      const mine = packs[this.index.key] || [Date.now(), 0];
+      packs[this.index.key] = [mine[0], mine[1] + added];
+      await this.cache.put(MANIFEST, new Response(JSON.stringify(packs), { headers: { 'Content-Type': 'application/json' } }));
+    } catch { /* the cache went away: the chunks are still served from what is held */ }
   }
 }
