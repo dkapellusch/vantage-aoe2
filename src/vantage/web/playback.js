@@ -112,6 +112,17 @@ export function chainedView(t, view, next, follow, maxLag = 1500) {
   return t - v.time < maxLag ? v : null;
 }
 
+/**
+ * `view` is the keyframe the clock `t` is in: at or before it, and the keyframe
+ * after it (`follow`) known to lie past `t`, or none. The newest cached view at
+ * or before the clock can be older than that, with keyframes in between unseen.
+ */
+export function isViewAt(t, view, follow) {
+  if (!view || view.time > t) return false;
+  const f = follow(view);
+  return !!(f.end || (f.next && f.next.time > t));
+}
+
 /** Wall ms of data ahead of the clock below which playback slows down (pacePlayback). */
 export const PACE_LEAD_MS = 300;
 

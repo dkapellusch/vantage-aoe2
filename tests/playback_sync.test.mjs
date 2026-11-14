@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
-  RowInterpolator, followingView, playableUntil, pacePlayback, chainedView, viewGridTime,
+  RowInterpolator, followingView, playableUntil, pacePlayback, chainedView, viewGridTime, isViewAt,
 } from '../src/vantage/web/playback.js';
 
 // Keyframes about a second apart, at most one in each second (timeline.py), off
@@ -58,6 +58,17 @@ test('a frame that crosses several keyframes lands on the one the clock is in', 
   // Far past what is in hand: not a view for this moment.
   assert.equal(chainedView(KEYS[9].time + 1600, KEYS[5], KEYS[6], follow), null);
   assert.equal(chainedView(KEYS[9].time + 1400, KEYS[5], KEYS[6], follow), KEYS[9]);
+});
+
+test('a cached view stands for the clock only when it is the keyframe the clock is in', () => {
+  const follow = (x) => followingView(x, answered([6999, 7999]));
+  assert.equal(isViewAt(KEYS[6].time + 500, KEYS[6], follow), true);
+  // Two seconds on, with the keyframe in between known: not this view any more.
+  assert.equal(isViewAt(KEYS[7].time + 500, KEYS[6], follow), false);
+  // The keyframe after it not known yet: not confirmed (it is fetched for the clock).
+  assert.equal(isViewAt(KEYS[8].time + 10, KEYS[8], follow), false);
+  assert.equal(isViewAt(KEYS[6].time - 1, KEYS[6], follow), false);
+  assert.equal(isViewAt(1000, null, follow), false);
 });
 
 test('playback slows as the keyframes ahead run short and never passes them', () => {

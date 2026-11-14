@@ -17,7 +17,7 @@ import { fidelityNotice } from './recording-fidelity.js';
 import * as audio from './audio.js';
 import * as layout from './layout.js';
 import { patchHtml } from './dom.js';
-import { shuttleSpeed, eventIndexAfter, replayBufferWait, matchEnded, followingView, chainedView, playableUntil, pacePlayback, viewGridTime } from './playback.js';
+import { shuttleSpeed, eventIndexAfter, replayBufferWait, matchEnded, followingView, chainedView, isViewAt, playableUntil, pacePlayback, viewGridTime } from './playback.js';
 import { GOTO_BUILDINGS, applyGame } from './games.js';
 import { chooseFight, FightSelection, highlightParticipants } from './autocast-focus.js';
 import { installPanelResizing } from './panel-resize.js';
@@ -683,8 +683,13 @@ async function updateView() {
     // A frame can cross more than one keyframe (a slow frame at 8x): follow the
     // chain to the one the clock is in.
     const chained = chainedView(S.t, S.view, S.nextView, follow);
+    // A cached view is the clock's own only when the keyframe after it is known
+    // to lie past the clock (or there is none): the newest cached one at or
+    // before the clock can be seconds older than that, with the keyframes in
+    // between not fetched. While the time bar is dragged a near one will do.
     const cached = chained ? null : cachedViewAt(S.t);
-    const v = chained || (cached && S.t - cached.time < 3000 ? cached : await fetchView(viewRequestTime(S.t)));
+    const near = cached && S.scrubbing && S.t - cached.time < 3000;
+    const v = chained || (isViewAt(S.t, cached, follow) || near ? cached : await fetchView(viewRequestTime(S.t)));
     if (epoch !== viewEpoch) return;
     if (v && v.time != null) {
       S.view = v;
