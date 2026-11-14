@@ -42,10 +42,9 @@ export function createHandler(post, fetchImpl = (...a) => fetch(...a), cacheStor
       let value, transfer, local = false;
       // Beside the server a view arrives sooner than a chunk of a large match
       // opens (~20 ms and more): then the server is asked, unless the chunk is
-      // open already, and the chunk is opened for the views that follow.
+      // open already, and the chunk is opened afterwards for the views that follow.
       const held = msg.t != null && store.holds(msg.t);
       const quick = held && !msg.tiles && !msg.localOnly && netMs < QUICK_MS && !store.isOpen(msg.t);
-      if (quick) store.open(store.chunkOf(msg.t)).catch(() => {});
       if (held && !quick) {
         // A chunk that turns out to be gone (the browser cleared it) falls
         // through to the network.
@@ -63,6 +62,8 @@ export function createHandler(post, fetchImpl = (...a) => fetch(...a), cacheStor
       }
       if (msg.tiles && value) transfer = [value.bytes.buffer];
       if (live()) post(local ? { id: msg.id, value, local: true } : { id: msg.id, value }, transfer);
+      // Only now: parsing a chunk would hold this thread while the answer waits.
+      if (quick) store.open(store.chunkOf(msg.t)).catch(() => {});
     } catch (e) {
       if (live()) post({ id: msg.id, error: String((e && e.message) || e) });
     } finally {
