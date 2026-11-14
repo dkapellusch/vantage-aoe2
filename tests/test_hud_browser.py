@@ -791,10 +791,16 @@ def test_focus_slot_has_no_tech_card_and_the_fight_card_picks_any_fight(
     assert page.input_value("#fs-fight-pick") == "20000"
     assert page.evaluate("document.getElementById('fs-fight-pick').marked") is True
     assert page.inner_text("#focus .fs-fight-when").startswith(f"0:20{DASH}0:21")
-    # Its jump button seeks to three seconds before it (this recording ends sooner).
+    # The jump lands three seconds before the fight: that lead-in keeps the pick.
+    page.evaluate("() => { window.vantage.S.t = 17000; }")
+    page.wait_for_timeout(600)
+    assert page.input_value("#fs-fight-pick") == "20000"
+    assert page.inner_text("#focus .fs-fight-when").startswith(f"0:20{DASH}0:21")
+    # Its jump button seeks there (this recording ends sooner).
     page.click("#focus .fs-fight-when")
     page.wait_for_function("window.vantage.S.t === Math.min(17000, window.vantage.S.end)")
-    # Seeking back before the picked fight falls back to Latest (and to no fight at all here).
+    # Seeking well before the picked fight falls back to Latest (and to no fight at all here).
+    page.evaluate("() => { window.vantage.S.t = 5000; }")
     page.wait_for_function(
         "document.querySelector('#focus .fs-body').textContent.includes('No fight yet')"
     )

@@ -84,8 +84,9 @@ export function ecoRows(list) {
 }
 
 // The fight picked in the Fight card ({ from, events }), or null to follow the latest. It
-// lasts until a seek goes back before the fight began (or another recording opens).
+// lasts until a seek goes back more than a few seconds before the fight began (or another recording opens).
 let pinned = null;
+const PIN_LEAD_MS = 5000; // a jump lands 3 s before the fight
 
 /** The Fight card's dropdown entry for a fight: "12:34–13:10 · 23 kills · 4120 res". */
 export function fightLabel(f) {
@@ -93,8 +94,12 @@ export function fightLabel(f) {
 }
 
 function fightHtml() {
-  const list = fightsUpTo(S.events, fightsOf(S.events), S.t);
-  if (pinned && (pinned.events !== S.events || !list.some((x) => x.from === pinned.from))) pinned = null;
+  const all = fightsOf(S.events);
+  let list = fightsUpTo(S.events, all, S.t);
+  // The jump button seeks to just before the fight: keep the pick through that lead-in.
+  const kept = pinned && pinned.events === S.events && S.t >= pinned.from - PIN_LEAD_MS ? all.find((x) => x.from === pinned.from) : null;
+  if (!kept) pinned = null;
+  else if (!list.some((x) => x.from === kept.from)) list = [kept, ...list];
   if (!list.length) return `<p class="hint fs-empty">${t('No fight yet')}</p>`;
   const f = pinned ? list.find((x) => x.from === pinned.from) : list[0];
   // Keyed options: a new fight is inserted, the open list is not rebuilt on every tick.
